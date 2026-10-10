@@ -59,7 +59,53 @@ No profile means no effect: the hook exits 0 and the agents offer to run
 ## Agent identity
 
 <!-- spike:begin -->
-Measured by `make spike` — see [`scripts/spike/agent-identity.sh`](scripts/spike/agent-identity.sh).
+Two things the documentation does not say, and that both the guard and the default session
+agent depend on. Measured with `make spike` on **Claude Code 2.1.296**, 2026-10-10:
+
+| scenario | `agent_type` | `agent_id` |
+|---|---|---|
+| main session, no agent | *absent* | *absent* |
+| subagent, `subagent_type: ola-workflow:probe` | `ola-workflow:probe` | present |
+| subagent, `subagent_type: probe` | — the call fails, see below | — |
+| `--agent ola-workflow:probe` | `ola-workflow:probe` | *absent* |
+| `--agent probe` | `ola-workflow:probe` | *absent* |
+| `"agent"` passed with `--settings` | `ola-workflow:probe` | *absent* |
+| `"agent"` in a project's `.claude/settings.json` | `ola-workflow:probe` | *absent* |
+
+What this means:
+
+- **`agent_type` is always the namespaced name** `<plugin>:<agent>`, both for a subagent and
+  for a session agent. A plugin agent has no bare alias. The name is built from the plugin
+  name, the path under `agents/` and the frontmatter `name`, so `agents/sub/x.md` would be
+  `ola-workflow:sub:x`. The guard therefore keeps only the part after the last `:` and must
+  be tested against both forms.
+- **`agent_id`, not `agent_type`, tells a subagent from a session agent**: it is present only
+  inside a subagent, and absent on the main thread even under `--agent`.
+- **A missing agent has no `agent_type` key at all** — not `""`, not `main`.
+- **`settings.json` accepts the namespaced name**, including in a project's committed
+  `.claude/settings.json`, which is how a project pins its default agent:
+  `"agent": "ola-workflow:coordinator"`. `--agent` additionally accepts the bare name
+  (resolved by `:`-suffix), and a missing `--agent` is fatal while a missing settings `agent`
+  only warns.
+- **The Agent tool is different: `subagent_type` is an exact match.** A bare name does not
+  resolve to a plugin agent:
+
+  ```
+  Agent type 'probe' not found. Available agents: claude, Explore, general-purpose,
+  ola-workflow:probe, Plan, statusline-setup
+  ```
+
+  So the coordinator has to dispatch `ola-workflow:developer`, never `developer`. The same
+  holds for a skill's `agent:` key.
+
+The fields a `PreToolUse` payload offers the guard, as measured:
+`agent_id`, `agent_type`, `cwd`, `effort`, `hook_event_name`, `permission_mode`, `prompt_id`,
+`session_id`, `tool_input`, `tool_name`, `tool_use_id`, `transcript_path`.
+
+Re-run `make spike` after a Claude Code upgrade: none of this is contractual. The seven
+scenarios live in [`scripts/spike/agent-identity.sh`](scripts/spike/agent-identity.sh); it
+loads the plugin with `--plugin-dir`, so nothing is installed and nothing is written inside
+the repository.
 <!-- spike:end -->
 
 ## Development
