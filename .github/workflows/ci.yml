@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One group per PR (superseded runs are cancelled), one per commit on main.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Every job calls the Makefile target the host uses, so `make check` is the CI.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Shellcheck
+        run: make lint
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bash test suites
+        run: make test
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the Claude Code CLI
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+      - name: Validate the plugin and marketplace manifests
+        run: make validate
+
+  # The check to require on main later: matrix-free, but one name for the three jobs.
+  # `always()` keeps it from being skipped, since a skipped required check counts as passing.
+  checks:
+    if: always()
+    needs: [lint, tests, manifests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs passed
+        env:
+          RESULTS: ${{ needs.lint.result }} ${{ needs.tests.result }} ${{ needs.manifests.result }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a CI job did not succeed ($RESULTS)"
+              exit 1
+            fi
+          done

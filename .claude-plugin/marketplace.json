@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ola-workflow",
+  "description": "Olivier Laurendeau's agent workflow, shared across projects.",
+  "owner": {
+    "name": "Olivier Laurendeau",
+    "url": "https://github.com/olaurendeau"
+  },
+  "plugins": [
+    {
+      "name": "ola-workflow",
+      "source": "./",
+      "description": "Profile-driven agent workflow (coordinator, product designer, architect, developers, PR reviewer) with a PreToolUse guard.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Olivier Laurendeau",
+        "url": "https://github.com/olaurendeau"
+      },
+      "category": "development",
+      "keywords": ["workflow", "agents", "hooks", "code-review"]
+    }
+  ]
+}
