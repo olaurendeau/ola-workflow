@@ -1,7 +1,9 @@
 # Same steps as the CI jobs, so `make check` is the CI.
 # Nothing has to be installed on the host: shellcheck runs in its own container.
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.11.0
-SHELL_FILES := hooks/guard.sh tests/run.sh tests/guard.test.sh scripts/spike/agent-identity.sh
+SHELL_FILES := hooks/guard.sh hooks/lib/profile.sh bin/ola-profile \
+	tests/run.sh tests/guard.test.sh tests/profile.test.sh \
+	scripts/spike/agent-identity.sh
 
 help: ## Shows this help
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t24

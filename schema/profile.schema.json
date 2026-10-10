@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/olaurendeau/ola-workflow/schema/profile.schema.json",
+  "title": "ola-workflow project profile",
+  "description": "Everything the workflow needs to know about one project. Committed as .claude/workflow.json (integrated mode) or kept out of the repository in ~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json (discreet mode).",
+  "type": "object",
+  "required": ["mode"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "mode": {
+      "description": "integrated: the profile is committed and the agents may write to the forge. discreet: nothing is committed, memory stays local, no issue/label/status is ever written, push and PR creation need a human, and nothing is ever merged.",
+      "enum": ["integrated", "discreet"]
+    },
+    "language": {
+      "description": "Languages to write in. Defaults to English everywhere.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "human": { "description": "What the coordinator says to the human.", "type": "string" },
+        "artifacts": { "description": "Issues, PRs, commits, reviews.", "type": "string" },
+        "agents": { "description": "Agent-to-agent prompts and reports.", "type": "string" }
+      }
+    },
+    "base_branch": {
+      "description": "The branch PRs target and nobody may push to. Defaults to main.",
+      "type": "string"
+    },
+    "check": {
+      "description": "How this project checks itself. These commands are the contract between the developers, the reviewer and CI.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "full": { "description": "Everything CI runs, e.g. `make check`.", "type": "string" },
+        "affected": { "description": "The subset for the current change; may contain {slot}.", "type": "string" },
+        "cleanup": { "description": "Run after a check to free containers, ports or volumes.", "type": "string" }
+      }
+    },
+    "slots": {
+      "description": "How parallel agents avoid colliding on ports, databases and containers.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "var": { "description": "Environment variable carrying the slot. Defaults to SLOT.", "type": "string" },
+        "developers": {
+          "description": "One slot per developer that may run at the same time.",
+          "type": "array",
+          "items": { "type": ["string", "integer"] }
+        },
+        "reviewer": { "description": "The slot reserved for the reviewer.", "type": ["string", "integer"] }
+      }
+    },
+    "pr": {
+      "description": "What a reviewable pull request looks like in this project.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_lines": { "description": "A PR above this must be split.", "type": "integer", "minimum": 1 },
+        "exclude": {
+          "description": "Globs that do not count towards max_lines (lockfiles, generated code).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "title": { "description": "conventional: Conventional Commits. free: anything.", "enum": ["conventional", "free"] }
+      }
+    },
+    "merge": {
+      "description": "The merge gate the guard enforces itself, since a free GitHub plan has no ruleset.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required_checks": {
+          "description": "Check names that must be successful on the head SHA.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "review_status": { "description": "Commit status context the reviewer sets, e.g. agent-review.", "type": "string" },
+        "sensitive_paths": {
+          "description": "Globs no agent may merge: a human does it.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sensitive_patterns": {
+          "description": "A patch matching one of these needs a human, wherever it lands.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["regex"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "description": "Glob the regex applies to. Omitted means every file.", "type": "string" },
+              "regex": { "description": "Perl-compatible regex matched against added lines.", "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "commands": {
+      "description": "Declarative rules for project-specific commands. A command with allow_args is refused unless its arguments match; deny_args refuses only what matches.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cmd"],
+        "additionalProperties": false,
+        "properties": {
+          "cmd": { "description": "First word of the command, e.g. eas, make, scalingo.", "type": "string" },
+          "allow_args": { "description": "Whitelist: anything else is refused.", "type": "string" },
+          "deny_args": { "description": "Blacklist: only what matches is refused.", "type": "string" },
+          "reason": { "description": "Shown to the agent when the command is refused.", "type": "string" }
+        }
+      }
+    },
+    "db_hosts_allowed": {
+      "description": "Database hosts an agent may connect to. Anything else is production until proven otherwise.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "context": {
+      "description": "Documents the agents read. Repository paths in integrated mode, paths inside the profile directory in discreet mode.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "product": { "description": "Users, personas, what counts as proven.", "type": "string" },
+        "architecture": { "description": "Layering, compatibility rules, how work is split.", "type": "string" },
+        "review_checklist": { "description": "Project-specific review rules, added to the base checklist.", "type": "string" },
+        "glossary": { "description": "Domain vocabulary.", "type": "string" }
+      }
+    },
+    "verify_ui": {
+      "description": "How a change is seen running, when looking at it is the only proof.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "description": "Free-form, e.g. ios-simulator, playwright, none.", "type": "string" },
+        "up": { "type": "string" },
+        "test": { "type": "string" },
+        "shot": { "type": "string" },
+        "down": { "type": "string" }
+      }
+    },
+    "escalation_extra": {
+      "description": "Subjects this project reserves for the human, on top of product, dependencies, process/security and release.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

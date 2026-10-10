@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Reads the profile of the project this session is working on.
+#
+# A plugin's bin/ is on the PATH of every Bash call, so agents and hooks can simply run
+# `ola-profile get check.affected --slot 3` instead of knowing where profiles live.
+set -uo pipefail
+
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=hooks/lib/profile.sh
+. "$SELF_DIR/../hooks/lib/profile.sh"
+
+usage() {
+  cat <<'USAGE'
+usage: ola-profile [-C <dir>] [--slot <n>] <command> [args]
+
+commands:
+  path                  the profile file in use
+  dir                   the directory holding it (in discreet mode, also the agents' memory)
+  id                    <host>/<owner>/<repo>, from `git remote get-url upstream || origin`
+  mode                  integrated | discreet
+  get <key> [default]   one value, dotted path; an array prints one item per line
+  show                  the whole profile
+  validate [file]       checks a profile against the schema; prints every problem
+  help
+
+options:
+  -C <dir>     resolve as if run from this directory (default: the current one)
+  --slot <n>   replace {slot} in the value printed by `get`
+
+Exit status is 1 when no profile applies to this project, which is not an error: it means
+the project has not opted into the workflow.
+USAGE
+}
+
+dir=$PWD
+slot=
+while [ $# -gt 0 ]; do
+  case $1 in
+    -C) dir=${2:-}; shift 2 || true ;;
+    --slot) slot=${2:-}; shift 2 || true ;;
+    -h|--help|help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) echo "ola-profile: unknown option $1" >&2; usage >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+[ $# -gt 0 ] || { usage >&2; exit 2; }
+command=$1
+shift
+
+case $command in
+  path) ola_profile_path "$dir" ;;
+  dir) ola_profile_dir "$dir" ;;
+  id) ola_profile_id "$dir" ;;
+  mode) ola_profile_mode "$dir" ;;
+  get)
+    [ $# -gt 0 ] || { echo "ola-profile get: a key is required" >&2; exit 2; }
+    if ! ola_profile_get "$1" "$dir" "$slot"; then
+      # A missing key falls back to the default when one is given, so callers can write
+      # `ola-profile get base_branch main` and stop worrying about optional keys.
+      if [ $# -gt 1 ]; then
+        printf '%s\n' "${2//\{slot\}/$slot}"
+      else
+        exit 1
+      fi
+    fi
+    ;;
+  show)
+    file=$(ola_profile_path "$dir") || exit 1
+    jq . "$file"
+    ;;
+  validate)
+    if [ $# -gt 0 ]; then
+      ola_profile_validate "$1"
+    else
+      ( cd "$dir" && ola_profile_validate )
+    fi
+    ;;
+  *) echo "ola-profile: unknown command $command" >&2; usage >&2; exit 2 ;;
+esac
