@@ -98,6 +98,16 @@ https://GitHub.COM/Owner/Repo.git|github.com/Owner/Repo
 https://gitlab.com/group/sub/deeper/repo.git|gitlab.com/group/sub/deeper/repo
 git@gitlab.com:group/sub/repo.git|gitlab.com/group/sub/repo
 https://github.com/owner/repo/|github.com/owner/repo
+https://alice:s3cr3t@p@ss@github.com/acme/widget.git|github.com/acme/widget
+git@a@b@gitlab.com:group/repo.git|gitlab.com/group/repo
+https://user@github.com/owner/re@po|github.com/owner/re@po
+ssh://host:22|(refused)
+https://github.com:443/|(refused)
+https://host/owner/.git|(refused)
+https://github.com//repo|(refused)
+../..|(refused)
+/srv/.|(refused)
+/|(refused)
 /srv/git/repo.git|local/repo
 file:///srv/git/repo|local/repo
 ../sibling-repo|local/sibling-repo
@@ -176,12 +186,16 @@ git -C "$WORK/discreet" worktree add -q --detach "$WORK/discreet-wt" >/dev/null 
 eq "github.com/someone/their-repo" "$("$CLI" -C "$WORK/discreet-wt" id)" "worktree: remote still resolves"
 eq trunk "$("$CLI" -C "$WORK/discreet-wt" get base_branch)" "worktree: same user profile"
 
-# --- The project file wins over the user profile --------------------------------------
+# --- The user's own profile wins over a committed one ---------------------------------
+# A third-party repository must not be able to upgrade the discreet profile its user chose
+# into an integrated one, which would hand it writes to the forge and command allowances.
 mkdir -p "$WORK/discreet/.claude"
 printf '%s\n' '{"mode": "integrated", "base_branch": "from-project"}' \
   >"$WORK/discreet/.claude/workflow.json"
-eq from-project "$("$CLI" -C "$WORK/discreet" get base_branch)" "precedence: project over user"
-eq integrated "$("$CLI" -C "$WORK/discreet" mode)" "precedence: project mode wins"
+eq trunk "$("$CLI" -C "$WORK/discreet" get base_branch)" "precedence: user over project"
+eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: a repository cannot upgrade the mode"
+eq "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json" \
+  "$("$CLI" -C "$WORK/discreet" path)" "precedence: the user's file is the one in use"
 rm -rf "$WORK/discreet/.claude"
 
 # --- No profile at all: nothing happens ----------------------------------------------
@@ -192,12 +206,38 @@ rc 1 "no profile: dir" -- "$CLI" -C "$WORK/bare" dir
 rc 1 "no profile: get" -- "$CLI" -C "$WORK/bare" get base_branch
 rc 1 "no profile: show" -- "$CLI" -C "$WORK/bare" show
 eq "github.com/someone/unconfigured" "$("$CLI" -C "$WORK/bare" id)" "no profile: id still resolves"
+# A default stands in for a missing key, never for a missing profile: issue #2 says the
+# caller decides what to do about a project that has not opted in.
+rc 1 "no profile: a default does not invent a configuration" -- \
+  "$CLI" -C "$WORK/bare" get base_branch main
 # Outside a repository, and inside a repository without any remote.
 mkdir -p "$WORK/not-a-repo"
 rc 1 "outside a repository: path" -- "$CLI" -C "$WORK/not-a-repo" path
 mkrepo "$WORK/no-remote" ""
 rc 1 "no remote: id" -- "$CLI" -C "$WORK/no-remote" id
 rc 1 "no remote: path" -- "$CLI" -C "$WORK/no-remote" path
+
+# The library is sourced by the guard, which runs under `set -u`: an unbound variable
+# would end the shell mid-decision instead of leaving the guard inert.
+rc 1 "HOME unset: resolution gives up quietly" -- env -u HOME "$CLI" -C "$WORK/discreet" path
+total=$((total + 1))
+if out=$(env -u HOME bash -c ". '$ROOT/hooks/lib/profile.sh'; set -u
+  ola_profile_path '$WORK/discreet' || echo GAVE_UP
+  echo STILL_ALIVE" 2>&1) \
+  && [ "$out" = "GAVE_UP
+STILL_ALIVE" ]; then
+  echo "ok    HOME unset: a sourcing shell survives under set -u"
+else
+  echo "FAIL  HOME unset: a sourcing shell should survive ('$out')"
+  failures=$((failures + 1))
+fi
+
+# A bare clone has no working tree, so only the user profile can apply.
+git clone -q --bare "$WORK/discreet" "$WORK/bare-clone.git" 2>/dev/null
+git -C "$WORK/bare-clone.git" remote set-url origin "https://github.com/someone/their-repo.git"
+eq discreet "$("$CLI" -C "$WORK/bare-clone.git" mode)" "bare repository: the user profile applies"
+git -C "$WORK/bare-clone.git" remote set-url origin "https://github.com/someone/unknown.git"
+rc 1 "bare repository: no profile, no answer" -- "$CLI" -C "$WORK/bare-clone.git" path
 
 # --- A broken profile is treated as the restrictive mode -----------------------------
 mkrepo "$WORK/broken" "git@github.com:someone/broken.git"
@@ -208,6 +248,22 @@ printf '%s\n' '{"base_branch": "main"}' >"$WORK/broken/.claude/workflow.json"
 eq discreet "$("$CLI" -C "$WORK/broken" mode)" "missing mode: falls back to discreet"
 printf '%s\n' '{"mode": "wide-open"}' >"$WORK/broken/.claude/workflow.json"
 eq discreet "$("$CLI" -C "$WORK/broken" mode)" "unknown mode: falls back to discreet"
+
+# An empty or whitespace-only profile is the shape a truncated write leaves behind. jq
+# exits 0 with no output on it, so `get` has to refuse explicitly: answering "empty, and
+# successfully" would report no protected branch and zero required checks.
+for content in '' '   ' '
+'; do
+  printf '%s' "$content" >"$WORK/broken/.claude/workflow.json"
+  rc 1 "empty profile: get refuses" -- "$CLI" -C "$WORK/broken" get base_branch
+  rc 1 "empty profile: get refuses even with a default" -- "$CLI" -C "$WORK/broken" get base_branch main
+  rc 1 "empty profile: get of an array refuses" -- "$CLI" -C "$WORK/broken" get merge.required_checks
+  rc 1 "empty profile: show refuses" -- "$CLI" -C "$WORK/broken" show
+  eq discreet "$("$CLI" -C "$WORK/broken" mode)" "empty profile: mode stays discreet"
+done
+printf '%s' '{"mode": "integrated",,,' >"$WORK/broken/.claude/workflow.json"
+rc 1 "broken JSON: get refuses with a default" -- "$CLI" -C "$WORK/broken" get base_branch main
+rm -rf "$WORK/broken/.claude"
 
 # --- Validation -----------------------------------------------------------------------
 printf '%s\n' "$FULL_PROFILE" >"$WORK/valid.json"
@@ -292,12 +348,23 @@ undocumented=$(jq -r '[.properties | to_entries[]
   | select(.key != "$schema") | select(.value.description == null) | .key] | join(", ")' \
   "$ROOT/schema/profile.schema.json")
 eq "" "$undocumented" "schema: every top-level key has a description"
+# ola_profile_mode matches the two modes literally, for speed in the guard's hot path.
+# This is the only rule stated twice, so it is pinned here: adding a mode to the schema
+# must fail this test until the case in hooks/lib/profile.sh knows about it.
+eq "integrated discreet" \
+  "$(jq -r '.properties.mode.enum | join(" ")' "$ROOT/schema/profile.schema.json")" \
+  "schema: the modes are exactly the ones ola_profile_mode accepts"
 
 # --- Bad usage ------------------------------------------------------------------------
 rc 2 "usage: no command" -- "$CLI"
 rc 2 "usage: unknown command" -- "$CLI" frobnicate
 rc 2 "usage: unknown option" -- "$CLI" --nope path
 rc 2 "usage: get without a key" -- "$CLI" get
+# These two used to spin forever: `shift 2` on a single argument shifts nothing.
+rc 2 "usage: -C without a value" -- "$CLI" -C
+rc 2 "usage: --slot without a value" -- "$CLI" --slot
+rc 2 "usage: -C with an empty value" -- "$CLI" -C "" mode
+rc 2 "usage: validate from a directory that does not exist" -- "$CLI" -C "$WORK/nope" validate
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total profile test(s) failed"

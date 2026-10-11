@@ -40,11 +40,16 @@ everything — and `probe` is the only agent. Coming next:
 
 The plugin does nothing until it finds a profile. It looks in two places, in order:
 
-1. `<project>/.claude/workflow.json` — **integrated** mode, committed with the project;
-2. `~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json` — **discreet** mode,
+1. `~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json` — **discreet** mode,
    nothing in the project at all. The identity comes from
-   `git remote get-url upstream || git remote get-url origin`, so it works from worktrees
-   too.
+   `git remote get-url upstream || git remote get-url origin`, so a fork is known by the
+   repository it contributes to, and a worktree resolves like its checkout;
+2. `<project>/.claude/workflow.json` — **integrated** mode, committed with the project.
+
+**Your own profile wins over the one a repository ships**, because the two are not equally
+trusted: a third-party repository must not be able to turn the discreet profile you chose
+for it into an integrated one, and so grant itself writes to the forge and allowances on
+commands. Use your own profile when you want the last word.
 
 No profile means no effect: the hook exits 0 and the agents offer to run
 `/ola-workflow:workflow-init`.
@@ -79,7 +84,11 @@ ola-profile get merge.required_checks         # an array prints one item per lin
 ola-profile validate                          # every problem, or silence
 ```
 
-Exit status 1 means no profile applies to this project — not an error, just an opt-out.
+Exit status 1 means the value asked for is not available: no profile applies to this
+project (not an error, just an opt-out), the profile cannot be read, or `get` found no such
+key and no default was given. A default stands in for a missing key, never for a missing or
+unreadable profile — inventing a configuration is how a truncated file ends up reporting no
+protected branch and no required checks.
 
 This repository carries its own profile in
 [`.claude/workflow.json`](.claude/workflow.json): the workflow is developed with the
