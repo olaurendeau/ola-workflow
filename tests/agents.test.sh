@@ -26,7 +26,7 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 # globbed, so that `probe` — which exists to dump a hook payload, not to work — is not held
 # to rules about modes and slots. Both directions are checked below, so a new file cannot
 # quietly escape either set.
-WORKFLOW_ROLES="coordinator developer pr-reviewer"
+WORKFLOW_ROLES="coordinator product-designer architect developer pr-reviewer"
 DIAGNOSTICS="probe"
 
 AGENTS=()
@@ -78,7 +78,7 @@ for f in "${AGENTS[@]}"; do
   fi
 done
 # The coordinator reads a Status from each of the others, and dispatches each of them.
-for role in developer pr-reviewer; do
+for role in product-designer architect developer pr-reviewer; do
   if grep -q 'Status:' "$ROOT/agents/$role.md"; then
     ok "$role: reports a Status, which the coordinator reads first"
   else
