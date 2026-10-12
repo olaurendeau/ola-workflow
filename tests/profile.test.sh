@@ -23,6 +23,9 @@ eq() { # eq <expected> <actual> <label>
   fi
 }
 
+ok() { total=$((total + 1)); echo "ok    $1"; }
+ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
+
 rc() { # rc <expected status> <label> -- <command...>
   local expected=$1 label=$2 out actual
   shift 3
@@ -564,6 +567,64 @@ eq "" "$undocumented" "schema: every top-level key has a description"
 eq "integrated discreet" \
   "$(jq -r '.properties.mode.enum | join(" ")' "$ROOT/schema/profile.schema.json")" \
   "schema: the modes are exactly the ones ola_profile_mode accepts"
+
+# --- The public accessor cannot be made to invent ------------------------------------
+mkdir -p "$WORK/broken/.claude"
+# The three-state primitive was collapsed by the first caller written after it existed, in
+# two lines, and a truncated profile then announced a base branch the project did not have.
+# So the policy moved into the name every caller reaches for first, and these assertions
+# are what keeps it there: whatever the shape of the profile, ola_profile_get either
+# prints a value the profile holds, prints a default the caller passed on purpose, or
+# prints nothing at all.
+for content in '' '   ' '{,' '[1,2]' '"hello"' '42' 'true' 'null' \
+               '{"a":1} {"b":2}'; do
+  printf '%s' "$content" >"$WORK/broken/.claude/workflow.json"
+  out=$(ola_profile_get base_branch "$WORK/broken" "" invented 2>/dev/null)
+  status=$?
+  total=$((total + 1))
+  if [ "$status" != 0 ] && [ -z "$out" ]; then
+    ok "unusable profile ($content): the accessor invents nothing, default or not"
+  else
+    ko "unusable profile ($content): the accessor printed '$out' with status $status"
+  fi
+done
+
+# And on a readable profile the default is honoured — otherwise the assertion above would
+# pass by the accessor never working at all.
+printf '%s\n' '{"mode":"discreet"}' >"$WORK/broken/.claude/workflow.json"
+eq invented "$(ola_profile_get base_branch "$WORK/broken" "" invented)" \
+  "witness: a readable profile does honour a default"
+eq discreet "$(ola_profile_get mode "$WORK/broken" "" invented)" \
+  "witness: and a present key wins over the default"
+rc 1 "a readable profile with no default prints nothing" -- \
+  ola_profile_get base_branch "$WORK/broken"
+
+# {slot} applies to a default too: a default is a value like any other.
+eq "port 7" "$(ola_profile_get nope "$WORK/broken" 7 'port {slot}')" \
+  "a default gets its {slot} substituted"
+
+# ola_profile_has answers presence, which is what a caller needs to say "this value is
+# mine, not the project's".
+total=$((total + 1))
+if ola_profile_has mode "$WORK/broken" && ! ola_profile_has base_branch "$WORK/broken"; then
+  ok "ola_profile_has separates a present key from an absent one"
+else
+  ko "ola_profile_has does not separate present from absent"
+fi
+rm -rf "$WORK/broken/.claude"
+mkdir -p "$WORK/broken/.claude"
+
+# No caller may re-implement the policy: a `case` on the accessor's status is how it was
+# collapsed, and the primitive carries the long name so that reaching for it is a choice.
+total=$((total + 1))
+# shellcheck disable=SC2016  # the $ is part of the pattern being searched for
+collapsers=$(grep -lE 'case \$(status|\?) in' "$ROOT/bin"/* 2>/dev/null |
+  sed 's#.*/##' | tr '\n' ' ')
+if [ -z "$collapsers" ]; then
+  ok "no CLI re-implements the default policy with a status case"
+else
+  ko "the default policy is decided again in: $collapsers"
+fi
 
 # --- A broken jq program is not an answer --------------------------------------------
 # The library signals "no such key" and "unusable profile" with halt_error codes chosen to

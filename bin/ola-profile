@@ -65,18 +65,19 @@ case $command in
   id) ola_profile_id "$dir" ;;
   mode) ola_profile_mode "$dir" ;;
   get)
-    [ $# -gt 0 ] || { echo "ola-profile get: a key is required" >&2; exit 2; }
-    ola_profile_get "$1" "$dir" "$slot"
-    case $? in
-      0) ;;
-      # The profile is readable and simply has no such key, so a default may stand in and
-      # callers can write `ola-profile get base_branch main` for optional keys.
-      3) if [ $# -gt 1 ]; then printf '%s\n' "${2//\{slot\}/$slot}"; else exit 1; fi ;;
-      2) exit 2 ;;
-      # No profile, or one that cannot be read: a default here would invent a
-      # configuration for a project that has none, or paper over a truncated file.
-      *) exit 1 ;;
-    esac
+    # Checked here rather than passed down: an empty key is a mistake in the caller, not a
+    # question about the profile, and letting it reach the accessor would reopen a status
+    # the accessor exists to have exactly one of.
+    [ $# -gt 0 ] && [ -n "$1" ] ||
+      { echo "ola-profile get: a key is required" >&2; exit 2; }
+    # The whole policy lives in ola_profile_get: a default stands in for a key the profile
+    # does not have, never for a profile that cannot be read. There is nothing left to
+    # decide here, which is the point — this `case` used to be where it was decided twice.
+    if [ $# -gt 1 ]; then
+      ola_profile_get "$1" "$dir" "$slot" "$2" || exit 1
+    else
+      ola_profile_get "$1" "$dir" "$slot" || exit 1
+    fi
     ;;
   show)
     file=$(ola_profile_path "$dir") || exit 1

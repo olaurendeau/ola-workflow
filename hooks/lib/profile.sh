@@ -313,12 +313,13 @@ ola_profile_mode() {
   esac
 }
 
-# ola_profile_get <dotted.key> [dir] [slot] → one value.
-# A scalar prints raw, an array of scalars prints one item per line, anything else prints
-# as compact JSON. {slot} in the value is replaced when a slot is given.
-# Status: 0 a value, 3 the profile is fine but holds no such key (a caller may substitute
-# a default), 1 no usable profile at all (a caller must not).
-ola_profile_get() {
+# ola_profile_get_state <dotted.key> [dir] [slot] → one value, and three statuses.
+# The long name is deliberate: this is the primitive, and it is the dangerous door.
+# Status: 0 a value, 3 the profile is fine but holds no such key, 1 no usable profile.
+# Use ola_profile_get unless you are implementing the default policy itself — the one
+# caller written after this distinction existed collapsed it in two lines, and a truncated
+# profile then announced a base branch the project did not have.
+ola_profile_get_state() {
   local key=$1 dir=${2:-$PWD} slot=${3:-} file out status
   [ -n "$key" ] || return 2
   file=$(ola_profile_path "$dir") || return 1
@@ -343,6 +344,37 @@ ola_profile_get() {
     out=${out//\{slot\}/$slot}
   fi
   printf '%s\n' "$out"
+}
+
+# ola_profile_get <dotted.key> [dir] [slot] [default] → one value, or nothing.
+# The whole default policy, in the name every caller reaches for first:
+#   - a value           → printed, status 0
+#   - no such key, a default given → the default, status 0
+#   - no such key, no default      → status 1, nothing printed
+#   - no usable profile            → status 1, nothing printed
+# The last two are indistinguishable on purpose. A caller cannot tell "absent" from
+# "unreadable", so it cannot invent a value for either: inventing requires passing a
+# default, which is a deliberate act at the call site. {slot} applies to a default too,
+# since a default is a value like any other.
+ola_profile_get() {
+  local key=$1 dir=${2:-$PWD} slot=${3:-} default=${4:-} status out
+  out=$(ola_profile_get_state "$key" "$dir" "$slot")
+  status=$?
+  case $status in
+    0) printf '%s\n' "$out"; return 0 ;;
+    3) [ $# -ge 4 ] || return 1
+       printf '%s\n' "${default//\{slot\}/$slot}"
+       return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ola_profile_has <dotted.key> [dir] → 0 when the profile holds that key.
+# For a caller that needs to say which values are its own defaults rather than the
+# project's. It answers "present" and "not present" and nothing else, so call it only once
+# the profile is known readable — ola_profile_readable, or ola_profile_get on any key.
+ola_profile_has() {
+  ola_profile_get_state "$1" "${2:-$PWD}" "" >/dev/null 2>&1
 }
 
 # ola_profile_validate [file] → every problem found, one per line on stderr.
