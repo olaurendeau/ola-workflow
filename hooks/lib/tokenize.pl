@@ -345,16 +345,28 @@ sub command_word {
       $after_function = 1 if $w eq 'function';
       push @walked, $w; shift @w; next;
     }
-    # A function definition header, in all three spellings bash accepts. Only `f ()` was
-    # recognised, so `f(){ gh …; }` was named `f(){` and `function f { gh …; }` was named
-    # `f` — both readable, both wrong, and the body is in the same segment so the command
-    # is within reach. The `function` keyword is handled by the flag below, because the
-    # name follows it as a separate word.
-    if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*\(\)\{?$/) {
+    # A function definition header, derived from the construct rather than listed by
+    # spelling. Listing was wrong three times — `f(){`, `function f`, then `f ()` with a
+    # blank, which POSIX allows — and listing spellings is the method that always misses
+    # one. The construct is: a valid name, then `()`, whatever blanks sit between them. So
+    # the two words are joined before the test, and one pattern covers every writing,
+    # including the one nobody has used yet.
+    if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*$/ && @w > 1 && $w[1] =~ /^\(\)/) {
+      push @walked, shift @w;                 # the name
+      $w[0] =~ s/^\(\)//;                     # and the parens, keeping anything glued after
+      shift @w unless length $w[0];
+      $after_function = 0;
+      next;
+    }
+    if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*\(\)/) {
       # Clearing the flag matters: `function f() { gh …` has both spellings at once, and
       # leaving it set made the flag swallow `gh` and name the command `pr`.
       $after_function = 0;
-      push @walked, $w; shift @w; next;
+      my $rest = $w;
+      $rest =~ s/^[A-Za-z_][A-Za-z0-9_]*\(\)//;
+      push @walked, $w;
+      if (length $rest) { $w[0] = $rest } else { shift @w }
+      next;
     }
     if ($after_function) { push @walked, $w; shift @w; $after_function = 0; next }
     # An assignment in front of a command: FOO=1 gh …
@@ -399,8 +411,19 @@ sub command_word {
           push @walked, shift @w if @w;                             # and its value
           next;
         }
-        # An option carrying its own value needs nothing after it.
+        # An option carrying its own value needs nothing after it — `--opt=value`, and the
+        # short forms where the value is glued to the letter. These are the standard
+        # spellings (`nice -n5`, `stdbuf -oL`, `xargs -n1`, `sudo -ux`, `timeout -s9`), and
+        # sending them all to unreadable was safe but would have spent a question on each.
+        # The value is inside the word rather than after it, so nothing is guessed.
         if ($w[0] =~ /^--?[A-Za-z0-9-]+=/) { push @walked, shift @w; next }
+        if ($takes_value && $w[0] =~ /^-([A-Za-z]).+$/ && "-$1" =~ $takes_value) {
+          push @walked, shift @w; next;
+        }
+        # `nice -5` and `ionice -5` are a priority, not an unknown option.
+        if (($name eq 'nice' || $name eq 'ionice') && $w[0] =~ /^-[0-9]+$/) {
+          push @walked, shift @w; next;
+        }
         # A known boolean takes nothing.
         my $boolean = $bool_opts{$name};
         if ($boolean && $w[0] =~ $boolean) { push @walked, shift @w; next }

@@ -106,9 +106,16 @@ sees 'group'          '{ gh --version; }' gh
 sees 'function body'  'f() { gh --version; }; f' gh
 # Four spellings bash accepts; one was recognised, and the other three named the function
 # instead of its body while reporting readable — a miss in silence, not an ask.
+# Five spellings POSIX and bash accept, written out because the header was listed by
+# spelling three times and missed one each time — the last being a blank between the name
+# and the parens. The pattern is now derived from the construct, so these are a check that
+# the derivation covers the writings rather than the definition of what is covered.
 sees 'function no space' 'f(){ gh --version; }; f' gh
+sees 'function blank'    'f () { gh --version; }; f' gh
+sees 'function tab'      "f	() { gh --version; }; f" gh
 sees 'function keyword'  'function f { gh --version; }; f' gh
 sees 'function both'     'function f() { gh --version; }; f' gh
+sees 'function all'      'function f () { gh --version; }; f' gh
 sees 'for loop'       'for i in 1; do gh --version; done' gh
 sees 'while loop'     'n=0; while [ $n = 0 ]; do n=1; gh --version; done' gh
 sees 'if'             'if true; then gh --version; fi' gh
@@ -121,7 +128,17 @@ sees 'xargs -0'       'echo x | xargs -0 gh --version' gh
 # deliberately uses the *default* PATH, so the stub is out of reach by design, and `sudo -n`
 # fails rather than prompt. Their class — a wrapper's boolean option — is measured by the
 # `xargs -0` row above.
+# The standard glued spellings. Sending them to unreadable was safe and would have spent a
+# question on each, which matters because the question budget is what decides whether this
+# guard gets switched on or switched off.
+sees 'nice priority'  'nice -5 gh --version' gh
+sees 'nice glued'     'nice -n5 gh --version' gh
+names 'stdbuf glued'  'stdbuf -oL gh --version' gh   # GNU coreutils, absent here
+sees 'xargs glued'    'echo x | xargs -n1 gh --version' gh
+
 names 'command -p'    'command -p gh --version' gh
+names 'timeout glued' 'timeout -s9 10 gh --version' gh
+names 'sudo glued'    'sudo -ux gh --version' gh
 names 'sudo -n'       'sudo -n gh --version' gh
 sees 'exec'           '(exec gh --version)' gh
 sees 'command'        'command gh --version' gh
