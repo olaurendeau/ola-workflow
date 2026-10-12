@@ -679,10 +679,13 @@ git -C "$globrepo" add -A 2>/dev/null
 eq "" "$(glob_match 'src?deep/a.ts')" "dialect: ? cannot consume a slash"
 eq "" "$(glob_match 'src[/]deep/a.ts')" "dialect: nor can a character class"
 eq "" "$(glob_match 'src*deep/a.ts')" "dialect: nor can a single *"
-# The controls: each wildcard does work inside a path component, so the three assertions
-# above are about crossing and not about the wildcard being refused outright.
-eq "src/deep/a.ts " "$(glob_match 'src/dee?/a.ts')" "dialect: control, ? works within a component"
-eq "src/deep/a.ts " "$(glob_match 'src/[d]eep/a.ts')" "dialect: control, a class works within a component"
+# One witness per negative assertion, each asserting a non-empty value: an `eq ""` control
+# would witness nothing, since that is what the absence of everything produces too. Three
+# assertions, three witnesses — "each wildcard" has to mean each of the three, or the
+# comment promises more than the block checks.
+eq "src/deep/a.ts " "$(glob_match 'src/dee?/a.ts')" "dialect: witness, ? works within a component"
+eq "src/deep/a.ts " "$(glob_match 'src/[d]eep/a.ts')" "dialect: witness, a class works within a component"
+eq "src/deep/a.ts " "$(glob_match 'src/*eep/a.ts')" "dialect: witness, * works within a component"
 # And a wildcard never recurses on a directory name, which is what keeps the sentence's
 # own example honest: Dockerfile* must not reach into a neighbouring Dockerfiles/.
 eq "Dockerfile " "$(glob_match 'Dockerfile*')" \
@@ -722,7 +725,7 @@ esac
 
 # A deletion canary, which is all this is: it answers "has someone removed the rule?",
 # never "is the rule right?".
-for claim in ':(glob)' 'no wildcard crosses' '**/Dockerfile*' 'named literally' 'never with a'; do
+for claim in ':(glob)' 'no wildcard crosses' '**/Dockerfile*' 'named literally' 'never with a' 'README: Globs'; do
   total=$((total + 1))
   case $dialect in
     *"$claim"*) echo "ok    canary: the description still mentions '$claim'" ;;
