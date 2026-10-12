@@ -237,29 +237,53 @@ done
 # guard in a function, and write the decision emitters before wiring them. The assertion
 # would then skip itself while printing a line that reads like a pass, on exactly the
 # commit where the claim starts mattering. Behaviour cannot be fooled that way.
-# A set of payloads, not one: the guard arrives in four parts, so deciding on anything at
-# all makes it real. One payload would call a half-built guard inert and then forbid the
-# true sentence describing what it already refuses.
-guard_decides=no
-for cmd in 'git push --force origin HEAD' 'gh pr merge 7 --squash' 'npm publish' \
-           'git tag v1.0.0' 'gh api -X PUT repos/o/r/pulls/7/merge'; do
-  said=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "$cmd" |
-    "$ROOT/hooks/guard.sh" 2>/dev/null)
-  status=$?
-  if [ -n "$said" ] || [ "$status" != 0 ]; then
-    guard_decides=yes
-    break
-  fi
-done
-if [ "$guard_decides" = yes ]; then guard_is_inert=no; else guard_is_inert=yes; fi
+# Derived, not enumerated. Five hand-written Bash commands sampled one axis while holding
+# tool_name at Bash — and merge.sensitive_paths is about *files*, so the rule enforcing it
+# inspects Write and Edit. A guard denying a Write to .github/ was invisible to all five
+# probes, and a sixth Bash command would have fixed that instance and left the next.
+#
+# So the question is asked of the place where the guard's decisions are already written:
+# tests/guard.test.sh is a table of (expectation, agent, command) that drives guard.sh
+# directly, and that suite has to pass. Every rule A3 adds extends this probe by itself.
+#
+# This matters more than tidiness: a false "inert" reading does not miss a lie, it forbids
+# a truth — and a test that fails on correct content leaves an author choosing between
+# deleting a true sentence and disabling the test. Under pressure the test loses.
+GUARD_SUITE=$ROOT/tests/guard.test.sh
+expected_decisions=$(grep -cE '^[[:space:]]*check (deny|ask)' "$GUARD_SUITE" || true)
 
-if [ "$guard_is_inert" = yes ]; then
+guard_decides=no
+if [ "$expected_decisions" -gt 0 ]; then
+  guard_decides=yes
+fi
+
+# And the inverse, which the derivation alone would miss: a guard that decides something
+# its own suite never expects. One probe per decision verb the hook can emit is enough to
+# notice, because any of them means the guard is no longer inert.
+if [ "$guard_decides" = no ]; then
+  for payload in \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin HEAD"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"gh pr merge 7 --squash"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":".github/workflows/ci.yml","content":"x"}}' \
+    '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"hooks/guard.sh"}}'; do
+    said=$(printf '%s' "$payload" | "$ROOT/hooks/guard.sh" 2>/dev/null)
+    status=$?
+    if [ -n "$said" ] || [ "$status" != 0 ]; then
+      ko "the guard decides something its own suite never expects: $said"
+      guard_decides=yes
+      break
+    fi
+  done
+fi
+
+
+if [ "$guard_decides" = no ]; then
   claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents)' \
     "${ALL[@]}" "$BRIEF" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
   if [ -z "$claims" ]; then
-    ok "the guard allows a forced push, and no prompt claims otherwise"
+    ok "the guard decides nothing its suite expects, and no prompt claims otherwise"
   else
-    ko "the guard allows a forced push, and these promise otherwise: $claims"
+    ko "the guard decides nothing yet, and these promise otherwise: $claims"
   fi
 else
   # The guard decides something now, so the prompts may — and should — say so. This arm is
