@@ -58,6 +58,13 @@ In practice a profile you keep for someone else's repository sets `"mode": "disc
 a committed one sets `"mode": "integrated"`, but nothing forces that pairing: the key is
 what is read.
 
+Two details of that identity, both deliberate. An IPv6 host keeps its address and loses its
+brackets (`ssh://git@[fd00::1]/srv/app.git` → `fd00::1/srv/app`), so two spellings of one
+address give two profile directories — a split, never a collision. And `ola-profile id`
+prints the host it parsed: a remote URL carrying credentials will have part of that URL
+read back, which ends up in agent transcripts. Credentials belong in a credential helper,
+not in a remote URL.
+
 No profile means no effect: the hook exits 0 and the agents offer to run
 `/ola-workflow:workflow-init`.
 

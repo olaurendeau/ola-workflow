@@ -81,6 +81,10 @@ FULL_PROFILE='{
 # --- Remote URL → profile directory ---------------------------------------------------
 # A remote URL is the only project-controlled input to a path, so this is also a security
 # boundary: nothing may walk out of the profiles directory.
+# The expectations were confronted with git itself where they were not obvious. Notably
+# the scp-like syntax has no port field, so `git@[fd00::1]:2222/srv/app.git` makes
+# `2222/srv/app.git` the path — verified with a logging GIT_SSH_COMMAND, which git invokes
+# as `git@fd00::1 git-upload-pack '2222/srv/app.git'`.
 while IFS='|' read -r url expected; do
   [ -n "$url" ] || continue
   got=$(ola_profile_url_id "$url" 2>/dev/null) || got="(refused)"
@@ -116,6 +120,12 @@ https://[fd00::1/o/r|(refused)
 https://[fd00::1]x/o/r|(refused)
 https://[fd00::1]:notaport/o/r|(refused)
 git@../x:owner/repo|(refused)
+git@[fd00::1]:srv/app.git|fd00::1/srv/app
+git@[fd00::1]:/srv/app.git|fd00::1/srv/app
+[fd00::1]:srv/app.git|fd00::1/srv/app
+git@[fd00::1]:2222/srv/app.git|fd00::1/2222/srv/app
+git@[fd00::1]/srv/app.git|(refused)
+git@[fd00::1:srv/app.git|(refused)
 https://github.com:8443/o/r|github.com/o/r
 ssh://git@github.com:2222/o/r.git|github.com/o/r
 https://github.com@evil.com/o/r|evil.com/o/r
@@ -267,6 +277,16 @@ if [ "$(id -u)" != 0 ]; then
     chmod 755 "$level"
   done
   eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: and works again once readable"
+
+  # The accident can sit above the profiles directory, where even [ -d ] on the root
+  # reads false. The contract has no exception, so neither does this.
+  for level in "$HOME/.claude" "$HOME"; do
+    chmod 000 "$level"
+    rc 1 "precedence: an unenterable ${level##*/} gives up too" -- \
+      "$CLI" -C "$WORK/discreet" mode
+    chmod 755 "$level"
+  done
+  eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: still fine afterwards"
 fi
 
 # Not a regular file at all: giving up is the only answer that keeps the order meaningful.
@@ -407,6 +427,27 @@ expect_problem '{"mode": "discreet", "commands": [{"allow_args": "x"}]}' \
   'commands[0]/cmd: required key is missing' 'a command needs its cmd'
 expect_problem '{"mode": "discreet", "slots": {"developers": [{"a": 1}]}}' \
   'developers[0]: expected' 'slot items are scalars'
+# Valid JSON that is not an object: the schema interpreter has the useful message, so
+# validate must not flatten it to "not valid JSON".
+for value in '[1,2]' '"hello"' '42' 'true' 'null'; do
+  printf '%s\n' "$value" >"$WORK/bad.json"
+  out=$("$CLI" validate "$WORK/bad.json" 2>&1)
+  total=$((total + 1))
+  case $out in
+    *'expected object'*) echo "ok    validate: $value is reported as the wrong type" ;;
+    *) echo "FAIL  validate: $value reported as '$out'"; failures=$((failures + 1)) ;;
+  esac
+done
+for empty in '' '   '; do
+  printf '%s' "$empty" >"$WORK/bad.json"
+  out=$("$CLI" validate "$WORK/bad.json" 2>&1)
+  total=$((total + 1))
+  case $out in
+    *'not valid JSON'*) echo "ok    validate: a file holding no JSON value is rejected" ;;
+    *) echo "FAIL  validate: empty file reported as '$out'"; failures=$((failures + 1)) ;;
+  esac
+done
+
 printf '%s' '{,' >"$WORK/bad.json"
 total=$((total + 1))
 if out=$("$CLI" validate "$WORK/bad.json" 2>&1); then

@@ -91,9 +91,23 @@ ola_profile_url_id() {
       return 0
       ;;
     *:*)
-      # scp-like: [user@]host:path
-      authority=${url%%:*}
-      path=${url#*:}
+      # scp-like: [user@]host:path. A bracketed IPv6 host holds colons of its own, so the
+      # split cannot be at the first one — git takes `git@[fd00::1]:srv/app.git` and
+      # connects to fd00::1, and refusing it would leave a configured repository inert.
+      case $url in
+        '['*|*'@['*)
+          case $url in
+            *']:'*) ;;
+            *) return 1 ;;
+          esac
+          authority=${url%%']:'*}']'
+          path=${url#*']:'}
+          ;;
+        *)
+          authority=${url%%:*}
+          path=${url#*:}
+          ;;
+      esac
       path=${path#/}
       ;;
     *)
@@ -110,7 +124,9 @@ ola_profile_url_id() {
   # that an IPv6 host is a bracketed literal full of colons: splitting on the first colon
   # would refuse `ssh://git@[fd00::1]/srv/app.git`, a URL git is perfectly happy with, and
   # a configured repository that went silently inert is worse than any of this.
-  # The brackets are URL syntax, not part of the host, so they are dropped.
+  # The brackets are URL syntax, not part of the host, so they are dropped. Note that two
+# spellings of one IPv6 address (fd00::1, fd00:0:0:0:0:0:0:1) give two identities: a split,
+# never a collision, and not worth normalising an address in shell for.
   case $authority in
     '['*)
       case $authority in
@@ -190,6 +206,12 @@ ola_profile_path() {
   root=$home/.claude/workflow-profiles
   # Resolving a remote costs three subprocesses. Someone who has never written a discreet
   # profile should not pay them on every PreToolUse, so the cheap test comes first.
+  # Inside a directory that cannot be entered, even [ -d ] on the root below reads false,
+  # so the two levels above are tested first: "cannot tell" has to mean "give up" with no
+  # exception, including when the accident is above the profiles directory.
+  if [ -n "$home" ]; then
+    ola_profile_traversable "$home" ".claude/workflow-profiles" || return 1
+  fi
   if [ -n "$home" ] && [ -d "$root" ] && id=$(ola_profile_id "$dir"); then
     ola_profile_traversable "$root" "$id" || return 1
     candidate=$root/$id/profile.json
@@ -231,6 +253,15 @@ ola_profile_dir() {
 # that is how a caller's default gets handed out for a file nobody can use.
 ola_profile_readable() {
   jq -e 'type == "object"' "$1" >/dev/null 2>&1
+}
+
+# ola_profile_holds_json <file> → 0 when the file holds exactly one JSON value, of any
+# type. `jq empty` would accept an empty file, and `jq -e .` would reject a file holding
+# `null` or `false`, so neither answers the question on its own.
+# This is what `validate` needs: for valid JSON of the wrong type, the schema interpreter
+# says "expected object, got array", which is far more useful than "not valid JSON".
+ola_profile_holds_json() {
+  jq -e -s 'length == 1' "$1" >/dev/null 2>&1
 }
 
 # ola_profile_mode [dir] → integrated | discreet.
@@ -285,7 +316,7 @@ ola_profile_validate() {
     file=$(ola_profile_path "$PWD") || { echo "no profile found" >&2; return 1; }
   fi
   [ -f "$file" ] || { echo "$file: no such file" >&2; return 1; }
-  if ! ola_profile_readable "$file"; then
+  if ! ola_profile_holds_json "$file"; then
     echo "$file: not valid JSON" >&2
     return 1
   fi
