@@ -72,6 +72,7 @@ case $command in
       # The profile is readable and simply has no such key, so a default may stand in and
       # callers can write `ola-profile get base_branch main` for optional keys.
       3) if [ $# -gt 1 ]; then printf '%s\n' "${2//\{slot\}/$slot}"; else exit 1; fi ;;
+      2) exit 2 ;;
       # No profile, or one that cannot be read: a default here would invent a
       # configuration for a project that has none, or paper over a truncated file.
       *) exit 1 ;;
@@ -79,7 +80,16 @@ case $command in
     ;;
   show)
     file=$(ola_profile_path "$dir") || exit 1
-    ola_profile_readable "$file" || { echo "ola-profile: $file: not valid JSON" >&2; exit 1; }
+    # Two messages, because they are two different problems: a file that holds no single
+    # JSON value, and valid JSON that is not a profile. Saying "not valid JSON" for an
+    # array sends the reader looking for a syntax error that is not there.
+    # Keep this order, and keep both calls: that every readable profile also holds one
+    # JSON value is now pinned only here, so dropping the first call to "simplify" would
+    # silently retire the containment between the two readers.
+    ola_profile_holds_json "$file" ||
+      { echo "ola-profile: $file: not valid JSON" >&2; exit 1; }
+    ola_profile_readable "$file" ||
+      { echo "ola-profile: $file: valid JSON, but not an object, so not a profile" >&2; exit 1; }
     jq . "$file"
     ;;
   validate)
