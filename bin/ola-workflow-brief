@@ -18,13 +18,32 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 dir=${1:-$PWD}
 
-get() { # get <key> [default]
-  local out
-  if out=$(ola_profile_get "$1" "$dir" ""); then
-    printf '%s' "$out"
-  elif [ $# -gt 1 ]; then
-    printf '%s' "$2"
-  fi
+# get <key> [default]
+# A default stands in for a key the profile does not have, never for a profile that cannot
+# be read. Collapsing the two is how a truncated file comes to announce a base branch the
+# project does not have — and `ola_profile_get` separates them precisely so that its
+# callers do not have to guess: 3 is "no such key", anything else is "no usable profile".
+get() {
+  local out status
+  out=$(ola_profile_get "$1" "$dir" "")
+  status=$?
+  case $status in
+    0) printf '%s' "$out" ;;
+    3) [ $# -gt 1 ] && printf '%s' "$2" ;;
+    *) unreadable ;;
+  esac
+}
+
+unreadable() {
+  cat >&2 <<'BROKEN'
+This project has a profile, and it cannot be read.
+
+Do not carry on with defaults: a profile that is truncated, empty or not a JSON object
+would otherwise produce a complete-looking set of rules, every one of them invented — a
+base branch the project does not have, a check command nobody runs. Tell the human which
+file it is and that it needs fixing; `ola-profile validate` says what is wrong with it.
+BROKEN
+  exit 1
 }
 
 profile=$(ola_profile_path "$dir") || {
@@ -38,6 +57,7 @@ agent pushes to the wrong branch or writes on a repository that did not ask for 
 NOPROFILE
   exit 1
 }
+ola_profile_readable "$profile" || unreadable
 mode=$(ola_profile_mode "$dir")
 base=$(get base_branch main)
 
@@ -104,8 +124,8 @@ if [ -n "$hosts" ]; then
   printf -- '- a database: only at %s. Anything else is production until proven otherwise.\n' \
     "$(printf '%s' "$hosts" | tr '\n' ' ')"
 fi
-echo "The guard refuses the rest and says why. Knowing in advance saves a cycle; it is not"
-echo "an invitation to look for the boundary."
+echo "Anything else is out of bounds. Knowing it in advance saves a cycle; it is not an"
+echo "invitation to find out where the boundary is by walking into it."
 echo
 ui_kind=$(get verify_ui.kind)
 if [ -n "$ui_kind" ]; then
@@ -167,13 +187,17 @@ must be as you found it.
 
 ## What discreet mode forbids
 
-- Writing anything on the forge: creating or editing an issue, a label, a comment, a
-  review, a commit status. Reading is free.
+- Changing anything on the forge, in any direction: creating, editing, deleting, closing,
+  reopening, labelling or unlabelling an issue, a comment, a review, a commit status, a
+  release. Reading is free — and that is the whole of what is free.
 - Merging. Nobody merges, the coordinator included.
 
 And two actions need the human to confirm, because they are the only ones other
 contributors see: pushing a branch, and opening a pull request. Propose them, explain what
-they will contain, and wait. The guard will ask as well; do not read that question as a
-formality.
+they will contain, and wait for an answer.
+
+Wait for it even if nothing interrupts you. Nothing is currently watching: no prompt will
+appear, no command will be refused, and silence is not permission — it only means the rule
+has no enforcement behind it yet. You are the enforcement.
 DISCREET
 fi

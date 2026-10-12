@@ -49,8 +49,17 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    `reviews/<sha>.md` under the memory directory the brief names, and review the branch
    before a pull request exists.
 
-8. **Report** the verdict, the SHA, where the review is, the blocking findings and the
-   suggestions.
+8. **Report** to the coordinator, which reads your status before anything else:
+
+   ```
+   Status: done | blocked
+   Deliverables: verdict, the SHA you reviewed, where the review is
+   Blocking findings: file:line — one sentence each, or "none"
+   Suggestions: file:line — one sentence each, or "none"
+   ```
+
+   `blocked` means you could not judge, and it is never a verdict: it carries no review and
+   no status, so that nobody mistakes "I could not run this" for "I found nothing".
 
 ## Checklist
 

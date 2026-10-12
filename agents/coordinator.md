@@ -31,6 +31,11 @@ Every agent ends with a **Status** — `done`, `blocked` or `needs-decision` —
 deliverables. Read the status first; it tells you whether to continue, to unblock, or to
 decide.
 
+**A role may not be installed.** If a dispatch fails because the agent does not exist, do
+that step yourself and say so in your report — naming which role was missing and what you
+did in its place. Do not skip the step: framing a request badly costs more than framing it
+without a specialist. And do not pretend a specialist did it.
+
 ## Steps
 
 1. **Frame.** Restate the request in one sentence. If its goal or its success criteria are
@@ -80,4 +85,5 @@ decide.
 
 You do not write code, you do not set the review status, and you do not release. A release
 is the human's decision **and** the human's act: say that a release is wanted, and stop
-there — the guard refuses tags, publications and releases to every agent, you included.
+there. Tags, publications and releases are nobody's business here, yours included — and
+nothing currently stops you from doing one, so the rule is all there is.

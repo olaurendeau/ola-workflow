@@ -61,6 +61,31 @@ for f in "${AGENTS[@]}"; do
   fi
 done
 
+# Existence is not substance. Stubbed down to eight lines, two of these agents left every
+# assertion below green — so the witness asserts what the coordinator actually consumes
+# from each of them, which is what a stub cannot fake without becoming the real thing.
+for f in "${AGENTS[@]}"; do
+  name=${f##*/}
+  if [ "$(body "$f" | grep -c .)" -ge 20 ]; then
+    ok "$name: has a body of substance, not a stub"
+  else
+    ko "$name: body is $(body "$f" | grep -c .) non-empty lines, which is a stub"
+  fi
+  if grep -q '^## Steps' "$f"; then
+    ok "$name: says in what order it works"
+  else
+    ko "$name: has no Steps section, so nothing says how it proceeds"
+  fi
+done
+# The coordinator reads a Status from each of the others, and dispatches each of them.
+for role in developer pr-reviewer; do
+  if grep -q 'Status:' "$ROOT/agents/$role.md"; then
+    ok "$role: reports a Status, which the coordinator reads first"
+  else
+    ko "$role: reports no Status, so the coordinator cannot tell done from blocked"
+  fi
+done
+
 # --- Frontmatter ----------------------------------------------------------------------
 for f in "${AGENTS[@]}"; do
   name=${f##*/}
@@ -100,7 +125,9 @@ done
 # "origin/main" to an agent raised nothing — which is the only reason it is not still dead.
 forbid() { # forbid <pattern> <what it would be>
   local hits
-  hits=$(grep -lE -- "$1" "${AGENTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+  # -i, because a prompt starts its sentences with a capital: "Branch from main." slipped
+  # through a case-sensitive `branch from main` for exactly that reason.
+  hits=$(grep -liE -- "$1" "${AGENTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
   if [ -z "$hits" ]; then
     ok "no agent hard-codes $2"
   else
@@ -108,15 +135,58 @@ forbid() { # forbid <pattern> <what it would be>
   fi
 }
 
-forbid 'origin/(main|master|trunk|develop)' 'a base branch'
-forbid '(make check|npm (run|test)|cargo test|pytest|go test)' 'a check command'
-forbid 'gh (issue|label) (create|edit)' 'a forge write the brief governs'
-forbid '--match-head-commit' 'the merge form the brief states'
-forbid 'agent-review' 'a review status name'
-forbid 'SLOT=[0-9]' 'a slot value'
-forbid '(docker compose|docker run)' 'a container command'
-forbid '(package-lock|Gemfile.lock|Cargo.lock)' 'a project'\''s lockfile'
-forbid '1000 (changed )?lines' 'a line budget'
+# One prohibition per value-bearing profile key, declared here and checked against the
+# schema below. Nine hand-picked patterns covered five keys of twelve, so nine realistic
+# hard-codings passed green — including `eas submit`, the example epic #1 gives for what
+# this plugin exists to prevent. Deriving the list from the schema means a new key cannot
+# be added without either a prohibition or an explicit decision not to have one.
+forbid_key() { # forbid_key <schema key> <pattern> <what it would be>
+  FORBIDDEN_KEYS="$FORBIDDEN_KEYS $1"
+  forbid "$2" "$3"
+}
+FORBIDDEN_KEYS=""
+
+forbid_key base_branch 'origin/(main|master|trunk|develop)|branch from (main|master|trunk)' \
+  'a base branch'
+forbid_key check '(make check|npm (run|test)|cargo test|pytest|go test|just check)' \
+  'a check command'
+# The honest limit of this approach: a required-check name is an ordinary word. Nothing
+# can tell `checks` the job from `checks` the noun, and a prompt that says "wait for the
+# checks" is right to. So this covers the merge form and the review status, which are
+# distinctive, and leaves check names to the review.
+forbid_key merge '(--match-head-commit|agent-review|gh (issue|label) (create|edit))' \
+  'the merge form or a review status'
+forbid_key slots 'SLOT=[0-9]|slot (1|2|3|9)\b' 'a slot value'
+forbid_key pr '[0-9]{3,4} (changed )?lines|(package-lock|yarn\.lock|Gemfile\.lock|Cargo\.lock)' \
+  'a line budget or a lockfile'
+forbid_key language '(write (to the human )?in (French|English|français)|langue)' 'a language'
+forbid_key context '(docs/agents/|CONTEXT\.md|CLAUDE\.md)' 'a context document path'
+forbid_key commands '(eas (build|submit|update)|npm publish|scalingo|clever|vercel|neonctl)' \
+  'a project command'
+forbid_key db_hosts_allowed '(psql|mysql|mongosh|localhost:[0-9]|127\.0\.0\.1)' \
+  'a database host'
+forbid_key verify_ui '(playwright|maestro|simctl|ios-simulator|--width [0-9])' \
+  'a way of looking at the project'
+forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
+forbid_key mode '(integrated|discreet) mode means' 'what a mode means'
+
+# Both directions: every value-bearing key has a prohibition, and every prohibition names a
+# key the schema declares.
+for key in $(jq -r '.properties | keys[] | select(startswith("$") | not)' \
+              "$ROOT/schema/profile.schema.json"); do
+  case " $FORBIDDEN_KEYS " in
+    *" $key "*) ok "profile key '$key' has a prohibition guarding it" ;;
+    *) ko "profile key '$key' can be hard-coded in a prompt with nothing to catch it" ;;
+  esac
+done
+for key in $FORBIDDEN_KEYS; do
+  if jq -e --arg k "$key" '.properties | has($k)' \
+      "$ROOT/schema/profile.schema.json" >/dev/null 2>&1; then
+    ok "the prohibition for '$key' names a key the schema declares"
+  else
+    ko "there is a prohibition for '$key', which the schema does not declare"
+  fi
+done
 
 # --- Dispatch names are namespaced ----------------------------------------------------
 # subagent_type is an exact match: a bare name does not resolve to a plugin agent, and the
@@ -154,6 +224,31 @@ for key in $(grep -v '^[[:space:]]*#' "$BRIEF" |
     ko "the brief reads '$key', which the schema does not declare"
   fi
 done
+
+# --- No prompt may promise a guard that does not guard --------------------------------
+# While hooks/guard.sh is inert, a present-tense claim that the guard refuses or asks is
+# false, and in discreet mode it is dangerous: an agent told it will be asked, that pushes
+# without asking and sees no prompt, reads the silence as sanction. So the claim is tied to
+# the guard's actual state rather than to anyone's memory of it — when A3 makes the guard
+# real, this assertion inverts and says so.
+guard_is_inert=no
+# Comments only, stripped: guard.sh documents the decisions it will emit in A3, so
+# searching the whole file finds the word in prose and reports a guard that guards.
+guard_code=$(grep -vE '^[[:space:]]*#' "$ROOT/hooks/guard.sh")
+if [ "$(printf '%s' "$guard_code" | tail -1 | tr -d ' ')" = "exit0" ] &&
+   ! printf '%s' "$guard_code" | grep -qE 'permissionDecision'; then
+  guard_is_inert=yes
+fi
+ok "the guard is inert: $guard_is_inert (read from hooks/guard.sh, not assumed)"
+if [ "$guard_is_inert" = yes ]; then
+  claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents)' \
+    "${ALL[@]}" "$BRIEF" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+  if [ -z "$claims" ]; then
+    ok "no prompt claims the inert guard refuses or asks"
+  else
+    ko "the guard is inert, and these promise otherwise: $claims"
+  fi
+fi
 
 # --- The brief, per mode --------------------------------------------------------------
 # The mode rules live here rather than in five prompts, so this is where they are checked —
