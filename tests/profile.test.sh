@@ -667,6 +667,27 @@ eq "Dockerfile src/deep/Dockerfile " "$(glob_match '**/Dockerfile*')" \
   "dialect: ** reaches every level"
 eq "src/deep/a.ts " "$(glob_match 'src/**/*.ts')" "dialect: ** crosses a slash"
 eq "" "$(glob_match 'src/*.ts')" "dialect: a single * does not cross a slash"
+# The clause says no wildcard crosses a slash, so the test says it of each wildcard and
+# not only of the one that was easy to check.
+touch "$globrepo/src/deep/b.ts"
+mkdir -p "$globrepo/Dockerfiles"
+touch "$globrepo/Dockerfiles/one"
+git -C "$globrepo" add -A 2>/dev/null
+# "Does not cross a slash" means the wildcard cannot consume the `/` itself, not that it
+# cannot appear in a path with slashes. The first version of these two asserted the second
+# reading and failed, which is the test doing its job on its author.
+eq "" "$(glob_match 'src?deep/a.ts')" "dialect: ? cannot consume a slash"
+eq "" "$(glob_match 'src[/]deep/a.ts')" "dialect: nor can a character class"
+eq "" "$(glob_match 'src*deep/a.ts')" "dialect: nor can a single *"
+# The controls: each wildcard does work inside a path component, so the three assertions
+# above are about crossing and not about the wildcard being refused outright.
+eq "src/deep/a.ts " "$(glob_match 'src/dee?/a.ts')" "dialect: control, ? works within a component"
+eq "src/deep/a.ts " "$(glob_match 'src/[d]eep/a.ts')" "dialect: control, a class works within a component"
+# And a wildcard never recurses on a directory name, which is what keeps the sentence's
+# own example honest: Dockerfile* must not reach into a neighbouring Dockerfiles/.
+eq "Dockerfile " "$(glob_match 'Dockerfile*')" \
+  "dialect: a wildcard does not recurse into a directory it would match"
+eq "" "$(glob_match 'Dockerfile?')" "dialect: nor with ?"
 # Three patterns that look alike and reach three depths. The anchoring example above
 # teaches "no slash means the top only", which a bare directory name contradicts.
 mkdir -p "$globrepo/docs/a"
@@ -701,7 +722,7 @@ esac
 
 # A deletion canary, which is all this is: it answers "has someone removed the rule?",
 # never "is the rule right?".
-for claim in ':(glob)' 'does not cross' '**/Dockerfile*' 'bare directory name' 'never with a'; do
+for claim in ':(glob)' 'no wildcard crosses' '**/Dockerfile*' 'named literally' 'never with a'; do
   total=$((total + 1))
   case $dialect in
     *"$claim"*) echo "ok    canary: the description still mentions '$claim'" ;;
