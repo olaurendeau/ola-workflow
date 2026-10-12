@@ -62,7 +62,7 @@ FULL_PROFILE='{
   "mode": "integrated",
   "language": {"human": "fr", "artifacts": "fr", "agents": "en"},
   "base_branch": "master",
-  "check": {"full": "make check", "affected": "make check-affected SLOT={slot}", "cleanup": "make down-all"},
+  "check": {"full": "make check", "affected": "make check-affected SLOT={slot}", "cleanup": "make down-all {slot}"},
   "slots": {"var": "SLOT", "developers": [1, 2, 3, 4], "reviewer": 9},
   "pr": {"max_lines": 1000, "exclude": ["package-lock.json"], "title": "conventional"},
   "merge": {
@@ -210,6 +210,11 @@ rc 1 "get: a key path through a scalar, without a default" -- \
   "$CLI" -C "$WORK/integrated" get base_branch.deeper
 rc 2 "get: an empty key is a usage error" -- "$CLI" -C "$WORK/integrated" get ""
 eq "ios-simulator" "$(cd "$WORK/integrated" && "$CLI" get verify_ui.kind)" "get: without -C, from the cwd"
+eq "pg
+localhost" "$("$CLI" -C "$WORK/integrated" get db_hosts_allowed)" "get: a list of hosts"
+# The schema now states that {slot} works in any string value, not only check.affected.
+eq "make down-all 4" "$("$CLI" -C "$WORK/integrated" --slot 4 get check.cleanup)" \
+  "get: {slot} in a value the schema does not single out"
 
 # --- Discreet mode --------------------------------------------------------------------
 mkrepo "$WORK/discreet" "https://github.com/someone/their-repo.git"
@@ -421,6 +426,8 @@ expect_problem '{"mode": "discreet", "pr": {"title": "poetic"}}' 'is not one of 
   'nested enums are checked'
 expect_problem '{"mode": "discreet", "db_hosts_allowed": "pg"}' 'expected array, got string' \
   'an array is not a string'
+expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": "x", "exclude": "t"}]}}' \
+  'expected array, got string' 'a pattern exclusion is a list of globs'
 expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": "a"}, {"file": "b"}]}}' \
   'sensitive_patterns[1]/regex: required key is missing' 'the offending array item is named'
 expect_problem '{"mode": "discreet", "commands": [{"allow_args": "x"}]}' \
