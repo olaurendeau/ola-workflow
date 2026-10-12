@@ -231,13 +231,38 @@ done
 # without asking and sees no prompt, reads the silence as sanction. So the claim is tied to
 # the guard's actual state rather than to anyone's memory of it — when A3 makes the guard
 # real, this assertion inverts and says so.
-guard_is_inert=no
-# Comments only, stripped: guard.sh documents the decisions it will emit in A3, so
-# searching the whole file finds the word in prose and reports a guard that guards.
-guard_code=$(grep -vE '^[[:space:]]*#' "$ROOT/hooks/guard.sh")
-if [ "$(printf '%s' "$guard_code" | tail -1 | tr -d ' ')" = "exit0" ] &&
-   ! printf '%s' "$guard_code" | grep -qE 'permissionDecision'; then
+# Ask the guard instead of reading it. The first version inferred inertness from two
+# textual proxies — a last code line of `exit 0`, and no mention of permissionDecision —
+# and both break in the silent direction under the two things A3 will actually do: wrap the
+# guard in a function, and write the decision emitters before wiring them. The assertion
+# would then skip itself while printing a line that reads like a pass, on exactly the
+# commit where the claim starts mattering. Behaviour cannot be fooled that way.
+guard_said=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force"}}' |
+  "$ROOT/hooks/guard.sh" 2>/dev/null)
+guard_status=$?
+if [ -z "$guard_said" ] && [ "$guard_status" = 0 ]; then
   guard_is_inert=yes
+else
+  guard_is_inert=no
+fi
+
+if [ "$guard_is_inert" = yes ]; then
+  claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents)' \
+    "${ALL[@]}" "$BRIEF" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+  if [ -z "$claims" ]; then
+    ok "the guard allows a forced push, and no prompt claims otherwise"
+  else
+    ko "the guard allows a forced push, and these promise otherwise: $claims"
+  fi
+else
+  # The guard decides something now, so the prompts may — and should — say so. This arm is
+  # what A3 turns on, and it is an assertion rather than a note so that the switch is
+  # visible in the suite rather than inferred from its silence.
+  if grep -qlE 'guard (refuses|blocks|will ask|asks|prevents)' "${ALL[@]}" "$BRIEF" 2>/dev/null; then
+    ok "the guard decides, and the prompts say so"
+  else
+    ko "the guard decides now, and no prompt tells an agent that anything will stop it"
+  fi
 fi
 ok "the guard is inert: $guard_is_inert (read from hooks/guard.sh, not assumed)"
 if [ "$guard_is_inert" = yes ]; then
@@ -317,6 +342,54 @@ esac
 case $integrated in
   *reviewed*) ok "the integrated brief names the project's own review status" ;;
   *) ko "the integrated brief does not name the review status from the profile" ;;
+esac
+
+# A value the profile does not state is announced as a default before the rules, not
+# presented as one of them. Unmarked, a reviewer enforces a budget nobody set.
+minimal=$WORK/minimal
+mkdir -p "$minimal/.claude"
+git -C "$minimal" -c init.defaultBranch=master init -q 2>/dev/null
+git -C "$minimal" remote add origin https://github.com/someone/minimal.git 2>/dev/null
+printf '{"mode":"integrated"}\n' >"$minimal/.claude/workflow.json"
+bare=$("$BRIEF" "$minimal")
+case $bare in
+  *'these are my defaults'*) ok "a minimal profile says which values are the plugin's" ;;
+  *) ko "a minimal profile presents the plugin's defaults as the project's rules" ;;
+esac
+for key in pr.max_lines pr.title merge.review_status base_branch language.human; do
+  case $bare in
+    *"$key"*) ok "the defaults notice names $key" ;;
+    *) ko "the defaults notice does not name $key" ;;
+  esac
+done
+# The notice comes before the rules: a rule read first and qualified later has been believed.
+notice_line=$(printf '%s' "$bare" | grep -n 'these are my defaults' | cut -d: -f1)
+rule_line=$(printf '%s' "$bare" | grep -n '^Base branch:' | cut -d: -f1)
+if [ -n "$notice_line" ] && [ -n "$rule_line" ] && [ "$notice_line" -lt "$rule_line" ]; then
+  ok "the defaults notice comes before the rules"
+else
+  ko "the defaults notice comes after the rules (notice $notice_line, rules $rule_line)"
+fi
+
+# The base branch is the one default worth resolving: the repository knows its own.
+git -C "$minimal" -c user.email=t@e -c user.name=t commit -q --allow-empty -m init 2>/dev/null
+git -C "$minimal" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master 2>/dev/null
+case $("$BRIEF" "$minimal") in
+  *'Base branch: master'*) ok "the base branch is read from origin/HEAD, not guessed" ;;
+  *) ko "the base branch was guessed although origin/HEAD says master" ;;
+esac
+
+# A profile that is readable but does not match the schema is published with that said.
+# A key spelled wrong is a key that is not there, and the real command is lost in silence.
+printf '{"mode":"integrated","chekc":{"full":"make check"}}\n' >"$minimal/.claude/workflow.json"
+invalid=$("$BRIEF" "$minimal")
+case $invalid in
+  *'does not match the schema'*) ok "a schema-invalid profile is published with a warning" ;;
+  *) ko "a schema-invalid profile is published as if it were sound" ;;
+esac
+case $invalid in
+  *chekc*) ok "the warning names the key that is wrong" ;;
+  *) ko "the warning does not say which key is wrong" ;;
 esac
 
 # No profile: a refusal that says what to do, not a set of guessed defaults.

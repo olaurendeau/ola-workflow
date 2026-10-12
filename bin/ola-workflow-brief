@@ -59,18 +59,85 @@ NOPROFILE
 }
 ola_profile_readable "$profile" || unreadable
 mode=$(ola_profile_mode "$dir")
-base=$(get base_branch main)
+
+# A value the profile does not state is a plugin default, and it must say so. Unmarked, a
+# reviewer rejects an 1,100-line change on a budget nobody set, and a developer branches
+# from main in a repository whose branch is master.
+DEFAULTED=""
+defaulted() { # defaulted <key> <value> → the value, and remember it was not declared
+  DEFAULTED="$DEFAULTED $1"
+  printf '%s' "$2"
+}
+with_default() { # with_default <key> <default>
+  local out
+  if out=$(ola_profile_get "$1" "$dir" ""); then
+    printf '%s' "$out"
+  elif [ $? = 3 ]; then
+    defaulted "$1" "$2"
+  else
+    unreadable
+  fi
+}
+
+# The base branch is the one default worth resolving rather than guessing: the repository
+# knows which branch it belongs to.
+if base=$(ola_profile_get base_branch "$dir" "" 2>/dev/null); then
+  base_note=""
+else
+  resolved=$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+  if [ -n "$resolved" ]; then
+    base=${resolved#origin/}
+    base_note=" (not in the profile — read from origin/HEAD)"
+    DEFAULTED="$DEFAULTED base_branch"
+  else
+    base=main
+    base_note=" (not in the profile, and origin/HEAD says nothing — a guess)"
+    DEFAULTED="$DEFAULTED base_branch"
+  fi
+fi
+
+# Probed before anything is printed, so that what is not the project's own is said before
+# the rules rather than after them. A rule read first and qualified later has already been
+# believed.
+MISSING=""
+for pair in language.human language.artifacts language.agents pr.max_lines pr.title \
+            merge.review_status; do
+  ola_profile_get "$pair" "$dir" "" >/dev/null 2>&1 || MISSING="$MISSING $pair"
+done
+[ -n "$base_note" ] && MISSING="$MISSING base_branch"
 
 echo "# ola-workflow — the rules for this project"
 echo
 echo "Profile: $profile"
 echo "Mode:    $mode"
-echo "Base branch: $base — nobody pushes to it, every change arrives by pull request."
+
+if ! problems=$(ola_profile_validate "$profile" 2>&1) || [ -n "$problems" ]; then
+  echo
+  echo "## This profile does not match the schema"
+  echo
+  echo "Read what follows with that in mind, and tell the human. A key spelled wrong is a"
+  echo "key that is not there, so a rule you are about to read may be a default of mine"
+  echo "standing in for one this project meant to set:"
+  echo
+  printf '%s\n' "$problems" | sed 's/^/  /'
+fi
+
+if [ -n "$MISSING" ]; then
+  echo
+  echo "## Not in the profile — these are my defaults, not this project's rules"
+  echo
+  for key in $MISSING; do printf '  %s\n' "$key"; done
+  echo
+  echo "Treat them as a question to ask rather than a decision to enforce. Rejecting a"
+  echo "change for breaking a budget nobody set is worse than not having a budget."
+fi
+echo "Base branch: $base$base_note — nobody pushes to it, every change arrives by"
+echo "pull request."
 echo
 echo "## Languages"
-echo "To the human:        $(get language.human en)"
-echo "Issues, PRs, commits, reviews: $(get language.artifacts en)"
-echo "Agent to agent:      $(get language.agents en)"
+echo "To the human:        $(with_default language.human en)"
+echo "Issues, PRs, commits, reviews: $(with_default language.artifacts en)"
+echo "Agent to agent:      $(with_default language.agents en)"
 echo
 echo "## Commands"
 printf 'Everything CI runs:  %s\n' "$(get check.full '(none declared — ask the human what proves this project works)')"
@@ -90,11 +157,11 @@ echo "A slot is what keeps parallel work from colliding on ports, databases and 
 echo "Never run a command with another agent's slot."
 echo
 echo "## A reviewable pull request"
-printf 'At most %s changed lines' "$(get pr.max_lines 1000)"
+printf 'At most %s changed lines' "$(with_default pr.max_lines 1000)"
 excluded=$(get pr.exclude)
 [ -n "$excluded" ] && printf ', excluding %s' "$(printf '%s' "$excluded" | tr '\n' ' ')"
 echo "."
-case $(get pr.title conventional) in
+case $(with_default pr.title conventional) in
   conventional) echo "Title in Conventional Commits form: it becomes the commit message on $base." ;;
   *) echo "Title: no imposed form." ;;
 esac
@@ -162,7 +229,7 @@ only in an agent's report: if it matters tomorrow, it is written on an issue or 
 
 Checked on the forge for the PR's current head SHA, never taken from a report:
 $(req=$(get merge.required_checks '(none declared)'); printf '%s' "$req" | sed 's/^/- check: /')
-- status $(get merge.review_status agent-review) successful on that same SHA
+- status $(with_default merge.review_status agent-review) successful on that same SHA
 - the branch is not behind $base
 - no file touched under: $(get merge.sensitive_paths '(none declared)' | tr '\n' ' ')
 - no sensitive pattern in the patch
