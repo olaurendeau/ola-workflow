@@ -62,7 +62,7 @@ FULL_PROFILE='{
   "mode": "integrated",
   "language": {"human": "fr", "artifacts": "fr", "agents": "en"},
   "base_branch": "master",
-  "check": {"full": "make check", "affected": "make check-affected SLOT={slot}", "cleanup": "make down-all"},
+  "check": {"full": "make check", "affected": "make check-affected SLOT={slot}", "cleanup": "make down-all {slot}"},
   "slots": {"var": "SLOT", "developers": [1, 2, 3, 4], "reviewer": 9},
   "pr": {"max_lines": 1000, "exclude": ["package-lock.json"], "title": "conventional"},
   "merge": {
@@ -210,6 +210,11 @@ rc 1 "get: a key path through a scalar, without a default" -- \
   "$CLI" -C "$WORK/integrated" get base_branch.deeper
 rc 2 "get: an empty key is a usage error" -- "$CLI" -C "$WORK/integrated" get ""
 eq "ios-simulator" "$(cd "$WORK/integrated" && "$CLI" get verify_ui.kind)" "get: without -C, from the cwd"
+eq "pg
+localhost" "$("$CLI" -C "$WORK/integrated" get db_hosts_allowed)" "get: a list of hosts"
+# The schema now states that {slot} works in any string value, not only check.affected.
+eq "make down-all 4" "$("$CLI" -C "$WORK/integrated" --slot 4 get check.cleanup)" \
+  "get: {slot} in a value the schema does not single out"
 
 # --- Discreet mode --------------------------------------------------------------------
 mkrepo "$WORK/discreet" "https://github.com/someone/their-repo.git"
@@ -421,6 +426,8 @@ expect_problem '{"mode": "discreet", "pr": {"title": "poetic"}}' 'is not one of 
   'nested enums are checked'
 expect_problem '{"mode": "discreet", "db_hosts_allowed": "pg"}' 'expected array, got string' \
   'an array is not a string'
+expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": "x", "exclude": "t"}]}}' \
+  'expected array, got string' 'a pattern exclusion is a list of globs'
 expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": "a"}, {"file": "b"}]}}' \
   'sensitive_patterns[1]/regex: required key is missing' 'the offending array item is named'
 expect_problem '{"mode": "discreet", "commands": [{"allow_args": "x"}]}' \
@@ -630,6 +637,102 @@ eq integrated "$(HOME=$WORK/home-without-profiles "$CLI" -C "$WORK/integrated" m
 mkdir -p "$WORK/home-with-profiles/.claude/workflow-profiles"
 eq 2 "$(git_calls "$WORK/home-with-profiles")" \
   "cost: a profiles directory costs the upstream and origin lookups"
+
+# --- The glob dialect the schema promises ---------------------------------------------
+# The schema tells profile authors how its globs behave. That is prose, and prose has no
+# counter-proof — except when it describes a tool, which is testable. It is worth testing
+# because the first version of that sentence was wrong: it equated `:(glob)` with
+# .gitignore, which matches a slash-less pattern at any depth while a pathspec is anchored
+# at the repository root. Nobody writes pathspec magic and everybody has written a
+# .gitignore, so the wrong analogy was the one that would have been believed.
+globrepo=$WORK/globs
+mkdir -p "$globrepo/src/deep"
+git -C "$globrepo" -c init.defaultBranch=main init -q 2>/dev/null
+touch "$globrepo/Dockerfile" "$globrepo/src/deep/Dockerfile" "$globrepo/src/deep/a.ts"
+git -C "$globrepo" add -A 2>/dev/null
+
+glob_match() { git -C "$globrepo" ls-files -- ":(glob)$1" | tr '\n' ' '; }
+eq "Dockerfile " "$(glob_match 'Dockerfile*')" \
+  "dialect: a pattern with no slash is anchored at the root"
+# The counter-proof of the claim itself: gitignore does what the first sentence promised,
+# and that is precisely why the analogy was misleading.
+eq "Dockerfile src/deep/Dockerfile " \
+  "$(printf 'Dockerfile*\n' >"$globrepo/.gitignore"
+    for f in Dockerfile src/deep/Dockerfile; do
+      git -C "$globrepo" check-ignore --no-index -q "$f" && printf '%s ' "$f"
+    done
+    rm -f "$globrepo/.gitignore")" \
+  "dialect: the same pattern in a .gitignore does match at any depth"
+eq "Dockerfile src/deep/Dockerfile " "$(glob_match '**/Dockerfile*')" \
+  "dialect: ** reaches every level"
+eq "src/deep/a.ts " "$(glob_match 'src/**/*.ts')" "dialect: ** crosses a slash"
+eq "" "$(glob_match 'src/*.ts')" "dialect: a single * does not cross a slash"
+# The clause says no wildcard crosses a slash, so the test says it of each wildcard and
+# not only of the one that was easy to check.
+touch "$globrepo/src/deep/b.ts"
+mkdir -p "$globrepo/Dockerfiles"
+touch "$globrepo/Dockerfiles/one"
+git -C "$globrepo" add -A 2>/dev/null
+# "Does not cross a slash" means the wildcard cannot consume the `/` itself, not that it
+# cannot appear in a path with slashes. The first version of these two asserted the second
+# reading and failed, which is the test doing its job on its author.
+eq "" "$(glob_match 'src?deep/a.ts')" "dialect: ? cannot consume a slash"
+eq "" "$(glob_match 'src[/]deep/a.ts')" "dialect: nor can a character class"
+eq "" "$(glob_match 'src*deep/a.ts')" "dialect: nor can a single *"
+# One witness per negative assertion, each asserting a non-empty value: an `eq ""` control
+# would witness nothing, since that is what the absence of everything produces too. Three
+# assertions, three witnesses — "each wildcard" has to mean each of the three, or the
+# comment promises more than the block checks.
+eq "src/deep/a.ts " "$(glob_match 'src/dee?/a.ts')" "dialect: witness, ? works within a component"
+eq "src/deep/a.ts " "$(glob_match 'src/[d]eep/a.ts')" "dialect: witness, a class works within a component"
+eq "src/deep/a.ts " "$(glob_match 'src/*eep/a.ts')" "dialect: witness, * works within a component"
+# And a wildcard never recurses on a directory name, which is what keeps the sentence's
+# own example honest: Dockerfile* must not reach into a neighbouring Dockerfiles/.
+eq "Dockerfile " "$(glob_match 'Dockerfile*')" \
+  "dialect: a wildcard does not recurse into a directory it would match"
+eq "" "$(glob_match 'Dockerfile?')" "dialect: nor with ?"
+# Three patterns that look alike and reach three depths. The anchoring example above
+# teaches "no slash means the top only", which a bare directory name contradicts.
+mkdir -p "$globrepo/docs/a"
+touch "$globrepo/docs/x.md" "$globrepo/docs/a/y.md"
+git -C "$globrepo" add -A 2>/dev/null
+eq "docs/a/y.md docs/x.md " "$(glob_match 'docs')" "dialect: a bare directory name is recursive"
+eq "docs/x.md " "$(glob_match 'docs/*')" "dialect: one level under a directory"
+# A leading ! is not a negation: it matches nothing, and says nothing about it. An entry
+# written that way would protect exactly nothing.
+eq "" "$(glob_match '!docs/**')" "dialect: a leading ! matches nothing, silently"
+
+# The behaviours above pin git. These pin the sentence, and they are worth exactly what
+# they claim and no more.
+#
+# The reviewer mutation-tested the first version of this block: inverting the description
+# to say the opposite ("— like a .gitignore rule — a pattern with no slash is **not**
+# anchored…") left all of its assertions passing, because `anchored at the` survives
+# inside `not anchored at the` — it contains its own negation. Dropping a two-letter
+# prefix while simplifying a caveat is the most ordinary rewrite there is.
+#
+# So the claim is anchored on the word that carries its polarity, which fails on that
+# inversion. The honest limit: no assertion over prose is paraphrase-proof — "a .gitignore
+# rule, by contrast, matches at any depth" would be true without containing "unlike". The
+# reachable goal is to make an inversion noisy, not to prove a sentence true.
+dialect=$(jq -r '.description' "$ROOT/schema/profile.schema.json")
+total=$((total + 1))
+case $dialect in
+  *'unlike a .gitignore'*) echo "ok    dialect: the description still contrasts with .gitignore" ;;
+  *) echo "FAIL  dialect: the contrast with .gitignore is gone, so the rule may have been inverted"
+     failures=$((failures + 1)) ;;
+esac
+
+# A deletion canary, which is all this is: it answers "has someone removed the rule?",
+# never "is the rule right?".
+for claim in ':(glob)' 'no wildcard crosses' '**/Dockerfile*' 'named literally' 'never with a' 'README: Globs'; do
+  total=$((total + 1))
+  case $dialect in
+    *"$claim"*) echo "ok    canary: the description still mentions '$claim'" ;;
+    *) echo "FAIL  canary: the description no longer mentions '$claim'"
+       failures=$((failures + 1)) ;;
+  esac
+done
 
 # --- Bad usage ------------------------------------------------------------------------
 rc 2 "usage: no command" -- "$CLI"
