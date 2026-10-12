@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/olaurendeau/ola-workflow/schema/profile.schema.json",
   "title": "ola-workflow project profile",
-  "description": "Everything the workflow needs to know about one project. Committed as .claude/workflow.json (integrated mode) or kept out of the repository in ~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json (discreet mode).",
+  "description": "Everything the workflow needs to know about one project. It lives either in ~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json, which is yours and wins, or in <project>/.claude/workflow.json, which the project commits. Where the file lives says who owns it; the mode key below says how the workflow behaves.",
   "type": "object",
   "required": ["mode"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
     "mode": {
-      "description": "integrated: the profile is committed and the agents may write to the forge. discreet: nothing is committed, memory stays local, no issue/label/status is ever written, push and PR creation need a human, and nothing is ever merged.",
+      "description": "integrated: the agents may write to the forge, and the coordinator may merge. discreet: memory stays local, no issue/label/status is ever written, push and PR creation need a human, and nothing is ever merged. Either value is legal in either location, though a committed profile is normally integrated and one you keep for someone else's repository is normally discreet.",
       "enum": ["integrated", "discreet"]
     },
     "language": {

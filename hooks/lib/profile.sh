@@ -58,7 +58,7 @@ ola_profile_component_ok() {
 # authority and never from the path, so a password containing `@` cannot be mistaken for
 # a host and leak into a directory name; and no component may be empty, `.` or `..`.
 ola_profile_url_id() {
-  local url=$1 rest authority host path
+  local url=$1 rest authority host port path
 
   [ -n "$url" ] || return 1
 
@@ -106,19 +106,37 @@ ola_profile_url_id() {
   case $authority in
     *@*) authority=${authority##*@} ;;
   esac
-  # An unencoded / in the userinfo ends the authority too early, so a password holding one
-  # leaves its tail posing as a host: `https://user:tok/en@host/o/r` would read as
-  # `user/en@host/o/r`. Such a URL is invalid per RFC 3986 and git cannot use it either,
-  # but the answer is to refuse it, not to publish half a secret as an identity. What
-  # follows the colon of an authority is a port, so it is digits or nothing.
+  # Split the authority into host and port the way RFC 3986 does, which means noticing
+  # that an IPv6 host is a bracketed literal full of colons: splitting on the first colon
+  # would refuse `ssh://git@[fd00::1]/srv/app.git`, a URL git is perfectly happy with, and
+  # a configured repository that went silently inert is worse than any of this.
+  # The brackets are URL syntax, not part of the host, so they are dropped.
   case $authority in
-    *:*)
-      case ${authority#*:} in
-        ''|*[!0-9]*) return 1 ;;
+    '['*)
+      case $authority in
+        *']'*) ;;
+        *) return 1 ;;
+      esac
+      host=${authority%%']'*}
+      host=${host#'['}
+      port=${authority#*']'}
+      case $port in
+        '') ;;
+        :*) port=${port#:} ;;
+        *) return 1 ;;
       esac
       ;;
+    *:*) host=${authority%%:*}; port=${authority#*:} ;;
+    *) host=$authority; port= ;;
   esac
-  host=${authority%%:*}
+  # What follows the colon is a port: digits, or nothing at all (`host:` is a legal
+  # authority, and curl takes it). Anything else means the authority ended early — an
+  # unencoded / in a password does that — and the tail of the secret is now posing as a
+  # host. Refusing is the answer, not publishing half a credential as an identity.
+  case $port in
+    '') ;;
+    *[!0-9]*) return 1 ;;
+  esac
   host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
 
   path=${path%/}
@@ -145,6 +163,27 @@ ola_profile_id() {
   ola_profile_url_id "$url"
 }
 
+# ola_profile_traversable <root> <relative id> → 1 when a level that exists cannot be
+# entered. Inside a directory with no execute bit, every test on a file reads false: a
+# profile could be sitting there unseen, and falling through would be the one thing the
+# precedence forbids. So "cannot tell" has to mean "give up", not "it is not there".
+ola_profile_traversable() {
+  local base=$1 rest=$2 part
+  [ -d "$base" ] || return 0
+  [ -x "$base" ] || return 1
+  while [ -n "$rest" ]; do
+    part=${rest%%/*}
+    case $rest in
+      */*) rest=${rest#*/} ;;
+      *) rest= ;;
+    esac
+    base=$base/$part
+    [ -d "$base" ] || return 0
+    [ -x "$base" ] || return 1
+  done
+  return 0
+}
+
 # ola_profile_path [dir] → the profile file in use.
 ola_profile_path() {
   local dir=${1:-$PWD} home=${HOME:-} top id candidate root
@@ -152,6 +191,7 @@ ola_profile_path() {
   # Resolving a remote costs three subprocesses. Someone who has never written a discreet
   # profile should not pay them on every PreToolUse, so the cheap test comes first.
   if [ -n "$home" ] && [ -d "$root" ] && id=$(ola_profile_id "$dir"); then
+    ola_profile_traversable "$root" "$id" || return 1
     candidate=$root/$id/profile.json
     if [ -f "$candidate" ]; then
       printf '%s\n' "$candidate"
@@ -182,12 +222,15 @@ ola_profile_dir() {
   printf '%s\n' "${file%/*}"
 }
 
-# ola_profile_readable <file> → 0 when the file holds a JSON value.
+# ola_profile_readable <file> → 0 when the file holds a JSON object.
 # jq exits 0 on an empty input, so every reader has to check for itself: "empty, and
 # successfully" is the one answer a caller must never get out of a broken profile. A
 # truncated write would otherwise read as zero required checks, or as no protected branch.
+# An object, not merely a value: the schema says `"type": "object"`, and a profile holding
+# `[1,2]` or `"hello"` must not read as an object that happens to be missing every key —
+# that is how a caller's default gets handed out for a file nobody can use.
 ola_profile_readable() {
-  jq -e . "$1" >/dev/null 2>&1
+  jq -e 'type == "object"' "$1" >/dev/null 2>&1
 }
 
 # ola_profile_mode [dir] → integrated | discreet.

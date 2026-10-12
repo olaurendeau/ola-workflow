@@ -106,7 +106,16 @@ https://github.com:443/|(refused)
 https://user:tok/en@github.com/o/r.git|(refused)
 https://user:tok/en@github.com/o/r|(refused)
 https://github.com:notaport/o/r|(refused)
-https://github.com:/o/r|(refused)
+https://github.com:/o/r|github.com/o/r
+ssh://git@[fd00::1]/srv/team/app.git|fd00::1/srv/team/app
+ssh://git@[fd00::1]:2222/srv/team/app.git|fd00::1/srv/team/app
+https://[2001:db8::1]:8443/o/r.git|2001:db8::1/o/r
+https://[2001:DB8::1]/o/r|2001:db8::1/o/r
+https://user:tok@[fd00::1]/o/r|fd00::1/o/r
+https://[fd00::1/o/r|(refused)
+https://[fd00::1]x/o/r|(refused)
+https://[fd00::1]:notaport/o/r|(refused)
+git@../x:owner/repo|(refused)
 https://github.com:8443/o/r|github.com/o/r
 ssh://git@github.com:2222/o/r.git|github.com/o/r
 https://github.com@evil.com/o/r|evil.com/o/r
@@ -126,9 +135,9 @@ nonsense|(refused)
 https:///owner/repo|(refused)
 TABLE
 
-# A component holding a slash cannot come out of a URL today, because the host has no
-# slash and the local branch keeps only the basename. The clause is pinned anyway: it is
-# what protects a future caller that hands over a whole path.
+# A component holding a slash does come out of a URL: `git@../x:owner/repo` makes `../x`
+# the authority, which the clause below is what refuses. The earlier version of this
+# comment claimed it was unreachable, and the reviewer was right that it is not.
 for bad in 'a/b' '..' '.' ''; do
   total=$((total + 1))
   if ola_profile_component_ok "$bad"; then
@@ -242,6 +251,23 @@ rc 1 "precedence: get refuses rather than read the repo's file" -- \
 
 printf '' >"$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json"
 eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: an empty user profile still wins"
+user_profile "github.com/someone/their-repo" '{"mode": "discreet", "base_branch": "trunk"}'
+
+# Inside a directory with no execute bit every test on a file reads false, so a profile
+# that is right there looks absent. Falling through would hand the repository the last
+# word, which is the one direction the precedence forbids. root ignores the bits, so this
+# only means anything as an ordinary user.
+if [ "$(id -u)" != 0 ]; then
+  for level in "$HOME/.claude/workflow-profiles" \
+               "$HOME/.claude/workflow-profiles/github.com" \
+               "$HOME/.claude/workflow-profiles/github.com/someone/their-repo"; do
+    chmod 000 "$level"
+    rc 1 "precedence: an unenterable ${level##*workflow-profiles} gives up, it does not fall through" -- \
+      "$CLI" -C "$WORK/discreet" mode
+    chmod 755 "$level"
+  done
+  eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: and works again once readable"
+fi
 
 # Not a regular file at all: giving up is the only answer that keeps the order meaningful.
 rm -f "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json"
@@ -320,6 +346,18 @@ for content in '' '   ' '
 done
 printf '%s' '{"mode": "integrated",,,' >"$WORK/broken/.claude/workflow.json"
 rc 1 "broken JSON: get refuses with a default" -- "$CLI" -C "$WORK/broken" get base_branch main
+
+# Valid JSON that is not an object. `jq -e .` accepts all of these, so without a type
+# check they read as an object missing every key, and the caller's default is handed out
+# for a file nobody can use. The schema says the profile is an object; so does this.
+for value in '[1,2]' '"hello"' '42' 'true' 'null' 'false'; do
+  printf '%s\n' "$value" >"$WORK/broken/.claude/workflow.json"
+  rc 1 "non-object profile $value: get refuses" -- "$CLI" -C "$WORK/broken" get base_branch
+  rc 1 "non-object profile $value: and refuses a default too" -- \
+    "$CLI" -C "$WORK/broken" get merge.required_checks zzz
+  rc 1 "non-object profile $value: show refuses" -- "$CLI" -C "$WORK/broken" show
+  eq discreet "$("$CLI" -C "$WORK/broken" mode)" "non-object profile $value: mode stays discreet"
+done
 rm -rf "$WORK/broken/.claude"
 
 # --- Validation -----------------------------------------------------------------------
@@ -437,8 +475,11 @@ eq 0 "$(git_calls "$WORK/home-without-profiles")" \
 eq integrated "$(HOME=$WORK/home-without-profiles "$CLI" -C "$WORK/integrated" mode)" \
   "cost: and the project profile still resolves"
 # Two, not one: upstream is tried before origin, so a repository without a fork remote
-# pays the miss as well.
-eq 2 "$(git_calls "$HOME")" "cost: a profiles directory costs the upstream and origin lookups"
+# pays the miss as well. Its own fixture home, so the count cannot drift with what earlier
+# tests happened to create.
+mkdir -p "$WORK/home-with-profiles/.claude/workflow-profiles"
+eq 2 "$(git_calls "$WORK/home-with-profiles")" \
+  "cost: a profiles directory costs the upstream and origin lookups"
 
 # --- Bad usage ------------------------------------------------------------------------
 rc 2 "usage: no command" -- "$CLI"
