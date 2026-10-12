@@ -100,11 +100,15 @@ fi
 # the rules rather than after them. A rule read first and qualified later has already been
 # believed.
 MISSING=""
-for pair in language.human language.artifacts language.agents pr.max_lines pr.title \
-            merge.review_status; do
-  ola_profile_get "$pair" "$dir" "" >/dev/null 2>&1 || MISSING="$MISSING $pair"
+# key=default, so the notice can say what the value is: the agent's decision is about the
+# value, and "pr.max_lines" alone does not tell it what budget not to enforce.
+for pair in language.human=en language.artifacts=en language.agents=en \
+            pr.max_lines=1000 pr.title=conventional merge.review_status=agent-review \
+            slots.var=SLOT; do
+  key=${pair%%=*}
+  ola_profile_get "$key" "$dir" "" >/dev/null 2>&1 || MISSING="$MISSING $pair"
 done
-[ -n "$base_note" ] && MISSING="$MISSING base_branch"
+[ -n "$base_note" ] && MISSING="$MISSING base_branch=$base"
 
 echo "# ola-workflow — the rules for this project"
 echo
@@ -126,7 +130,7 @@ if [ -n "$MISSING" ]; then
   echo
   echo "## Not in the profile — these are my defaults, not this project's rules"
   echo
-  for key in $MISSING; do printf '  %s\n' "$key"; done
+  for pair in $MISSING; do printf '  %s → %s\n' "${pair%%=*}" "${pair#*=}"; done
   echo
   echo "Treat them as a question to ask rather than a decision to enforce. Rejecting a"
   echo "change for breaking a budget nobody set is worse than not having a budget."
@@ -141,7 +145,12 @@ echo "Agent to agent:      $(with_default language.agents en)"
 echo
 echo "## Commands"
 printf 'Everything CI runs:  %s\n' "$(get check.full '(none declared — ask the human what proves this project works)')"
-printf 'The affected subset: %s\n' "$(get check.affected "$(get check.full '(none declared)')")"
+if affected=$(ola_profile_get check.affected "$dir" "" 2>/dev/null); then
+  printf 'The affected subset: %s\n' "$affected"
+else
+  printf 'The affected subset: %s — the same command: this project declares no subset.\n' \
+    "$(get check.full '(none declared)')"
+fi
 cleanup=$(get check.cleanup)
 [ -n "$cleanup" ] && printf 'After a check:        %s\n' "$cleanup"
 echo
@@ -150,7 +159,7 @@ echo "with the slot already substituted: ola-profile get check.affected --slot <
 echo
 echo "## Slots"
 printf 'Variable: %s · developers: %s · reviewer: %s\n' \
-  "$(get slots.var SLOT)" \
+  "$(with_default slots.var SLOT)" \
   "$(get slots.developers '(none declared)' | tr '\n' ' ')" \
   "$(get slots.reviewer '(none declared)')"
 echo "A slot is what keeps parallel work from colliding on ports, databases and containers."

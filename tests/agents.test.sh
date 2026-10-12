@@ -237,14 +237,21 @@ done
 # guard in a function, and write the decision emitters before wiring them. The assertion
 # would then skip itself while printing a line that reads like a pass, on exactly the
 # commit where the claim starts mattering. Behaviour cannot be fooled that way.
-guard_said=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force"}}' |
-  "$ROOT/hooks/guard.sh" 2>/dev/null)
-guard_status=$?
-if [ -z "$guard_said" ] && [ "$guard_status" = 0 ]; then
-  guard_is_inert=yes
-else
-  guard_is_inert=no
-fi
+# A set of payloads, not one: the guard arrives in four parts, so deciding on anything at
+# all makes it real. One payload would call a half-built guard inert and then forbid the
+# true sentence describing what it already refuses.
+guard_decides=no
+for cmd in 'git push --force origin HEAD' 'gh pr merge 7 --squash' 'npm publish' \
+           'git tag v1.0.0' 'gh api -X PUT repos/o/r/pulls/7/merge'; do
+  said=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "$cmd" |
+    "$ROOT/hooks/guard.sh" 2>/dev/null)
+  status=$?
+  if [ -n "$said" ] || [ "$status" != 0 ]; then
+    guard_decides=yes
+    break
+  fi
+done
+if [ "$guard_decides" = yes ]; then guard_is_inert=no; else guard_is_inert=yes; fi
 
 if [ "$guard_is_inert" = yes ]; then
   claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents)' \
@@ -258,21 +265,14 @@ else
   # The guard decides something now, so the prompts may — and should — say so. This arm is
   # what A3 turns on, and it is an assertion rather than a note so that the switch is
   # visible in the suite rather than inferred from its silence.
-  if grep -qlE 'guard (refuses|blocks|will ask|asks|prevents)' "${ALL[@]}" "$BRIEF" 2>/dev/null; then
-    ok "the guard decides, and the prompts say so"
-  else
-    ko "the guard decides now, and no prompt tells an agent that anything will stop it"
-  fi
-fi
-ok "the guard is inert: $guard_is_inert (read from hooks/guard.sh, not assumed)"
-if [ "$guard_is_inert" = yes ]; then
-  claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents)' \
-    "${ALL[@]}" "$BRIEF" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
-  if [ -z "$claims" ]; then
-    ok "no prompt claims the inert guard refuses or asks"
-  else
-    ko "the guard is inert, and these promise otherwise: $claims"
-  fi
+  for f in "${AGENTS[@]}" "$BRIEF"; do
+    name=${f##*/}
+    if grep -qE 'guard (refuses|blocks|will ask|asks|prevents)' "$f"; then
+      ok "$name: the guard decides, and this says so"
+    else
+      ko "$name: the guard decides now, and this tells an agent nothing will stop it"
+    fi
+  done
 fi
 
 # --- The brief, per mode --------------------------------------------------------------
@@ -356,12 +356,20 @@ case $bare in
   *'these are my defaults'*) ok "a minimal profile says which values are the plugin's" ;;
   *) ko "a minimal profile presents the plugin's defaults as the project's rules" ;;
 esac
-for key in pr.max_lines pr.title merge.review_status base_branch language.human; do
+# key → value, because the decision an agent makes is about the value: "pr.max_lines"
+# alone does not tell it which budget not to enforce.
+while read -r key value; do
   case $bare in
-    *"$key"*) ok "the defaults notice names $key" ;;
-    *) ko "the defaults notice does not name $key" ;;
+    *"$key → $value"*) ok "the defaults notice gives $key and its value" ;;
+    *) ko "the defaults notice does not give $key → $value" ;;
   esac
-done
+done <<'PAIRS'
+pr.max_lines 1000
+pr.title conventional
+merge.review_status agent-review
+language.human en
+slots.var SLOT
+PAIRS
 # The notice comes before the rules: a rule read first and qualified later has been believed.
 notice_line=$(printf '%s' "$bare" | grep -n 'these are my defaults' | cut -d: -f1)
 rule_line=$(printf '%s' "$bare" | grep -n '^Base branch:' | cut -d: -f1)
