@@ -80,7 +80,13 @@ case $command in
     ;;
   show)
     file=$(ola_profile_path "$dir") || exit 1
-    ola_profile_readable "$file" || { echo "ola-profile: $file: not valid JSON" >&2; exit 1; }
+    # Two messages, because they are two different problems: a file that holds no single
+    # JSON value, and valid JSON that is not a profile. Saying "not valid JSON" for an
+    # array sends the reader looking for a syntax error that is not there.
+    ola_profile_holds_json "$file" ||
+      { echo "ola-profile: $file: not valid JSON" >&2; exit 1; }
+    ola_profile_readable "$file" ||
+      { echo "ola-profile: $file: valid JSON, but not an object, so not a profile" >&2; exit 1; }
     jq . "$file"
     ;;
   validate)

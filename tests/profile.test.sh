@@ -448,6 +448,48 @@ for empty in '' '   '; do
   esac
 done
 
+mkdir -p "$WORK/broken/.claude"
+# A file holding two JSON values is what a `>>` where a `>` was meant leaves behind. Both
+# readers must refuse it, and in the same direction: jq evaluates its program once per
+# input value and -e reports on the last, so a naive object test calls this readable and
+# get would then serve values out of a file validate rejects.
+for pair in '{"a":1} {"b":2}' '{"a":1} [1,2]' '[1,2] {"a":1}' '{"a":1} {"a":1}'; do
+  printf '%s\n' "$pair" >"$WORK/broken/.claude/workflow.json"
+  rc 1 "two values ($pair): get refuses" -- "$CLI" -C "$WORK/broken" get a
+  rc 1 "two values ($pair): get refuses a default too" -- "$CLI" -C "$WORK/broken" get a zzz
+  rc 1 "two values ($pair): show refuses" -- "$CLI" -C "$WORK/broken" show
+  eq discreet "$("$CLI" -C "$WORK/broken" mode)" "two values ($pair): mode stays discreet"
+  printf '%s\n' "$pair" >"$WORK/bad.json"
+  out=$("$CLI" validate "$WORK/bad.json" 2>&1)
+  total=$((total + 1))
+  case $out in
+    *'not valid JSON'*) echo "ok    two values ($pair): validate refuses" ;;
+    *) echo "FAIL  two values ($pair): validate said '$out'"; failures=$((failures + 1)) ;;
+  esac
+done
+rm -rf "$WORK/broken/.claude"
+mkdir -p "$WORK/broken/.claude"
+
+# The containment between the two readers, stated as a property: anything get will serve
+# comes out of a file validate accepts. This is the invariant the blocking finding broke.
+for content in '{"mode":"discreet"}' '[1,2]' '"hello"' '42' 'true' 'null' '' '   ' '{,'                '{"a":1} {"b":2}'; do
+  printf '%s' "$content" >"$WORK/bad.json"
+  if "$CLI" -C "$WORK/broken" validate "$WORK/bad.json" >/dev/null 2>&1; then :; fi
+  readable=no
+  printf '%s' "$content" >"$WORK/broken/.claude/workflow.json"
+  "$CLI" -C "$WORK/broken" get mode >/dev/null 2>&1 && readable=yes
+  holds=no
+  ola_profile_holds_json "$WORK/broken/.claude/workflow.json" && holds=yes
+  total=$((total + 1))
+  if [ "$readable" = no ] || [ "$holds" = yes ]; then
+    echo "ok    containment: get serves nothing validate would reject ($content)"
+  else
+    echo "FAIL  containment: get served a value from a file validate rejects ($content)"
+    failures=$((failures + 1))
+  fi
+done
+rm -rf "$WORK/broken/.claude"
+
 printf '%s' '{,' >"$WORK/bad.json"
 total=$((total + 1))
 if out=$("$CLI" validate "$WORK/bad.json" 2>&1); then

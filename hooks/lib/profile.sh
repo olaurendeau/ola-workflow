@@ -125,8 +125,8 @@ ola_profile_url_id() {
   # would refuse `ssh://git@[fd00::1]/srv/app.git`, a URL git is perfectly happy with, and
   # a configured repository that went silently inert is worse than any of this.
   # The brackets are URL syntax, not part of the host, so they are dropped. Note that two
-# spellings of one IPv6 address (fd00::1, fd00:0:0:0:0:0:0:1) give two identities: a split,
-# never a collision, and not worth normalising an address in shell for.
+  # spellings of one IPv6 address (fd00::1, fd00:0:0:0:0:0:0:1) give two identities: a split,
+  # never a collision, and not worth normalising an address in shell for.
   case $authority in
     '['*)
       case $authority in
@@ -145,7 +145,7 @@ ola_profile_url_id() {
     *:*) host=${authority%%:*}; port=${authority#*:} ;;
     *) host=$authority; port= ;;
   esac
-  # What follows the colon is a port: digits, or nothing at all (`host:` is a legal
+    # What follows the colon is a port: digits, or nothing at all (`host:` is a legal
   # authority, and curl takes it). Anything else means the authority ended early — an
   # unencoded / in a password does that — and the tail of the secret is now posing as a
   # host. Refusing is the answer, not publishing half a credential as an identity.
@@ -251,8 +251,14 @@ ola_profile_dir() {
 # An object, not merely a value: the schema says `"type": "object"`, and a profile holding
 # `[1,2]` or `"hello"` must not read as an object that happens to be missing every key —
 # that is how a caller's default gets handed out for a file nobody can use.
+# One value, and an object. Both halves matter: jq evaluates its program once per input
+# value and -e reports on the last, so `type == "object"` alone calls a file holding two
+# concatenated objects readable — a `>>` where a `>` was meant — and then get would serve
+# values out of a file validate rejects. `limit(2; inputs)` stops at the second value, so
+# the check costs the same on a huge file as on a small one.
 ola_profile_readable() {
-  jq -e 'type == "object"' "$1" >/dev/null 2>&1
+  jq -n -e '[limit(2; inputs)] | length == 1 and (.[0] | type) == "object"' "$1" \
+    >/dev/null 2>&1
 }
 
 # ola_profile_holds_json <file> → 0 when the file holds exactly one JSON value, of any
@@ -260,8 +266,11 @@ ola_profile_readable() {
 # `null` or `false`, so neither answers the question on its own.
 # This is what `validate` needs: for valid JSON of the wrong type, the schema interpreter
 # says "expected object, got array", which is far more useful than "not valid JSON".
+# Every readable profile holds one JSON value, so this is the weaker of the two tests and
+# must stay that way: a value that get would serve must never come out of a file this
+# refuses.
 ola_profile_holds_json() {
-  jq -e -s 'length == 1' "$1" >/dev/null 2>&1
+  jq -n -e '[limit(2; inputs)] | length == 1' "$1" >/dev/null 2>&1
 }
 
 # ola_profile_mode [dir] → integrated | discreet.
