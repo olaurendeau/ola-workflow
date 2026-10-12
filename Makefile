@@ -1,8 +1,8 @@
 # Same steps as the CI jobs, so `make check` is the CI.
 # Nothing has to be installed on the host: shellcheck runs in its own container.
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.11.0
-SHELL_FILES := hooks/guard.sh hooks/lib/profile.sh bin/ola-profile \
-	tests/run.sh tests/guard.test.sh tests/profile.test.sh \
+SHELL_FILES := hooks/guard.sh hooks/lib/profile.sh bin/ola-profile bin/ola-workflow-brief \
+	tests/run.sh tests/guard.test.sh tests/profile.test.sh tests/agents.test.sh \
 	scripts/spike/agent-identity.sh
 
 help: ## Shows this help

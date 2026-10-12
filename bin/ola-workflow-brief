@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# Prints the rules of the workflow for the project the session is working on, resolved
+# against its profile.
+#
+# This exists so that the rules are written once. Five agent prompts need the same facts —
+# which mode, which branch, which commands, which slots, what this mode forbids, what is
+# reserved for the human — and five copies of those facts would drift apart one justified
+# edit at a time. So each agent starts by running this, and the prompts hold only what is
+# specific to their role.
+#
+# Exit 1 and say so when no profile applies: a project that has not opted into the workflow
+# must get a clear refusal, not a set of guessed defaults.
+set -uo pipefail
+
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=hooks/lib/profile.sh
+. "$SELF_DIR/../hooks/lib/profile.sh"
+
+dir=${1:-$PWD}
+
+get() { # get <key> [default]
+  local out
+  if out=$(ola_profile_get "$1" "$dir" ""); then
+    printf '%s' "$out"
+  elif [ $# -gt 1 ]; then
+    printf '%s' "$2"
+  fi
+}
+
+profile=$(ola_profile_path "$dir") || {
+  cat >&2 <<'NOPROFILE'
+No ola-workflow profile applies to this project, so the workflow does not apply either.
+
+Nothing is wrong: the plugin stays out of the way until a project opts in. Tell the human
+this, and offer to run /ola-workflow:workflow-init, which inspects the repository and writes
+a profile. Do not guess a branch, a check command or a mode — a wrong guess here is how an
+agent pushes to the wrong branch or writes on a repository that did not ask for it.
+NOPROFILE
+  exit 1
+}
+mode=$(ola_profile_mode "$dir")
+base=$(get base_branch main)
+
+echo "# ola-workflow — the rules for this project"
+echo
+echo "Profile: $profile"
+echo "Mode:    $mode"
+echo "Base branch: $base — nobody pushes to it, every change arrives by pull request."
+echo
+echo "## Languages"
+echo "To the human:        $(get language.human en)"
+echo "Issues, PRs, commits, reviews: $(get language.artifacts en)"
+echo "Agent to agent:      $(get language.agents en)"
+echo
+echo "## Commands"
+printf 'Everything CI runs:  %s\n' "$(get check.full '(none declared — ask the human what proves this project works)')"
+printf 'The affected subset: %s\n' "$(get check.affected "$(get check.full '(none declared)')")"
+cleanup=$(get check.cleanup)
+[ -n "$cleanup" ] && printf 'After a check:        %s\n' "$cleanup"
+echo
+echo "Any {slot} in those commands is replaced by the slot you were given. Read a value"
+echo "with the slot already substituted: ola-profile get check.affected --slot <n>"
+echo
+echo "## Slots"
+printf 'Variable: %s · developers: %s · reviewer: %s\n' \
+  "$(get slots.var SLOT)" \
+  "$(get slots.developers '(none declared)' | tr '\n' ' ')" \
+  "$(get slots.reviewer '(none declared)')"
+echo "A slot is what keeps parallel work from colliding on ports, databases and containers."
+echo "Never run a command with another agent's slot."
+echo
+echo "## A reviewable pull request"
+printf 'At most %s changed lines' "$(get pr.max_lines 1000)"
+excluded=$(get pr.exclude)
+[ -n "$excluded" ] && printf ', excluding %s' "$(printf '%s' "$excluded" | tr '\n' ' ')"
+echo "."
+case $(get pr.title conventional) in
+  conventional) echo "Title in Conventional Commits form: it becomes the commit message on $base." ;;
+  *) echo "Title: no imposed form." ;;
+esac
+echo
+echo "## Escalation — what belongs to the human"
+cat <<'BASE'
+- Scope and product: what a user sees, departing from what was asked.
+- Dependencies: adding a runtime dependency, any major version upgrade.
+- Process and security: CI, rulesets, quality thresholds, hooks, agent definitions.
+- Release: whether to release, and the version. The release itself is the human's act.
+BASE
+extra=$(get escalation_extra)
+[ -n "$extra" ] && printf '%s\n' "$extra" | sed 's/^/- /'
+echo
+echo "Anything else, decide yourself and favour the option closest to existing code."
+echo "Record a decision where the work lives: Decision: … — Reason: …"
+echo
+echo "## Restricted commands"
+restricted=$(get commands)
+if [ -n "$restricted" ]; then
+  printf '%s' "$restricted" | jq -r '.[] | "- \(.cmd): \(.reason // (if .allow_args then "only some arguments are allowed" else "some arguments are refused" end))"'
+else
+  echo "(none declared)"
+fi
+hosts=$(get db_hosts_allowed)
+if [ -n "$hosts" ]; then
+  printf -- '- a database: only at %s. Anything else is production until proven otherwise.\n' \
+    "$(printf '%s' "$hosts" | tr '\n' ' ')"
+fi
+echo "The guard refuses the rest and says why. Knowing in advance saves a cycle; it is not"
+echo "an invitation to look for the boundary."
+echo
+ui_kind=$(get verify_ui.kind)
+if [ -n "$ui_kind" ]; then
+  echo "## Seeing it run"
+  printf 'This project can be looked at (%s). Use it when looking is the only proof:\n' "$ui_kind"
+  for step in up test shot down; do
+    value=$(get "verify_ui.$step")
+    [ -n "$value" ] && printf '  %-5s %s\n' "$step" "$value"
+  done
+  echo "Run down whatever the result, and remember {slot} applies here too."
+  echo
+fi
+echo "## Context — read these before writing anything"
+found=0
+for key in product architecture review_checklist glossary; do
+  path=$(get "context.$key")
+  if [ -n "$path" ]; then
+    printf '%-18s %s\n' "$key:" "$path"
+    found=1
+  fi
+done
+[ "$found" = 0 ] && echo "(none declared — the repository itself is the only source)"
+echo
+
+if [ "$mode" = integrated ]; then
+  cat <<INTEGRATED
+## Memory — integrated mode
+
+The forge is the memory. An epic is a GitHub issue labelled \`epic\`, a task is an issue
+labelled \`task\`, a review is a PR comment plus a commit status. Nothing important lives
+only in an agent's report: if it matters tomorrow, it is written on an issue or a PR today.
+
+## Merging — integrated mode
+
+Checked on the forge for the PR's current head SHA, never taken from a report:
+$(req=$(get merge.required_checks '(none declared)'); printf '%s' "$req" | sed 's/^/- check: /')
+- status $(get merge.review_status agent-review) successful on that same SHA
+- the branch is not behind $base
+- no file touched under: $(get merge.sensitive_paths '(none declared)' | tr '\n' ' ')
+- no sensitive pattern in the patch
+
+Then: gh pr merge <N> --squash --match-head-commit <the SHA you checked>
+
+A file in a sensitive path, or a sensitive pattern in the patch, means the human merges.
+Say so and stop; do not look for a way around it.
+INTEGRATED
+else
+  profile_dir=$(ola_profile_dir "$dir")
+  cat <<DISCREET
+## Memory — discreet mode
+
+This project did not ask for the workflow, so the workflow leaves no trace in it. The
+memory is local, under:
+
+  $profile_dir/runs/<slug>/
+
+with epic.md, tasks/ and reviews/<sha>.md. Keep the repository itself clean: git status
+must be as you found it.
+
+## What discreet mode forbids
+
+- Writing anything on the forge: creating or editing an issue, a label, a comment, a
+  review, a commit status. Reading is free.
+- Merging. Nobody merges, the coordinator included.
+
+And two actions need the human to confirm, because they are the only ones other
+contributors see: pushing a branch, and opening a pull request. Propose them, explain what
+they will contain, and wait. The guard will ask as well; do not read that question as a
+formality.
+DISCREET
+fi
