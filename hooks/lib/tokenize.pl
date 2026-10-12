@@ -109,6 +109,13 @@ sub split_line {
   my ($s) = @_;
   my $cur = '';
   my $i = 0;
+  # `|` separates commands everywhere except between a `case`'s `in` and the `)` that
+  # closes a pattern, where it separates alternatives. The information belongs here, at
+  # the cut, rather than in the normaliser downstream: the normaliser could only notice
+  # afterwards that the cut had gone through a pattern, and declare the segment unreadable
+  # — which cost an ask per multi-pattern arm. One flag, of the same nature as the ones
+  # this function already keeps for quotes and parens.
+  my $case_pattern = 0;
   my $flush = sub { push @segments, $cur if $cur =~ /\S/; $cur = '' };
 
   while ($i < length $s) {
@@ -174,6 +181,12 @@ sub split_line {
     # `>&` and `&>` are redirections, not separators.
     if ($c eq '&' && ($cur =~ /[<>]\z/ || substr($s, $i + 1, 1) eq '>')) { $cur .= $c; $i++; next }
 
+    # Entering a case pattern: after `in`, up to the `)` that closes it.
+    if (!$case_pattern && $cur =~ /(?:^|[\s;])case\s[^)]*\sin\s*\z/) { $case_pattern = 1 }
+    if ($case_pattern) {
+      if ($c eq '|') { $cur .= $c; $i++; next }          # an alternative, not a pipeline
+      $case_pattern = 0 if $c eq ')';
+    }
     if ($c =~ /[;&|\n]/) { $flush->(); $i++; next }
 
     $cur .= $c; $i++;
@@ -214,6 +227,29 @@ my %value_opts = (
   env     => qr/^-(?:u|C|S)$/,
   stdbuf  => qr/^-(?:i|o|e)$/,
   xargs   => qr/^-(?:I|i|L|n|P|s|d|E|a)$/,
+  exec    => qr/^-(?:a)$/,
+  time    => qr/^-(?:f|o)$/,
+);
+
+# And which take none. The two tables together are the point: an option in neither makes
+# the segment unreadable, because *assuming* an unknown option is boolean is how
+# `exec -a innocent gh pr merge` came to be named `innocent` — the same defect as
+# `sudo -u x`, returning through the fallback instead of through a missing row. The safe
+# default for an unknown option is an admission, never a guess.
+my %bool_opts = (
+  sudo    => qr/^-(?:A|b|E|H|i|k|K|l|n|P|S|s|V|v)$/,
+  doas    => qr/^-(?:L|n|s)$/,
+  nice    => qr/^$/,
+  ionice  => qr/^-(?:t)$/,
+  timeout => qr/^-(?:-foreground|-preserve-status|v)$/,
+  env     => qr/^-(?:i|0|v)$/,
+  stdbuf  => qr/^$/,
+  xargs   => qr/^-(?:0|p|r|t|x)$/,
+  exec    => qr/^-(?:c|l)$/,
+  command => qr/^-(?:p|v|V)$/,
+  nohup   => qr/^$/,
+  setsid  => qr/^-(?:c|f|w)$/,
+  builtin => qr/^$/,
 );
 
 # Builtins that run code the text does not contain.
@@ -286,6 +322,7 @@ sub command_word {
   my @w = words($segment);
   my @walked;
   my $in_case = 0;
+  my $after_function = 0;
 
   while (@w) {
     my $w = $w[0];
@@ -303,11 +340,23 @@ sub command_word {
     }
 
     # Reserved words and the heads of compound statements.
-    if ($reserved{$w}) { $in_case = 1 if $w eq 'case'; push @walked, $w; shift @w; next }
-    # A function definition header. Without this the body of `f() { gh pr merge; }` hides
-    # behind the command word `f()`, and a rule looking for the inner command finds
-    # nothing — measured, it did.
-    if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*\(\)$/) { push @walked, $w; shift @w; next }
+    if ($reserved{$w}) {
+      $in_case = 1 if $w eq 'case';
+      $after_function = 1 if $w eq 'function';
+      push @walked, $w; shift @w; next;
+    }
+    # A function definition header, in all three spellings bash accepts. Only `f ()` was
+    # recognised, so `f(){ gh …; }` was named `f(){` and `function f { gh …; }` was named
+    # `f` — both readable, both wrong, and the body is in the same segment so the command
+    # is within reach. The `function` keyword is handled by the flag below, because the
+    # name follows it as a separate word.
+    if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*\(\)\{?$/) {
+      # Clearing the flag matters: `function f() { gh …` has both spellings at once, and
+      # leaving it set made the flag swallow `gh` and name the command `pr`.
+      $after_function = 0;
+      push @walked, $w; shift @w; next;
+    }
+    if ($after_function) { push @walked, $w; shift @w; $after_function = 0; next }
     # An assignment in front of a command: FOO=1 gh …
     if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*=/) { push @walked, $w; shift @w; next }
     # A redirection in front of a command: 2>/dev/null gh …
@@ -350,22 +399,27 @@ sub command_word {
           push @walked, shift @w if @w;                             # and its value
           next;
         }
-        # A combined or unknown option: guessing its arity is how a value becomes the
-        # command word, so say so instead.
-        if ($w[0] =~ /^--?[A-Za-z0-9-]+=/ || $w[0] =~ /^-[A-Za-z0-9]$/
-            || $w[0] =~ /^--[A-Za-z0-9-]+$/) {
-          push @walked, shift @w; next;                             # a boolean option
-        }
+        # An option carrying its own value needs nothing after it.
+        if ($w[0] =~ /^--?[A-Za-z0-9-]+=/) { push @walked, shift @w; next }
+        # A known boolean takes nothing.
+        my $boolean = $bool_opts{$name};
+        if ($boolean && $w[0] =~ $boolean) { push @walked, shift @w; next }
         return ($name, join(' ', @walked, @w),
                 "$name is given the option $w[0], and whether it takes a value is unknown here");
       }
       next;
     }
 
-    # A label reaching this position means the split cut inside a construct it does not
-    # parse — `case $x in a|b) gh …` splits at the `|` of the pattern, so the arm's command
-    # ends up behind `b)`. The implementation this is ported from survives that by matching
-    # the segment's text, which is robustness by accident; normalising the command word is
+    # A `pattern)` label at the head of a segment is the second and later arms of a case:
+    # `;;` ends an arm, the split cuts there, and the next segment opens with the label.
+    # Skipping it recovers the arm's command. It must hold no expansion, because `$()`
+    # also ends in `)` and has to stay visible as an unreadable command word.
+    if (!@walked && $bare =~ /\)$/ && $bare !~ /[\$`]/) {
+      push @walked, $w; shift @w; next;
+    }
+    # A label anywhere else means the split cut inside something this splitter does not
+    # parse. The implementation this is ported from survives such cases by matching the
+    # segment's text, which is robustness by accident; normalising the command word is
     # more precise and loses exactly this, so the loss is declared rather than silent.
     if ($bare =~ /\)$/ && $bare !~ /[\$`]/) {
       return ($name, join(' ', @walked, $w),

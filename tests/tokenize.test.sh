@@ -104,12 +104,25 @@ sees 'negation'       '! gh --version' gh
 sees 'subshell'       '(gh --version)' gh
 sees 'group'          '{ gh --version; }' gh
 sees 'function body'  'f() { gh --version; }; f' gh
+# Four spellings bash accepts; one was recognised, and the other three named the function
+# instead of its body while reporting readable — a miss in silence, not an ask.
+sees 'function no space' 'f(){ gh --version; }; f' gh
+sees 'function keyword'  'function f { gh --version; }; f' gh
+sees 'function both'     'function f() { gh --version; }; f' gh
 sees 'for loop'       'for i in 1; do gh --version; done' gh
 sees 'while loop'     'n=0; while [ $n = 0 ]; do n=1; gh --version; done' gh
 sees 'if'             'if true; then gh --version; fi' gh
 sees 'case arm'       'case x in x) gh --version ;; esac' gh
 
 echo "--- wrappers: the first word is not the command"
+sees 'exec -a'        '(exec -a innocent gh --version)' gh
+sees 'xargs -0'       'echo x | xargs -0 gh --version' gh
+# Two more rows the shell half cannot measure, for reasons worth writing down: `command -p`
+# deliberately uses the *default* PATH, so the stub is out of reach by design, and `sudo -n`
+# fails rather than prompt. Their class — a wrapper's boolean option — is measured by the
+# `xargs -0` row above.
+names 'command -p'    'command -p gh --version' gh
+names 'sudo -n'       'sudo -n gh --version' gh
 sees 'exec'           '(exec gh --version)' gh
 sees 'command'        'command gh --version' gh
 sees 'env'            'env FOO=1 gh --version' gh
@@ -155,7 +168,11 @@ asks 'source'         '. ./s.sh' 'not in this text'
 asks 'source word'    'source ./s.sh' 'not in this text'
 asks 'trap'           'trap "gh --version" EXIT' 'not in this text'
 asks 'unknown option' 'nice -q10 gh --version' 'whether it takes a value'
-asks 'cut case arm'   'case $x in a|b) gh --version ;; esac' 'the split cut inside it'
+asks 'unknown option 2' 'exec -Z gh --version' 'whether it takes a value'
+# The case alternation used to be declared unreadable, which cost an ask per
+# multi-pattern arm; the `|` state now lives in the splitter, where the cut happens.
+sees 'case alternation' 'case x in a|x) gh --version ;; esac' gh
+sees 'case later arm'   'case x in a) true ;; x) gh --version ;; esac' gh
 
 echo "--- the separator that is not one, and the text that is not code"
 total=$((total + 1))
