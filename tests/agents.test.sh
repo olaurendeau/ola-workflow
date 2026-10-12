@@ -26,7 +26,7 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 # globbed, so that `probe` — which exists to dump a hook payload, not to work — is not held
 # to rules about modes and slots. Both directions are checked below, so a new file cannot
 # quietly escape either set.
-WORKFLOW_ROLES="coordinator developer pr-reviewer"
+WORKFLOW_ROLES="coordinator product-designer architect developer pr-reviewer"
 DIAGNOSTICS="probe"
 
 AGENTS=()
@@ -78,7 +78,7 @@ for f in "${AGENTS[@]}"; do
   fi
 done
 # The coordinator reads a Status from each of the others, and dispatches each of them.
-for role in developer pr-reviewer; do
+for role in product-designer architect developer pr-reviewer; do
   if grep -q 'Status:' "$ROOT/agents/$role.md"; then
     ok "$role: reports a Status, which the coordinator reads first"
   else
@@ -201,8 +201,19 @@ if [ -s "$coord" ]; then
       ok "coordinator.md names $role only with its prefix"
     fi
   done
-  prefixed=$(grep -c 'ola-workflow:[a-z-]*' "$coord")
-  if [ "$prefixed" -ge 4 ]; then ok "coordinator.md dispatches four namespaced agents"; else ko "coordinator.md mentions only $prefixed namespaced agents"; fi
+  # One assertion per role, derived from the declared set — not a count. A count of four
+  # for a team of five let an agent be dropped from the coordinator entirely while the
+  # suite stayed green: the file stayed flawless, nobody dispatched it, and the absence
+  # assertion above was satisfied *by* the disappearance. An absence needs something to be
+  # absent from.
+  for role in $WORKFLOW_ROLES; do
+    if [ "$role" = coordinator ]; then continue; fi
+    if grep -q "ola-workflow:$role" "$coord"; then
+      ok "coordinator.md dispatches ola-workflow:$role"
+    else
+      ko "coordinator.md never dispatches $role, so that agent is one nobody uses"
+    fi
+  done
 else
   ko "coordinator.md is missing"
 fi

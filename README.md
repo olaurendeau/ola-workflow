@@ -24,16 +24,21 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 ## Status
 
-Early, but it does something now. In place: the manifests, the CI, the test harness, the
-answer to how a plugin agent is identified (see [Agent identity](#agent-identity)), the
-project profile with its schema and its `ola-profile` CLI, and **three of the five agents** —
-a coordinator that dispatches, a developer that builds test-first in its own worktree, and
-an independent reviewer. The guard is still **inert**: it allows everything, so nothing yet
-stops an agent from doing what the workflow says it must not. Coming next:
+**The team is complete, and nothing enforces it yet.** In place: the manifests, the CI, the
+test harness, the answer to how a plugin agent is identified (see
+[Agent identity](#agent-identity)), the project profile with its schema and its
+`ola-profile` CLI, and the **five agents** — a coordinator that frames and dispatches, a
+product designer that turns a request into criteria a test can prove, an architect that
+splits an epic into reviewable tasks, developers that build test-first in their own
+worktrees, and an independent reviewer.
+
+The guard is still **inert**. It allows everything, so the rules these agents follow are
+rules nothing applies: an agent that follows a rule and an agent that is prevented from
+breaking it are not the same thing. Until the guard is real, use this where a mistake is
+cheap — a new project, not one that deploys on merge.
 
 | step | content |
 |---|---|
-| A5b | the product-designer and architect agents |
 | A3 | the real guard, ported from `mcp-camptocamp` and driven by the profile |
 | A4 | the conditional merge gate |
 | A6 | the `workflow-init` and `verify-ui` skills, then 1.0.0 |
