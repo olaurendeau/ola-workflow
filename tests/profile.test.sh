@@ -558,6 +558,26 @@ eq "integrated discreet" \
   "$(jq -r '.properties.mode.enum | join(" ")' "$ROOT/schema/profile.schema.json")" \
   "schema: the modes are exactly the ones ola_profile_mode accepts"
 
+# --- A broken jq program is not an answer --------------------------------------------
+# The library signals "no such key" and "unusable profile" with halt_error codes chosen to
+# stay clear of jq's own: 3 is a compile error and 4 is `-e` with no output. If a signal
+# shared a code, a typo in the program would be read as an answer — and `get` is the one
+# reader that turns an answer into "use the caller's default", so the default would be
+# served on a perfectly good profile. This pins it by breaking the gate on purpose.
+total=$((total + 1))
+broken_gate_status=$(
+  OLA_PROFILE_GATE='this is not jq'   bash -c ". '$ROOT/hooks/lib/profile.sh'
+    OLA_PROFILE_GATE='this is not jq'
+    ola_profile_get base_branch '$WORK/integrated' >/dev/null 2>&1
+    echo \$?"
+)
+if [ "$broken_gate_status" = 1 ]; then
+  echo "ok    a non-compiling gate reads as unusable, not as an absent key"
+else
+  echo "FAIL  a non-compiling gate returned $broken_gate_status, which get would treat as an absent key"
+  failures=$((failures + 1))
+fi
+
 # --- The remote is only looked up when a discreet profile could exist -----------------
 # The guard of A3 runs this resolution on every PreToolUse, so the cost is part of the
 # contract: resolving a remote takes three subprocesses, and someone who has never written

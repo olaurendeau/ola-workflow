@@ -9,6 +9,14 @@ for tool in jq perl; do
   command -v "$tool" >/dev/null || { echo "tests need $tool on PATH" >&2; exit 2; }
 done
 
+# hooks/lib/profile.sh uses limit/2 and halt_error/1, both jq 1.5 and later.
+case $(jq --version 2>/dev/null) in
+  jq-1.[0-4]*|jq-0*)
+    echo "tests need jq >= 1.5 for limit/2 and halt_error/1, found $(jq --version)" >&2
+    exit 2
+    ;;
+esac
+
 failed=()
 for suite in tests/*.test.sh; do
   [ -f "$suite" ] || continue

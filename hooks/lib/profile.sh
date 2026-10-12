@@ -271,8 +271,16 @@ ola_profile_dir() {
 # It fails with `halt_error` rather than yielding nothing, because `jq -e` reports a
 # legitimate `false` the same way it reports no output at all: a profile key whose value is
 # `false` must not read as an unusable profile.
+#
+# The signal is 7, and the "no such key" signal below is 6, to stay clear of the codes jq
+# reserves for itself: 3 is a compile error and 4 is `-e` with no output. Sharing a code
+# would make a broken jq program indistinguishable from an answer — and `get` is the one
+# reader that turns one of its answers into "use the caller's default", so a typo in the
+# program would hand out defaults on a perfectly good profile.
+#
+# `limit/2` and `halt_error/1` are jq 1.5 and later; tests/run.sh checks that.
 OLA_PROFILE_GATE='[limit(2; inputs)]
-  | if length == 1 and (.[0] | type) == "object" then .[0] else halt_error(4) end'
+  | if length == 1 and (.[0] | type) == "object" then .[0] else halt_error(7) end'
 
 ola_profile_readable() {
   jq -n "$OLA_PROFILE_GATE" "$1" >/dev/null 2>&1
@@ -320,7 +328,7 @@ ola_profile_get() {
   # yielding null, and on a readable profile that still only means "no such key".
   out=$(jq -r -n --arg key "$key" "$OLA_PROFILE_GATE"'
     | (try getpath($key | split(".")) catch null)
-    | if . == null then halt_error(3)
+    | if . == null then halt_error(6)
       elif type == "array" and (map(type == "object" or type == "array") | any | not) then .[]
       elif type == "object" or type == "array" then tojson
       else .
@@ -328,7 +336,7 @@ ola_profile_get() {
   status=$?
   case $status in
     0) ;;
-    3) return 3 ;;
+    6) return 3 ;;
     *) return 1 ;;
   esac
   if [ -n "$slot" ]; then
