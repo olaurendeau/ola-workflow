@@ -24,17 +24,32 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 ## Status
 
-Early. In place: the manifests, the CI, the test harness, the answer to how a plugin agent
-is identified (see [Agent identity](#agent-identity)), and the project profile with its
-schema, its resolution and the `ola-profile` CLI. The guard is still **inert** — it allows
-everything — and `probe` is the only agent. Coming next:
+Early, but it does something now. In place: the manifests, the CI, the test harness, the
+answer to how a plugin agent is identified (see [Agent identity](#agent-identity)), the
+project profile with its schema and its `ola-profile` CLI, and **three of the five agents** —
+a coordinator that dispatches, a developer that builds test-first in its own worktree, and
+an independent reviewer. The guard is still **inert**: it allows everything, so nothing yet
+stops an agent from doing what the workflow says it must not. Coming next:
 
 | step | content |
 |---|---|
+| A5b | the product-designer and architect agents |
 | A3 | the real guard, ported from `mcp-camptocamp` and driven by the profile |
 | A4 | the conditional merge gate |
-| A5 | the five workflow agents |
 | A6 | the `workflow-init` and `verify-ui` skills, then 1.0.0 |
+
+### Where the rules live
+
+The agents share one source: `ola-workflow-brief`, on the PATH beside `ola-profile`. It
+resolves the profile and prints the rules that follow from it — mode, languages, base
+branch, commands, slots, escalation, restricted commands, where the memory goes, what the
+merge gate requires. Each agent starts by running it, and each prompt holds only what is
+specific to its role.
+
+That is not tidiness. Five prompts restating the same facts drift apart one justified edit
+at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
+name a base branch, a check command, a review status, a slot value or a line budget, since
+those belong to the brief. Run it against an agent that hard-codes one and it says which.
 
 ## How a project is configured
 
