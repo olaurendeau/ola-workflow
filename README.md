@@ -24,13 +24,13 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 ## Status
 
-Early. This is the A1 skeleton: the manifests, the CI, the test harness, and the answer to
-how a plugin agent is identified (see [Agent identity](#agent-identity)). The guard is
-**inert** — it allows everything — and `probe` is the only agent. Coming next:
+Early. In place: the manifests, the CI, the test harness, the answer to how a plugin agent
+is identified (see [Agent identity](#agent-identity)), and the project profile with its
+schema, its resolution and the `ola-profile` CLI. The guard is still **inert** — it allows
+everything — and `probe` is the only agent. Coming next:
 
 | step | content |
 |---|---|
-| A2 | the project profile: JSON schema, resolution, `ola-profile` CLI |
 | A3 | the real guard, ported from `mcp-camptocamp` and driven by the profile |
 | A4 | the conditional merge gate |
 | A5 | the five workflow agents |
@@ -40,14 +40,59 @@ how a plugin agent is identified (see [Agent identity](#agent-identity)). The gu
 
 The plugin does nothing until it finds a profile. It looks in two places, in order:
 
-1. `<project>/.claude/workflow.json` — **integrated** mode, committed with the project;
-2. `~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json` — **discreet** mode,
+1. `~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json` — **discreet** mode,
    nothing in the project at all. The identity comes from
-   `git remote get-url upstream || git remote get-url origin`, so it works from worktrees
-   too.
+   `git remote get-url upstream || git remote get-url origin`, so a fork is known by the
+   repository it contributes to, and a worktree resolves like its checkout;
+2. `<project>/.claude/workflow.json` — **integrated** mode, committed with the project.
+
+**Your own profile wins over the one a repository ships**, because the two are not equally
+trusted: a third-party repository must not be able to turn the discreet profile you chose
+for it into an integrated one, and so grant itself writes to the forge and allowances on
+commands. Use your own profile when you want the last word.
 
 No profile means no effect: the hook exits 0 and the agents offer to run
 `/ola-workflow:workflow-init`.
+
+The file is described by [`schema/profile.schema.json`](schema/profile.schema.json), which
+is also what validates it — point your editor at it:
+
+| key | what it decides |
+|---|---|
+| `mode` | **required**: `integrated` or `discreet` |
+| `language` | what to write in, for the human, the artifacts and the agents |
+| `base_branch` | the branch PRs target and nobody pushes to |
+| `check` | `full` (what CI runs), `affected` (the subset, may contain `{slot}`), `cleanup` |
+| `slots` | how parallel agents avoid colliding on ports, databases and containers |
+| `pr` | `max_lines`, `exclude`, `title` |
+| `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
+| `commands` | per-command `allow_args` / `deny_args` rules the guard applies |
+| `db_hosts_allowed` | the databases an agent may connect to |
+| `context` | the documents the agents read: product, architecture, review checklist, glossary |
+| `verify_ui` | how a change is seen running |
+| `escalation_extra` | what this project reserves for the human |
+
+Read it with `ola-profile`, which is on the PATH of every Bash call once the plugin is
+installed:
+
+```bash
+ola-profile mode                              # integrated | discreet
+ola-profile path                              # the file in use
+ola-profile get check.affected --slot 3       # {slot} replaced
+ola-profile get base_branch main              # with a default
+ola-profile get merge.required_checks         # an array prints one item per line
+ola-profile validate                          # every problem, or silence
+```
+
+Exit status 1 means the value asked for is not available: no profile applies to this
+project (not an error, just an opt-out), the profile cannot be read, or `get` found no such
+key and no default was given. A default stands in for a missing key, never for a missing or
+unreadable profile — inventing a configuration is how a truncated file ends up reporting no
+protected branch and no required checks.
+
+This repository carries its own profile in
+[`.claude/workflow.json`](.claude/workflow.json): the workflow is developed with the
+workflow, which is the only honest test of how generic it is.
 
 |  | integrated | discreet |
 |---|---|---|

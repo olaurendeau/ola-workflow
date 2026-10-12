@@ -1,0 +1,38 @@
+{
+  "$schema": "../schema/profile.schema.json",
+  "mode": "integrated",
+  "language": {
+    "human": "fr",
+    "artifacts": "fr",
+    "agents": "en"
+  },
+  "base_branch": "main",
+  "check": {
+    "full": "make check",
+    "affected": "make check"
+  },
+  "slots": {
+    "var": "SLOT",
+    "developers": [1, 2],
+    "reviewer": 9
+  },
+  "pr": {
+    "max_lines": 1000,
+    "title": "conventional"
+  },
+  "merge": {
+    "required_checks": ["checks"],
+    "review_status": "agent-review",
+    "sensitive_paths": [
+      ".github/**",
+      ".claude-plugin/**",
+      ".claude/**",
+      "hooks/guard.sh",
+      "Makefile"
+    ]
+  },
+  "escalation_extra": [
+    "changing what the guard forbids",
+    "releasing a version or publishing the marketplace"
+  ]
+}

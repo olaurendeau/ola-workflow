@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Reads the profile of the project this session is working on.
+#
+# A plugin's bin/ is on the PATH of every Bash call, so agents and hooks can simply run
+# `ola-profile get check.affected --slot 3` instead of knowing where profiles live.
+set -uo pipefail
+
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=hooks/lib/profile.sh
+. "$SELF_DIR/../hooks/lib/profile.sh"
+
+usage() {
+  cat <<'USAGE'
+usage: ola-profile [-C <dir>] [--slot <n>] <command> [args]
+
+commands:
+  path                  the profile file in use
+  dir                   the directory holding it (in discreet mode, also the agents' memory)
+  id                    <host>/<owner>/<repo>, from `git remote get-url upstream || origin`
+  mode                  integrated | discreet
+  get <key> [default]   one value, dotted path; an array prints one item per line
+  show                  the whole profile
+  validate [file]       checks a profile against the schema; prints every problem
+  help
+
+options:
+  -C <dir>     resolve as if run from this directory (default: the current one)
+  --slot <n>   replace {slot} in the value printed by `get`
+
+Exit status 1 means the value asked for is not available: no profile applies to this
+project (which is not an error, just an opt-out), the profile cannot be read, or `get`
+found no such key and no default was given. Status 2 is a usage error.
+USAGE
+}
+
+dir=$PWD
+slot=
+
+# An option whose value is missing must fail, not be shrugged off: `shift 2` with a single
+# argument left shifts nothing and returns non-zero, so swallowing that status would spin
+# this loop forever — and A3 calls this binary from a PreToolUse hook.
+need_value() {
+  [ "$1" -ge 2 ] || { echo "ola-profile: $2 needs a value" >&2; exit 2; }
+  [ -n "$3" ] || { echo "ola-profile: $2 needs a value" >&2; exit 2; }
+}
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    -C) need_value "$#" -C "${2:-}"; dir=$2; shift 2 ;;
+    --slot) need_value "$#" --slot "${2:-}"; slot=$2; shift 2 ;;
+    -h|--help|help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) echo "ola-profile: unknown option $1" >&2; usage >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+[ $# -gt 0 ] || { usage >&2; exit 2; }
+command=$1
+shift
+
+case $command in
+  path) ola_profile_path "$dir" ;;
+  dir) ola_profile_dir "$dir" ;;
+  id) ola_profile_id "$dir" ;;
+  mode) ola_profile_mode "$dir" ;;
+  get)
+    [ $# -gt 0 ] || { echo "ola-profile get: a key is required" >&2; exit 2; }
+    ola_profile_get "$1" "$dir" "$slot"
+    case $? in
+      0) ;;
+      # The profile is readable and simply has no such key, so a default may stand in and
+      # callers can write `ola-profile get base_branch main` for optional keys.
+      3) if [ $# -gt 1 ]; then printf '%s\n' "${2//\{slot\}/$slot}"; else exit 1; fi ;;
+      # No profile, or one that cannot be read: a default here would invent a
+      # configuration for a project that has none, or paper over a truncated file.
+      *) exit 1 ;;
+    esac
+    ;;
+  show)
+    file=$(ola_profile_path "$dir") || exit 1
+    ola_profile_readable "$file" || { echo "ola-profile: $file: not valid JSON" >&2; exit 1; }
+    jq . "$file"
+    ;;
+  validate)
+    if [ $# -gt 0 ]; then
+      ola_profile_validate "$1"
+    else
+      [ -d "$dir" ] || { echo "ola-profile: $dir: no such directory" >&2; exit 2; }
+      ( cd "$dir" && ola_profile_validate )
+    fi
+    ;;
+  *) echo "ola-profile: unknown command $command" >&2; usage >&2; exit 2 ;;
+esac
