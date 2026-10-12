@@ -250,6 +250,15 @@ done
 # a truth — and a test that fails on correct content leaves an author choosing between
 # deleting a true sentence and disabling the test. Under pressure the test loses.
 GUARD_SUITE=$ROOT/tests/guard.test.sh
+# The witness, because `expected_decisions = 0` is an absence and an absence passes
+# vacuously: if that suite renames its helper, the derivation stays at zero and reads as if
+# it works. So assert the vocabulary it greps for exists at all.
+suite_cases=$(grep -cE '^[[:space:]]*check (allow|deny|ask)' "$GUARD_SUITE" || true)
+if [ "$suite_cases" -gt 0 ]; then
+  ok "the guard suite states $suite_cases decisions in the form this derivation reads"
+else
+  ko "the guard suite states no decision in the form read here, so the derivation is blind"
+fi
 expected_decisions=$(grep -cE '^[[:space:]]*check (deny|ask)' "$GUARD_SUITE" || true)
 
 guard_decides=no
