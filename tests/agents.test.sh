@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016
+#   Every `$` in a command line below is part of what is being tested — `$(echo gh)`,
+#   `${u:-gh}`, `$c`, `$EDITOR` — and expanding it here would test nothing.
 # The agents are prompts, so what is testable about them is not what they say but what they
 # must not say, and whether the single source they all cite stays the single source.
 #
@@ -248,38 +251,55 @@ done
 # guard in a function, and write the decision emitters before wiring them. The assertion
 # would then skip itself while printing a line that reads like a pass, on exactly the
 # commit where the claim starts mattering. Behaviour cannot be fooled that way.
-# Derived, not enumerated. Five hand-written Bash commands sampled one axis while holding
-# tool_name at Bash — and merge.sensitive_paths is about *files*, so the rule enforcing it
-# inspects Write and Edit. A guard denying a Write to .github/ was invisible to all five
-# probes, and a sixth Bash command would have fixed that instance and left the next.
+# The question is what a user experiences, which is neither "does the guard have rules"
+# nor "does its suite expect decisions". A guard can hold every rule and ship them turned
+# off — which is exactly what it does today, on purpose, because the rate of `ask` on real
+# sessions is not measured yet. So the probe asks the guard, with a profile, in the
+# environment it ships with, and a prompt may claim only what that answers.
 #
-# So the question is asked of the place where the guard's decisions are already written:
-# tests/guard.test.sh is a table of (expectation, agent, command) that drives guard.sh
-# directly, and that suite has to pass. Every rule A3 adds extends this probe by itself.
-#
-# This matters more than tidiness: a false "inert" reading does not miss a lie, it forbids
-# a truth — and a test that fails on correct content leaves an author choosing between
-# deleting a true sentence and disabling the test. Under pressure the test loses.
+# Earlier versions got this wrong twice: inferring inertness from the text of guard.sh
+# (broken by the two refactors A3 performs) and from one Bash payload (blind to a rule
+# about files). This asks the shipped artefact the user's own question.
 GUARD_SUITE=$ROOT/tests/guard.test.sh
-# The witness, because `expected_decisions = 0` is an absence and an absence passes
-# vacuously: if that suite renames its helper, the derivation stays at zero and reads as if
-# it works. So assert the vocabulary it greps for exists at all.
-suite_cases=$(grep -cE '^[[:space:]]*check (allow|deny|ask)' "$GUARD_SUITE" || true)
+suite_cases=$(grep -cE '^[[:space:]]*(check|enforced) (allow|deny|ask)' "$GUARD_SUITE" || true)
 if [ "$suite_cases" -gt 0 ]; then
   ok "the guard suite states $suite_cases decisions in the form this derivation reads"
 else
   ko "the guard suite states no decision in the form read here, so the derivation is blind"
 fi
-expected_decisions=$(grep -cE '^[[:space:]]*check (deny|ask)' "$GUARD_SUITE" || true)
+
+probe_repo=$WORK/guard-probe
+mkdir -p "$probe_repo/.claude"
+git -C "$probe_repo" -c init.defaultBranch=main init -q 2>/dev/null
+printf '{"mode":"integrated","base_branch":"main"}\n' >"$probe_repo/.claude/workflow.json"
 
 guard_decides=no
-if [ "$expected_decisions" -gt 0 ]; then
-  guard_decides=yes
+for cmd in '$(echo gh) pr merge 7' 'git push --force origin main' 'gh pr merge 7 --squash' \
+           'eval gh pr merge 7' 'npm publish'; do
+  said=$(jq -n --arg c "$cmd" --arg d "$probe_repo" \
+    '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"probe",cwd:$d,
+      agent_type:"ola-workflow:developer",tool_input:{command:$c}}' |
+    "$ROOT/hooks/guard.sh" 2>/dev/null)
+  status=$?
+  if [ -n "$said" ] || [ "$status" != 0 ]; then
+    guard_decides=yes
+    break
+  fi
+done
+
+# The witness: the same guard, with enforcement on, does decide. Without it this block
+# would read "inert" just as happily from a guard that is broken, or from a profile the
+# fixture failed to write — and then no prompt could ever be allowed to mention the guard.
+enforced_said=$(jq -n --arg d "$probe_repo" \
+  '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"probe2",cwd:$d,
+    agent_type:"ola-workflow:developer",tool_input:{command:"$(echo gh) pr merge"}}' |
+  OLA_WORKFLOW_GUARD=enforce "$ROOT/hooks/guard.sh" 2>/dev/null)
+if [ -n "$enforced_said" ]; then
+  ok "witness: the guard does decide when enforcement is on, so this probe measures something"
+else
+  ko "witness: the guard decides nothing even when enforcing — the probe below is vacuous"
 fi
 
-# And the inverse, which the derivation alone would miss: a guard that decides something
-# its own suite never expects. One probe per decision verb the hook can emit is enough to
-# notice, because any of them means the guard is no longer inert.
 if [ "$guard_decides" = no ]; then
   for payload in \
     '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin HEAD"}}' \
