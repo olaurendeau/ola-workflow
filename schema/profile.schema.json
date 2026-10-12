@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/olaurendeau/ola-workflow/schema/profile.schema.json",
   "title": "ola-workflow project profile",
-  "description": "Everything the workflow needs to know about one project. It lives either in ~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json, which is yours and wins, or in <project>/.claude/workflow.json, which the project commits. Where the file lives says who owns it; the mode key below says how the workflow behaves. Any string value may hold {slot}, which `ola-profile get --slot N` replaces with the slot in use: that is how parallel agents get their own ports, databases and containers.",
+  "description": "Everything the workflow needs to know about one project. It lives either in ~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json, which is yours and wins, or in <project>/.claude/workflow.json, which the project commits. Where the file lives says who owns it; the mode key below says how the workflow behaves. Any string value may hold {slot}, which `ola-profile get --slot N` replaces with the slot in use: that is how parallel agents get their own ports, databases and containers. Every glob in this file follows git's pathspec `:(glob)` dialect, the one .gitignore uses: `*` does not cross a `/`, `**` does. An implementation should let git match them rather than re-implement the dialect, because a shell `case` — where `*` does cross `/` — would silently widen `pr.exclude` and `sensitive_patterns[].exclude`, and widening those two removes coverage.",
   "type": "object",
   "required": ["mode"],
   "additionalProperties": false,
