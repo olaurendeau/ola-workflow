@@ -201,8 +201,19 @@ if [ -s "$coord" ]; then
       ok "coordinator.md names $role only with its prefix"
     fi
   done
-  prefixed=$(grep -c 'ola-workflow:[a-z-]*' "$coord")
-  if [ "$prefixed" -ge 4 ]; then ok "coordinator.md dispatches four namespaced agents"; else ko "coordinator.md mentions only $prefixed namespaced agents"; fi
+  # One assertion per role, derived from the declared set — not a count. A count of four
+  # for a team of five let an agent be dropped from the coordinator entirely while the
+  # suite stayed green: the file stayed flawless, nobody dispatched it, and the absence
+  # assertion above was satisfied *by* the disappearance. An absence needs something to be
+  # absent from.
+  for role in $WORKFLOW_ROLES; do
+    if [ "$role" = coordinator ]; then continue; fi
+    if grep -q "ola-workflow:$role" "$coord"; then
+      ok "coordinator.md dispatches ola-workflow:$role"
+    else
+      ko "coordinator.md never dispatches $role, so that agent is one nobody uses"
+    fi
+  done
 else
   ko "coordinator.md is missing"
 fi
