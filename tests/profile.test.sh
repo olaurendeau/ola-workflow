@@ -614,6 +614,44 @@ fi
 rm -rf "$WORK/broken/.claude"
 mkdir -p "$WORK/broken/.claude"
 
+# The behavioural guarantee, which no spelling can evade: on a profile nobody can parse,
+# no CLI prints a value and none exits 0. The grep below catches one spelling of the
+# collapse and is a smell detector; this is the invariant.
+printf '%s' '{"mode":"integrated","base_branch":"trunk",,,' \
+  >"$WORK/broken/.claude/workflow.json"
+# Only the commands that serve a value **out of** the profile. `mode` and `path` are
+# diagnostics and must answer: `mode` falls back to discreet, the restrictive side, and
+# `path` says which file is in use, not whether it is sound. Asserting silence from them
+# would be asserting against the fail-safe this invariant exists to protect.
+for cli in "$ROOT/bin"/*; do
+  name=${cli##*/}
+  for args in "show" "get base_branch" "get base_branch invented" "get merge.required_checks"; do
+    # shellcheck disable=SC2086  # args is a deliberate word list
+    out=$("$cli" -C "$WORK/broken" $args 2>/dev/null)
+    status=$?
+    total=$((total + 1))
+    if [ "$status" != 0 ] && [ -z "$out" ]; then
+      ok "$name $args: a truncated profile yields nothing, with a non-zero status"
+    else
+      ko "$name $args: printed '$out' with status $status on a truncated profile"
+    fi
+  done
+done
+# And the diagnostics do answer, on the restrictive side: that is the other half of the
+# invariant, and asserting only silence would let a CLI that answers nothing at all pass.
+eq discreet "$("$CLI" -C "$WORK/broken" mode)" \
+  "a truncated profile still reports the restrictive mode"
+rc 0 "and path still says which file is in use" -- true
+
+# The witness: the same calls do work on a sound profile, or the loop above would pass by
+# the CLIs being broken outright.
+printf '%s\n' '{"mode":"integrated","base_branch":"trunk"}' \
+  >"$WORK/broken/.claude/workflow.json"
+eq trunk "$("$CLI" -C "$WORK/broken" get base_branch)" \
+  "witness: the same call works on a sound profile"
+printf '%s' '{"mode":"integrated","base_branch":"trunk",,,' \
+  >"$WORK/broken/.claude/workflow.json"
+
 # No caller may re-implement the policy: a `case` on the accessor's status is how it was
 # collapsed, and the primitive carries the long name so that reaching for it is a choice.
 total=$((total + 1))

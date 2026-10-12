@@ -356,6 +356,14 @@ ola_profile_get_state() {
 # "unreadable", so it cannot invent a value for either: inventing requires passing a
 # default, which is a deliberate act at the call site. {slot} applies to a default too,
 # since a default is a value like any other.
+#
+# So read status 1 as **"I do not know"**, never as "nothing is declared". The difference
+# matters most where a rule list is read: `rules=$(ola_profile_get commands) || rules=""`
+# gives the same empty answer for a project that declares no command rules and for a
+# profile nobody can parse — and then concludes "no rules, allow everything" on the broken
+# one. Check the profile is usable **once**, at the entry of whatever you are writing
+# (`ola_profile_readable`, or refuse what `ola_profile_path` refuses), and after that an
+# empty answer means empty. Do not re-derive that check at each read; do not skip it.
 ola_profile_get() {
   local key=$1 dir=${2:-$PWD} slot=${3:-} default=${4:-} status out
   out=$(ola_profile_get_state "$key" "$dir" "$slot")
