@@ -103,6 +103,13 @@ git@a@b@gitlab.com:group/repo.git|gitlab.com/group/repo
 https://user@github.com/owner/re@po|github.com/owner/re@po
 ssh://host:22|(refused)
 https://github.com:443/|(refused)
+https://user:tok/en@github.com/o/r.git|(refused)
+https://user:tok/en@github.com/o/r|(refused)
+https://github.com:notaport/o/r|(refused)
+https://github.com:/o/r|(refused)
+https://github.com:8443/o/r|github.com/o/r
+ssh://git@github.com:2222/o/r.git|github.com/o/r
+https://github.com@evil.com/o/r|evil.com/o/r
 https://host/owner/.git|(refused)
 https://github.com//repo|(refused)
 ../..|(refused)
@@ -118,6 +125,28 @@ https://github.com/owner/../../repo|(refused)
 nonsense|(refused)
 https:///owner/repo|(refused)
 TABLE
+
+# A component holding a slash cannot come out of a URL today, because the host has no
+# slash and the local branch keeps only the basename. The clause is pinned anyway: it is
+# what protects a future caller that hands over a whole path.
+for bad in 'a/b' '..' '.' ''; do
+  total=$((total + 1))
+  if ola_profile_component_ok "$bad"; then
+    echo "FAIL  component_ok refuses '$bad'"
+    failures=$((failures + 1))
+  else
+    echo "ok    component_ok refuses '$bad'"
+  fi
+done
+for good in repo 'owner.name' 'a_b-c' '.hidden'; do
+  total=$((total + 1))
+  if ola_profile_component_ok "$good"; then
+    echo "ok    component_ok accepts '$good'"
+  else
+    echo "FAIL  component_ok accepts '$good'"
+    failures=$((failures + 1))
+  fi
+done
 
 # --- Integrated mode ------------------------------------------------------------------
 mkrepo "$WORK/integrated" "git@github.com:olaurendeau/racine.git"
@@ -156,6 +185,11 @@ rc 1 "get: missing key exits 1" -- "$CLI" -C "$WORK/integrated" get nope.nope
 eq main "$("$CLI" -C "$WORK/integrated" get nope main)" "get: default for a missing key"
 eq "SLOT=7" "$("$CLI" -C "$WORK/integrated" --slot 7 get nope 'SLOT={slot}')" "get: {slot} in the default"
 eq master "$("$CLI" -C "$WORK/integrated" get base_branch fallback)" "get: default unused when set"
+eq fallback "$("$CLI" -C "$WORK/integrated" get base_branch.deeper fallback)" \
+  "get: a key path through a scalar is just absent"
+rc 1 "get: a key path through a scalar, without a default" -- \
+  "$CLI" -C "$WORK/integrated" get base_branch.deeper
+rc 2 "get: an empty key is a usage error" -- "$CLI" -C "$WORK/integrated" get ""
 eq "ios-simulator" "$(cd "$WORK/integrated" && "$CLI" get verify_ui.kind)" "get: without -C, from the cwd"
 
 # --- Discreet mode --------------------------------------------------------------------
@@ -196,6 +230,29 @@ eq trunk "$("$CLI" -C "$WORK/discreet" get base_branch)" "precedence: user over 
 eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: a repository cannot upgrade the mode"
 eq "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json" \
   "$("$CLI" -C "$WORK/discreet" path)" "precedence: the user's file is the one in use"
+
+# A user profile that is corrupt, empty or not even a file must not restore the committed
+# one: that would be the way back in for the content the precedence exists to distrust.
+user_profile "github.com/someone/their-repo" '{"mode": "integrated",,,'
+eq "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json" \
+  "$("$CLI" -C "$WORK/discreet" path)" "precedence: a corrupt user profile still wins"
+eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: corrupt means discreet, not the repo's mode"
+rc 1 "precedence: get refuses rather than read the repo's file" -- \
+  "$CLI" -C "$WORK/discreet" get base_branch from-project
+
+printf '' >"$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json"
+eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: an empty user profile still wins"
+
+# Not a regular file at all: giving up is the only answer that keeps the order meaningful.
+rm -f "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json"
+mkdir -p "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json"
+rc 1 "precedence: a directory where the profile should be refuses" -- \
+  "$CLI" -C "$WORK/discreet" path
+rc 1 "precedence: and does not fall back to the repository" -- \
+  "$CLI" -C "$WORK/discreet" mode
+rmdir "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json"
+user_profile "github.com/someone/their-repo" '{"mode": "discreet", "base_branch": "trunk"}'
+
 rm -rf "$WORK/discreet/.claude"
 
 # --- No profile at all: nothing happens ----------------------------------------------
@@ -354,6 +411,34 @@ eq "" "$undocumented" "schema: every top-level key has a description"
 eq "integrated discreet" \
   "$(jq -r '.properties.mode.enum | join(" ")' "$ROOT/schema/profile.schema.json")" \
   "schema: the modes are exactly the ones ola_profile_mode accepts"
+
+# --- The remote is only looked up when a discreet profile could exist -----------------
+# The guard of A3 runs this resolution on every PreToolUse, so the cost is part of the
+# contract: resolving a remote takes three subprocesses, and someone who has never written
+# a discreet profile must not pay them. A git that records its calls pins both directions.
+stub=$WORK/stub
+mkdir -p "$stub"
+# shellcheck disable=SC2016  # $* and $@ belong to the stub being written, not to here
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"$GIT_CALL_LOG"\nexec %s "$@"\n' \
+  "$(command -v git)" >"$stub/git"
+chmod +x "$stub/git"
+
+git_calls() { # git_calls <home> → the remote lookups made while resolving the mode
+  local log=$WORK/git-calls.log
+  : >"$log"
+  env "HOME=$1" "GIT_CALL_LOG=$log" "PATH=$stub:$PATH" \
+    "$CLI" -C "$WORK/integrated" mode >/dev/null 2>&1
+  grep -c 'remote get-url' "$log" | tr -d ' '
+}
+
+mkdir -p "$WORK/home-without-profiles"
+eq 0 "$(git_calls "$WORK/home-without-profiles")" \
+  "cost: no profiles directory, no remote lookup"
+eq integrated "$(HOME=$WORK/home-without-profiles "$CLI" -C "$WORK/integrated" mode)" \
+  "cost: and the project profile still resolves"
+# Two, not one: upstream is tried before origin, so a repository without a fork remote
+# pays the miss as well.
+eq 2 "$(git_calls "$HOME")" "cost: a profiles directory costs the upstream and origin lookups"
 
 # --- Bad usage ------------------------------------------------------------------------
 rc 2 "usage: no command" -- "$CLI"

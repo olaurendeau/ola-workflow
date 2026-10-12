@@ -2,15 +2,17 @@
 # Finds and reads the profile of the project the session is working on.
 #
 # Two places, in this order:
-#   1. $HOME/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json   discreet mode
-#   2. <git toplevel>/.claude/workflow.json                                integrated mode
+#   1. $HOME/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json   yours
+#   2. <git toplevel>/.claude/workflow.json                                the project's
+# Where the file lives says who owns it; the `mode` key inside says how to behave.
 # The identity in (1) comes from `git remote get-url upstream || origin`, so a fork is
 # known by the repository it contributes to, and a worktree resolves like its checkout.
 #
 # The user's own profile wins over a file committed in the repository, because the two are
 # not equally trusted: a third-party repository must not be able to turn the discreet
 # profile you chose for it into an integrated one, and thereby grant itself writes to the
-# forge and allowances on commands.
+# forge and allowances on commands. One that is there but unusable still wins, and the
+# resolution gives up: falling through would be the way back in for the file it distrusts.
 #
 # Nothing found means nothing found: every function returns 1 and prints nothing, and the
 # caller decides. The guard stays inert, which is what keeps this plugin invisible in a
@@ -104,6 +106,18 @@ ola_profile_url_id() {
   case $authority in
     *@*) authority=${authority##*@} ;;
   esac
+  # An unencoded / in the userinfo ends the authority too early, so a password holding one
+  # leaves its tail posing as a host: `https://user:tok/en@host/o/r` would read as
+  # `user/en@host/o/r`. Such a URL is invalid per RFC 3986 and git cannot use it either,
+  # but the answer is to refuse it, not to publish half a secret as an identity. What
+  # follows the colon of an authority is a port, so it is digits or nothing.
+  case $authority in
+    *:*)
+      case ${authority#*:} in
+        ''|*[!0-9]*) return 1 ;;
+      esac
+      ;;
+  esac
   host=${authority%%:*}
   host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
 
@@ -133,12 +147,21 @@ ola_profile_id() {
 
 # ola_profile_path [dir] → the profile file in use.
 ola_profile_path() {
-  local dir=${1:-$PWD} home=${HOME:-} top id candidate
-  if [ -n "$home" ] && id=$(ola_profile_id "$dir"); then
-    candidate=$home/.claude/workflow-profiles/$id/profile.json
+  local dir=${1:-$PWD} home=${HOME:-} top id candidate root
+  root=$home/.claude/workflow-profiles
+  # Resolving a remote costs three subprocesses. Someone who has never written a discreet
+  # profile should not pay them on every PreToolUse, so the cheap test comes first.
+  if [ -n "$home" ] && [ -d "$root" ] && id=$(ola_profile_id "$dir"); then
+    candidate=$root/$id/profile.json
     if [ -f "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
+    fi
+    # Something is there and is not a regular file: a directory, a broken symlink. Giving
+    # up is the only answer that keeps the precedence meaningful — falling through would
+    # hand the last word back to the file the repository ships.
+    if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+      return 1
     fi
   fi
   if top=$(ola_profile_toplevel "$dir"); then
@@ -191,8 +214,10 @@ ola_profile_get() {
   [ -n "$key" ] || return 2
   file=$(ola_profile_path "$dir") || return 1
   ola_profile_readable "$file" || return 1
+  # `try`, because indexing through a scalar (get base_branch.x) raises rather than
+  # yielding null, and on a readable profile that still only means "no such key".
   out=$(jq -r --arg key "$key" '
-    getpath($key | split("."))
+    (try getpath($key | split(".")) catch null)
     | if . == null then halt_error(3)
       elif type == "array" and (map(type == "object" or type == "array") | any | not) then .[]
       elif type == "object" or type == "array" then tojson

@@ -38,18 +38,25 @@ everything — and `probe` is the only agent. Coming next:
 
 ## How a project is configured
 
-The plugin does nothing until it finds a profile. It looks in two places, in order:
+The plugin does nothing until it finds a profile. Where the file lives decides who owns
+it; the `mode` key inside decides how the workflow behaves. It is looked for in two
+places, in this order:
 
-1. `~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json` — **discreet** mode,
-   nothing in the project at all. The identity comes from
+1. `~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json` — **yours**, kept out
+   of the project. The identity comes from
    `git remote get-url upstream || git remote get-url origin`, so a fork is known by the
    repository it contributes to, and a worktree resolves like its checkout;
-2. `<project>/.claude/workflow.json` — **integrated** mode, committed with the project.
+2. `<project>/.claude/workflow.json` — the project's, committed with it.
 
-**Your own profile wins over the one a repository ships**, because the two are not equally
-trusted: a third-party repository must not be able to turn the discreet profile you chose
-for it into an integrated one, and so grant itself writes to the forge and allowances on
-commands. Use your own profile when you want the last word.
+**Your own profile wins**, because the two are not equally trusted: a third-party
+repository must not be able to turn the discreet profile you chose for it into an
+integrated one, and so grant itself writes to the forge and allowances on commands. One
+that is there but unusable — corrupt, empty, not even a file — still wins, and the
+resolution gives up rather than handing the last word back to the repository.
+
+In practice a profile you keep for someone else's repository sets `"mode": "discreet"` and
+a committed one sets `"mode": "integrated"`, but nothing forces that pairing: the key is
+what is read.
 
 No profile means no effect: the hook exits 0 and the agents offer to run
 `/ola-workflow:workflow-init`.
