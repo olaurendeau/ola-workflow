@@ -19,19 +19,15 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 dir=${1:-$PWD}
 
 # get <key> [default]
-# A default stands in for a key the profile does not have, never for a profile that cannot
-# be read. Collapsing the two is how a truncated file comes to announce a base branch the
-# project does not have — and `ola_profile_get` separates them precisely so that its
-# callers do not have to guess: 3 is "no such key", anything else is "no usable profile".
+# The default policy lives in ola_profile_get, so there is nothing to decide here. A
+# missing default simply prints nothing, and a profile that cannot be read was already
+# refused above — whichever way, this cannot invent a value.
 get() {
-  local out status
-  out=$(ola_profile_get "$1" "$dir" "")
-  status=$?
-  case $status in
-    0) printf '%s' "$out" ;;
-    3) [ $# -gt 1 ] && printf '%s' "$2" ;;
-    *) unreadable ;;
-  esac
+  if [ $# -gt 1 ]; then
+    printf '%s' "$(ola_profile_get "$1" "$dir" "" "$2")"
+  else
+    printf '%s' "$(ola_profile_get "$1" "$dir" "")"
+  fi
 }
 
 unreadable() {
@@ -69,19 +65,16 @@ defaulted() { # defaulted <key> <value> → the value, and remember it was not d
   printf '%s' "$2"
 }
 with_default() { # with_default <key> <default>
-  local out
-  if out=$(ola_profile_get "$1" "$dir" ""); then
-    printf '%s' "$out"
-  elif [ $? = 3 ]; then
-    defaulted "$1" "$2"
+  if ola_profile_has "$1" "$dir"; then
+    ola_profile_get "$1" "$dir" "" | tr -d '\n'
   else
-    unreadable
+    defaulted "$1" "$2"
   fi
 }
 
 # The base branch is the one default worth resolving rather than guessing: the repository
 # knows which branch it belongs to.
-if base=$(ola_profile_get base_branch "$dir" "" 2>/dev/null); then
+if base=$(ola_profile_get base_branch "$dir" 2>/dev/null); then
   base_note=""
 else
   resolved=$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
@@ -105,8 +98,7 @@ MISSING=""
 for pair in language.human=en language.artifacts=en language.agents=en \
             pr.max_lines=1000 pr.title=conventional merge.review_status=agent-review \
             slots.var=SLOT; do
-  key=${pair%%=*}
-  ola_profile_get "$key" "$dir" "" >/dev/null 2>&1 || MISSING="$MISSING $pair"
+  ola_profile_has "${pair%%=*}" "$dir" || MISSING="$MISSING $pair"
 done
 [ -n "$base_note" ] && MISSING="$MISSING base_branch=$base"
 
@@ -145,7 +137,7 @@ echo "Agent to agent:      $(with_default language.agents en)"
 echo
 echo "## Commands"
 printf 'Everything CI runs:  %s\n' "$(get check.full '(none declared — ask the human what proves this project works)')"
-if affected=$(ola_profile_get check.affected "$dir" "" 2>/dev/null); then
+if affected=$(ola_profile_get check.affected "$dir" 2>/dev/null); then
   printf 'The affected subset: %s\n' "$affected"
 else
   printf 'The affected subset: %s — the same command: this project declares no subset.\n' \
