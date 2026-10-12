@@ -667,15 +667,45 @@ eq "Dockerfile src/deep/Dockerfile " "$(glob_match '**/Dockerfile*')" \
   "dialect: ** reaches every level"
 eq "src/deep/a.ts " "$(glob_match 'src/**/*.ts')" "dialect: ** crosses a slash"
 eq "" "$(glob_match 'src/*.ts')" "dialect: a single * does not cross a slash"
+# Three patterns that look alike and reach three depths. The anchoring example above
+# teaches "no slash means the top only", which a bare directory name contradicts.
+mkdir -p "$globrepo/docs/a"
+touch "$globrepo/docs/x.md" "$globrepo/docs/a/y.md"
+git -C "$globrepo" add -A 2>/dev/null
+eq "docs/a/y.md docs/x.md " "$(glob_match 'docs')" "dialect: a bare directory name is recursive"
+eq "docs/x.md " "$(glob_match 'docs/*')" "dialect: one level under a directory"
+# A leading ! is not a negation: it matches nothing, and says nothing about it. An entry
+# written that way would protect exactly nothing.
+eq "" "$(glob_match '!docs/**')" "dialect: a leading ! matches nothing, silently"
 
-# And the sentence must keep saying it: a behaviour nobody states is a behaviour nobody
-# can rely on, and this one was stated wrongly once already.
+# The behaviours above pin git. These pin the sentence, and they are worth exactly what
+# they claim and no more.
+#
+# The reviewer mutation-tested the first version of this block: inverting the description
+# to say the opposite ("— like a .gitignore rule — a pattern with no slash is **not**
+# anchored…") left all of its assertions passing, because `anchored at the` survives
+# inside `not anchored at the` — it contains its own negation. Dropping a two-letter
+# prefix while simplifying a caveat is the most ordinary rewrite there is.
+#
+# So the claim is anchored on the word that carries its polarity, which fails on that
+# inversion. The honest limit: no assertion over prose is paraphrase-proof — "a .gitignore
+# rule, by contrast, matches at any depth" would be true without containing "unlike". The
+# reachable goal is to make an inversion noisy, not to prove a sentence true.
 dialect=$(jq -r '.description' "$ROOT/schema/profile.schema.json")
-for claim in ':(glob)' 'anchored at the' 'does not cross' '**/Dockerfile*'; do
+total=$((total + 1))
+case $dialect in
+  *'unlike a .gitignore'*) echo "ok    dialect: the description still contrasts with .gitignore" ;;
+  *) echo "FAIL  dialect: the contrast with .gitignore is gone, so the rule may have been inverted"
+     failures=$((failures + 1)) ;;
+esac
+
+# A deletion canary, which is all this is: it answers "has someone removed the rule?",
+# never "is the rule right?".
+for claim in ':(glob)' 'does not cross' '**/Dockerfile*' 'bare directory name' 'never with a'; do
   total=$((total + 1))
   case $dialect in
-    *"$claim"*) echo "ok    dialect: the root description still states '$claim'" ;;
-    *) echo "FAIL  dialect: the root description no longer states '$claim'"
+    *"$claim"*) echo "ok    canary: the description still mentions '$claim'" ;;
+    *) echo "FAIL  canary: the description no longer mentions '$claim'"
        failures=$((failures + 1)) ;;
   esac
 done
