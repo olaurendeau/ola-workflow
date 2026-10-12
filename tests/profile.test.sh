@@ -564,17 +564,39 @@ eq "integrated discreet" \
 # shared a code, a typo in the program would be read as an answer — and `get` is the one
 # reader that turns an answer into "use the caller's default", so the default would be
 # served on a perfectly good profile. This pins it by breaking the gate on purpose.
+# A probe script rather than a composed `bash -c` string: the gate holds quotes of its own,
+# and three levels of escaping is how a test ends up proving nothing.
+cat >"$WORK/gate-probe.sh" <<'PROBE'
+#!/usr/bin/env bash
+. "$1"
+OLA_PROFILE_GATE=$2
+ola_profile_get base_branch "$3" >/dev/null 2>&1
+echo $?
+PROBE
+chmod +x "$WORK/gate-probe.sh"
+
+get_status_with_gate() { # get_status_with_gate <gate program>
+  "$WORK/gate-probe.sh" "$ROOT/hooks/lib/profile.sh" "$1" "$WORK/integrated"
+}
+
+# The control comes first, because without it the assertion below passes whenever `get`
+# returns 1 — including if the fixture held no profile at all. That is the same way a test
+# can pass for the wrong reason as a test whose name is false.
 total=$((total + 1))
-broken_gate_status=$(
-  OLA_PROFILE_GATE='this is not jq'   bash -c ". '$ROOT/hooks/lib/profile.sh'
-    OLA_PROFILE_GATE='this is not jq'
-    ola_profile_get base_branch '$WORK/integrated' >/dev/null 2>&1
-    echo \$?"
-)
-if [ "$broken_gate_status" = 1 ]; then
+intact=$(get_status_with_gate "$OLA_PROFILE_GATE")
+if [ "$intact" = 0 ]; then
+  echo "ok    control: the fixture is read successfully with the gate intact"
+else
+  echo "FAIL  control: the fixture is wrong, get returned $intact with an intact gate"
+  failures=$((failures + 1))
+fi
+
+total=$((total + 1))
+broken=$(get_status_with_gate 'this is not jq')
+if [ "$broken" = 1 ]; then
   echo "ok    a non-compiling gate reads as unusable, not as an absent key"
 else
-  echo "FAIL  a non-compiling gate returned $broken_gate_status, which get would treat as an absent key"
+  echo "FAIL  a non-compiling gate returned $broken, which get would treat as an absent key"
   failures=$((failures + 1))
 fi
 
