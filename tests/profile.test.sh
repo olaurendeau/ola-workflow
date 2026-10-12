@@ -638,6 +638,48 @@ mkdir -p "$WORK/home-with-profiles/.claude/workflow-profiles"
 eq 2 "$(git_calls "$WORK/home-with-profiles")" \
   "cost: a profiles directory costs the upstream and origin lookups"
 
+# --- The glob dialect the schema promises ---------------------------------------------
+# The schema tells profile authors how its globs behave. That is prose, and prose has no
+# counter-proof — except when it describes a tool, which is testable. It is worth testing
+# because the first version of that sentence was wrong: it equated `:(glob)` with
+# .gitignore, which matches a slash-less pattern at any depth while a pathspec is anchored
+# at the repository root. Nobody writes pathspec magic and everybody has written a
+# .gitignore, so the wrong analogy was the one that would have been believed.
+globrepo=$WORK/globs
+mkdir -p "$globrepo/src/deep"
+git -C "$globrepo" -c init.defaultBranch=main init -q 2>/dev/null
+touch "$globrepo/Dockerfile" "$globrepo/src/deep/Dockerfile" "$globrepo/src/deep/a.ts"
+git -C "$globrepo" add -A 2>/dev/null
+
+glob_match() { git -C "$globrepo" ls-files -- ":(glob)$1" | tr '\n' ' '; }
+eq "Dockerfile " "$(glob_match 'Dockerfile*')" \
+  "dialect: a pattern with no slash is anchored at the root"
+# The counter-proof of the claim itself: gitignore does what the first sentence promised,
+# and that is precisely why the analogy was misleading.
+eq "Dockerfile src/deep/Dockerfile " \
+  "$(printf 'Dockerfile*\n' >"$globrepo/.gitignore"
+    for f in Dockerfile src/deep/Dockerfile; do
+      git -C "$globrepo" check-ignore --no-index -q "$f" && printf '%s ' "$f"
+    done
+    rm -f "$globrepo/.gitignore")" \
+  "dialect: the same pattern in a .gitignore does match at any depth"
+eq "Dockerfile src/deep/Dockerfile " "$(glob_match '**/Dockerfile*')" \
+  "dialect: ** reaches every level"
+eq "src/deep/a.ts " "$(glob_match 'src/**/*.ts')" "dialect: ** crosses a slash"
+eq "" "$(glob_match 'src/*.ts')" "dialect: a single * does not cross a slash"
+
+# And the sentence must keep saying it: a behaviour nobody states is a behaviour nobody
+# can rely on, and this one was stated wrongly once already.
+dialect=$(jq -r '.description' "$ROOT/schema/profile.schema.json")
+for claim in ':(glob)' 'anchored at the' 'does not cross' '**/Dockerfile*'; do
+  total=$((total + 1))
+  case $dialect in
+    *"$claim"*) echo "ok    dialect: the root description still states '$claim'" ;;
+    *) echo "FAIL  dialect: the root description no longer states '$claim'"
+       failures=$((failures + 1)) ;;
+  esac
+done
+
 # --- Bad usage ------------------------------------------------------------------------
 rc 2 "usage: no command" -- "$CLI"
 rc 2 "usage: unknown command" -- "$CLI" frobnicate
