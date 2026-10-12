@@ -108,6 +108,17 @@ key and no default was given. A default stands in for a missing key, never for a
 unreadable profile — inventing a configuration is how a truncated file ends up reporting no
 protected branch and no required checks.
 
+This repository carries its own profile in
+[`.claude/workflow.json`](.claude/workflow.json): the workflow is developed with the
+workflow, which is the only honest test of how generic it is.
+
+|  | integrated | discreet |
+|---|---|---|
+| Memory | GitHub issues, labels, a review commit status, review comments | local files under the profile directory |
+| Conventions | the profile, plus the project's own CONTRIBUTING | read from the project: CONTRIBUTING, PR template, commit language |
+| Writes to GitHub | allowed, per role | issues, labels, comments, statuses: **refused**. `git push` and `gh pr create`: **ask** (a human confirms) |
+| Merge | the coordinator, through the merge gate | nobody |
+
 ### Globs
 
 Every glob in a profile is a git pathspec `:(glob)`, and `schema/profile.schema.json` states
@@ -122,17 +133,6 @@ them:
   `src/deep` pull in their subtrees, while `doc*`, `doc?` and `[dx]ocs` match nothing at
   all. That is what makes the schema's own example sound — `Dockerfile*` cannot reach into a
   neighbouring `Dockerfiles/`.
-
-This repository carries its own profile in
-[`.claude/workflow.json`](.claude/workflow.json): the workflow is developed with the
-workflow, which is the only honest test of how generic it is.
-
-|  | integrated | discreet |
-|---|---|---|
-| Memory | GitHub issues, labels, a review commit status, review comments | local files under the profile directory |
-| Conventions | the profile, plus the project's own CONTRIBUTING | read from the project: CONTRIBUTING, PR template, commit language |
-| Writes to GitHub | allowed, per role | issues, labels, comments, statuses: **refused**. `git push` and `gh pr create`: **ask** (a human confirms) |
-| Merge | the coordinator, through the merge gate | nobody |
 
 ## Agent identity
 
