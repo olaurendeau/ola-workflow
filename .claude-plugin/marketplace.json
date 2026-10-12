@@ -11,7 +11,7 @@
       "name": "ola-workflow",
       "source": "./",
       "description": "Profile-driven agent workflow (coordinator, product designer, architect, developers, PR reviewer) with a PreToolUse guard.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "Olivier Laurendeau",
         "url": "https://github.com/olaurendeau"
