@@ -470,21 +470,46 @@ done
 rm -rf "$WORK/broken/.claude"
 mkdir -p "$WORK/broken/.claude"
 
-# The containment between the two readers, stated as a property: anything get will serve
-# comes out of a file validate accepts. This is the invariant the blocking finding broke.
-for content in '{"mode":"discreet"}' '[1,2]' '"hello"' '42' 'true' 'null' '' '   ' '{,'                '{"a":1} {"b":2}'; do
-  printf '%s' "$content" >"$WORK/bad.json"
-  if "$CLI" -C "$WORK/broken" validate "$WORK/bad.json" >/dev/null 2>&1; then :; fi
-  readable=no
+# The property that matters, and the one three separate defects broke: every reader agrees
+# on whether a file is a usable profile. Not "get serves nothing validate would reject" —
+# that sentence is false on purpose, since `{"base_branch":"x"}` is a perfectly readable
+# profile that the schema rejects, and gating `get` on the validator would make one typo'd
+# key render a whole project inert.
+#
+# So this compares the readers against each other, and `mode` must answer `discreet`
+# exactly when the others refuse, because `mode` is the one whose answer grants rights.
+for content in '{"mode":"integrated"}' \
+               '{"mode":"integrated"} {}' \
+               '{"mode":"integrated"} null' \
+               '{"mode":"integrated"} [1,2]' \
+               '{"mode":"integrated"} 0' \
+               '{"mode":"integrated"} {"base_branch":"x"}' \
+               '{"mode":"integrated"} {,' \
+               '{"mode":"discreet"} {}' \
+               '{"base_branch":"x"}' \
+               '[1,2]' '"hello"' '42' 'true' 'null' '' '   ' '{,'; do
   printf '%s' "$content" >"$WORK/broken/.claude/workflow.json"
-  "$CLI" -C "$WORK/broken" get mode >/dev/null 2>&1 && readable=yes
-  holds=no
-  ola_profile_holds_json "$WORK/broken/.claude/workflow.json" && holds=yes
+  usable=no
+  ola_profile_readable "$WORK/broken/.claude/workflow.json" && usable=yes
+  got_mode=$("$CLI" -C "$WORK/broken" mode 2>/dev/null)
+  # With a default, so that an absent key does not look like a refused file: that
+  # distinction is the whole point of get's three statuses.
+  get_ok=no
+  "$CLI" -C "$WORK/broken" get mode zzz >/dev/null 2>&1 && get_ok=yes
+  show_ok=no
+  "$CLI" -C "$WORK/broken" show >/dev/null 2>&1 && show_ok=yes
   total=$((total + 1))
-  if [ "$readable" = no ] || [ "$holds" = yes ]; then
-    echo "ok    containment: get serves nothing validate would reject ($content)"
+  if [ "$usable" = no ]; then
+    if [ "$get_ok" = no ] && [ "$show_ok" = no ] && [ "$got_mode" = discreet ]; then
+      echo "ok    readers agree it is unusable: $content"
+    else
+      echo "FAIL  readers disagree on an unusable profile (mode=$got_mode get=$get_ok show=$show_ok): $content"
+      failures=$((failures + 1))
+    fi
+  elif [ "$get_ok" = yes ] && [ "$show_ok" = yes ]; then
+    echo "ok    readers agree it is usable: $content"
   else
-    echo "FAIL  containment: get served a value from a file validate rejects ($content)"
+    echo "FAIL  readers disagree on a usable profile (get=$get_ok show=$show_ok): $content"
     failures=$((failures + 1))
   fi
 done

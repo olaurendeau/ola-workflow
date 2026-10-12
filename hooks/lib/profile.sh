@@ -251,14 +251,31 @@ ola_profile_dir() {
 # An object, not merely a value: the schema says `"type": "object"`, and a profile holding
 # `[1,2]` or `"hello"` must not read as an object that happens to be missing every key —
 # that is how a caller's default gets handed out for a file nobody can use.
-# One value, and an object. Both halves matter: jq evaluates its program once per input
-# value and -e reports on the last, so `type == "object"` alone calls a file holding two
-# concatenated objects readable — a `>>` where a `>` was meant — and then get would serve
-# values out of a file validate rejects. `limit(2; inputs)` stops at the second value, so
-# the check costs the same on a huge file as on a small one.
+# What a usable profile is, written once, as a jq program every reader starts with. It
+# yields the profile object, or nothing at all.
+#
+# Both halves matter. jq evaluates its program once per input value and reports on the
+# last, so a type test alone accepts a file holding two concatenated objects — what a `>>`
+# written where a `>` was meant leaves behind. `limit(2; inputs)` stops at the second
+# value, so the gate costs the same on a huge file as on a small one.
+#
+# It is a shared constant rather than a function each reader calls, so that each read is
+# still one jq and the gate is literally the same text everywhere. That is the point:
+# three of the defects found in review were a reader deciding for itself what a usable
+# profile is, and twice a fix reached some readers and not all — the last one a `mode`
+# answering `integrated` out of a file every other reader refused. A decision that exists
+# in one place cannot be half-fixed.
+#
+# `ola_profile_validate` is the one documented exception: it has to see JSON of the wrong
+# type in order to say so usefully.
+# It fails with `halt_error` rather than yielding nothing, because `jq -e` reports a
+# legitimate `false` the same way it reports no output at all: a profile key whose value is
+# `false` must not read as an unusable profile.
+OLA_PROFILE_GATE='[limit(2; inputs)]
+  | if length == 1 and (.[0] | type) == "object" then .[0] else halt_error(4) end'
+
 ola_profile_readable() {
-  jq -n -e '[limit(2; inputs)] | length == 1 and (.[0] | type) == "object"' "$1" \
-    >/dev/null 2>&1
+  jq -n "$OLA_PROFILE_GATE" "$1" >/dev/null 2>&1
 }
 
 # ola_profile_holds_json <file> → 0 when the file holds exactly one JSON value, of any
@@ -280,7 +297,8 @@ ola_profile_holds_json() {
 ola_profile_mode() {
   local file mode
   file=$(ola_profile_path "${1:-$PWD}") || return 1
-  mode=$(jq -r 'if (.mode | type) == "string" then .mode else "" end' "$file" 2>/dev/null)
+  mode=$(jq -r -n "$OLA_PROFILE_GATE
+    | if (.mode | type) == \"string\" then .mode else \"\" end" "$file" 2>/dev/null)
   case $mode in
     integrated|discreet) printf '%s\n' "$mode" ;;
     *) printf 'discreet\n' ;;
@@ -296,11 +314,12 @@ ola_profile_get() {
   local key=$1 dir=${2:-$PWD} slot=${3:-} file out status
   [ -n "$key" ] || return 2
   file=$(ola_profile_path "$dir") || return 1
-  ola_profile_readable "$file" || return 1
+  # The gate and the read are one jq, so an unusable profile cannot be read at all: it
+  # produces no output, jq exits non-zero, and no default may stand in.
   # `try`, because indexing through a scalar (get base_branch.x) raises rather than
   # yielding null, and on a readable profile that still only means "no such key".
-  out=$(jq -r --arg key "$key" '
-    (try getpath($key | split(".")) catch null)
+  out=$(jq -r -n --arg key "$key" "$OLA_PROFILE_GATE"'
+    | (try getpath($key | split(".")) catch null)
     | if . == null then halt_error(3)
       elif type == "array" and (map(type == "object" or type == "array") | any | not) then .[]
       elif type == "object" or type == "array" then tojson
