@@ -641,7 +641,8 @@ done
 # invariant, and asserting only silence would let a CLI that answers nothing at all pass.
 eq discreet "$("$CLI" -C "$WORK/broken" mode)" \
   "a truncated profile still reports the restrictive mode"
-rc 0 "and path still says which file is in use" -- true
+eq "$WORK/broken/.claude/workflow.json" "$("$CLI" -C "$WORK/broken" path)" \
+  "and path still says which file is in use"
 
 # The witness: the same calls do work on a sound profile, or the loop above would pass by
 # the CLIs being broken outright.
