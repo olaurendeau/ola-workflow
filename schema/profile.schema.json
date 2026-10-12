@@ -81,7 +81,7 @@
           "items": { "type": "string" }
         },
         "sensitive_patterns": {
-          "description": "A patch matching one of these needs a human, wherever it lands.",
+          "description": "A patch matching one of these needs a human, wherever it lands. Matching is per file: a match in a file the pattern applies to makes the patch sensitive, whatever else the patch touches. Otherwise touching one excluded test file would defuse the pattern, on the one key whose job is to force a human to look.",
           "type": "array",
           "items": {
             "type": "object",
@@ -91,7 +91,7 @@
               "file": { "description": "Glob the regex applies to. Omitted means every file.", "type": "string" },
               "regex": { "description": "Perl-compatible regex matched against added lines.", "type": "string" },
               "exclude": {
-                "description": "Globs the pattern does not apply to, for files that mention the subject without touching it: tests, fixtures, documentation.",
+                "description": "Globs the pattern does not apply to, for files that mention the subject without touching it: tests, fixtures, documentation. It narrows `file` when both are given, so a file matching both is spared.",
                 "type": "array",
                 "items": { "type": "string" }
               }

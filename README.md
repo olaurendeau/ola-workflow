@@ -76,7 +76,7 @@ is also what validates it — point your editor at it:
 | `mode` | **required**: `integrated` or `discreet` |
 | `language` | what to write in, for the human, the artifacts and the agents |
 | `base_branch` | the branch PRs target and nobody pushes to |
-| `check` | `full` (what CI runs), `affected` (the subset, may contain `{slot}`), `cleanup` |
+| `check` | `full` (what CI runs), `affected` (the subset), `cleanup` |
 | `slots` | how parallel agents avoid colliding on ports, databases and containers |
 | `pr` | `max_lines`, `exclude`, `title` |
 | `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
@@ -85,6 +85,10 @@ is also what validates it — point your editor at it:
 | `context` | the documents the agents read: product, architecture, review checklist, glossary |
 | `verify_ui` | how a change is seen running |
 | `escalation_extra` | what this project reserves for the human |
+
+Any string value may hold `{slot}`, which is replaced with the slot in use when one is
+given. That is how parallel agents get their own ports, databases and containers, and it
+works in every value — not just in `check.affected`.
 
 Read it with `ola-profile`, which is on the PATH of every Bash call once the plugin is
 installed:
