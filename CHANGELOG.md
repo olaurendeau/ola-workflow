@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+### The guard can decide, and ships switched off
+
+Without `OLA_WORKFLOW_GUARD=enforce` it **logs what it would have decided and allows the
+command**. Turning that round is [#29](../../issues/29), because `escalation_extra` reserves
+"changing what the guard forbids" for this repository's human. The number that default was
+waiting for is now measured: **about 6% of ordinary commands ask, and nothing is refused
+wrongly** — all of it the design's own cost, where the command a line runs is not in that
+line at all (`source x`, `eval "$(…)"`, `trap … EXIT`, `$EDITOR file`).
+
+- **A tokenizer** reads what a shell would really run, rather than matching its text. The
+  implementation this is ported from matches text, so `g\h pr merge` and `$(echo gh) pr merge`
+  walk past rules that `gh pr merge` trips — measured, both do. Quote removal, escapes,
+  `$'\x67h'`, wrappers (`sudo -u x`, `env FOO=1`, `nice -n 10`, `xargs -I{}`), grammar
+  prefixes (assignments, redirections, reserved words, function headers, case labels,
+  subshells) and heredocs are all undone once, here.
+- **Three decisions.** `allow` says nothing at all; `deny` and `ask` carry a reason.
+  `ask` exists because a shell command cannot always be read, and refusing those would refuse
+  `$EDITOR file` while allowing them is the hole the guard exists to close.
+- **Fail-closed, but only once a profile exists.** A project that has not opted in gets a
+  process and nothing else — the guard exits 0 before any rule. From a profile on, anything
+  unexpected blocks rather than passes.
+- **Rules read words, never text.** A joined string cannot express a position (so a label
+  named "ready to merge" was read as a merge), cannot hold a literal (a review status named
+  `c++-review` reached `grep -E` as a pattern), and cannot be case-folded field by field (`gh`
+  accepts `-X put`). An option carries its value eight ways, including after a group of short
+  flags; the group is parsed against a table of which letters take a value, and a letter in
+  neither is asked about rather than guessed.
+- **Two role rules.** Merging belongs to the coordinator — the CLI form and the API form
+  alike, since a PUT on `pulls/N/merge` merges exactly as `gh pr merge` does. `--admin` and
+  `--auto` are refused to every role, the coordinator included: one bypasses the checks the
+  gate is made of, the other merges when the review no longer applies to what lands. The
+  review status belongs to the pr-reviewer alone, under the name the *project's* profile gives
+  it, because whoever writes it can let anything through.
+- **One resolution per session.** Everything the guard reads from the profile is resolved
+  together and cached; the absence of a profile is deliberately not cached, so a project that
+  opts in *during* a session is guarded from the next command.
+
+### Not in this release
+
+The remaining role rules (pushing to the base branch, tags, releases, repository settings),
+declarative `commands[]` rules, discreet mode's prohibitions, and the conditional merge gate.
+
 ## 0.2.0
 
 The profile and the team. **The guard still allows everything** — see *Not in this release*.
