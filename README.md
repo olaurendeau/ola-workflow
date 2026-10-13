@@ -24,24 +24,52 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 ## Status
 
-**The team is complete, and nothing enforces it yet.** In place: the manifests, the CI, the
-test harness, the answer to how a plugin agent is identified (see
+**The team is complete and the guard applies its rules.** In place: the manifests, the CI,
+the test harness, the answer to how a plugin agent is identified (see
 [Agent identity](#agent-identity)), the project profile with its schema and its
-`ola-profile` CLI, and the **five agents** — a coordinator that frames and dispatches, a
-product designer that turns a request into criteria a test can prove, an architect that
-splits an epic into reviewable tasks, developers that build test-first in their own
-worktrees, and an independent reviewer.
+`ola-profile` CLI, the **five agents** — a coordinator that frames and dispatches, a product
+designer that turns a request into criteria a test can prove, an architect that splits an
+epic into reviewable tasks, developers that build test-first in their own worktrees, and an
+independent reviewer — and the **guard**: a tokenizer that reads what a shell would really
+run, three decisions, fail-closed once a profile exists, and its first two role rules.
 
-The guard is still **inert**. It allows everything, so the rules these agents follow are
-rules nothing applies: an agent that follows a rule and an agent that is prevented from
-breaking it are not the same thing. Until the guard is real, use this where a mistake is
-cheap — a new project, not one that deploys on merge.
+A project with no profile is unaffected, which is the whole point of the design: the hook
+exits 0 before any rule, at a cost of four subprocesses. A project that wrote a profile has
+opted in, and `"guard": "log"` is how it watches the decisions before letting them act.
+
+### What it costs, measured
+
+Both numbers below were measured on 2026-10-14, and both are the kind that drift — re-measure
+rather than trust them.
+
+| | |
+|---|---|
+| commands answered "I cannot read this, please confirm" | **3.7%** of 134 ordinary commands, and 0 refused wrongly |
+| the same, on four independent samples | between **3%** and **7%** |
+| the same five commands, on a 32-command sample holding all of them | **15.6%** — see below |
+| subprocesses per Bash call, no profile | **4** (6 once you keep a profile for some other repository) |
+| the same, with a profile, warm | **8** |
+
+The rate is a property of the sample, not of the guard, and the cleanest way to see that is
+to change the denominator: the **same five commands** are asked about either way, so a
+32-command sample that happens to hold all five reads 15.6% while a 134-command one reads
+3.7%. The number to watch is not the percentage, it is which commands.
+
+Those five are `source x`, `. x`, `eval "$(…)"`, `trap … EXIT`, `$EDITOR file` — each runs
+something that is not in its own text, as a command word built by expansion or a body read
+from a file. Refusing them would refuse `$EDITOR file`; allowing them is the hole the guard
+exists to close; so it asks, and that is the price.
+
+### What is not here yet
 
 | step | content |
 |---|---|
-| A3 | the real guard, ported from `mcp-camptocamp` and driven by the profile |
-| A4 | the conditional merge gate |
+| A3 | the remaining role rules: pushing to the base branch, tags, releases, repository settings |
+| A4 | declarative `commands[]` rules, discreet mode's prohibitions, the conditional merge gate |
 | A6 | the `verify-ui` skill, then 1.0.0 |
+
+Until the merge gate exists, the coordinator checks it by hand against the forge. And the
+guard knows nothing about a release: that rule is the prompts' alone.
 
 ### Where the rules live
 
