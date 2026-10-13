@@ -45,8 +45,13 @@ a rule the agents follow and nothing enforces: an agent that follows a rule and 
 that is prevented from breaking it are not the same thing. Nothing stops a push to the base
 branch, a merge without review, a publication or a tag.
 
-Use this where a mistake is cheap — a new project, not one that deploys on merge. The
-tokenizer that the real rules need is written and measured, and it is not wired in yet.
+Use this where a mistake is cheap — a new project, not one that deploys on merge.
+
+*Corrected after 0.2.0 was tagged:* this section first said the tokenizer the real rules
+need "is written and measured, and it is not wired in yet". It is neither in this release
+nor on `main` — it is on an open branch. Anyone reading that sentence and going to look for
+the file would not have found it, which is a different and worse thing than "not wired in".
+The tag is left where it is; the sentence is not.
 
 ## 0.1.0
 
