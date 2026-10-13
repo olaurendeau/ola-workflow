@@ -147,12 +147,25 @@ else
   ko "witness: on disk [$(printf '%s' "$got_provided" | tr '\n' ' ')] against declared [$(printf '%s' "$expected_provided" | tr '\n' ' ')]"
 fi
 
-# One scan, two patterns. The lookbehind rejects a `/` that follows a path character,
-# which is what separates an offer from a path and is why this is perl and not grep.
+# One scan, two patterns, and which way round the lookbehind asks its question took six
+# cycles to get right.
+#
+# Five versions listed what precedes a **path** and rejected those: a letter, a digit, `.`,
+# `-`, `_`, `/`, `:`. Every one was missing a character, and every missing character was a
+# correct sentence refused — `${TMPDIR:-/tmp}/ola-brief.XXXXXX`, then `/8080:8080`, then
+# `$profile_dir/runs/<slug>/developer`, a path whose last segment happens to be a role name
+# and which the sibling file this check also scans already writes. A blacklist of what a path
+# can look like is open-ended, and every hole in it accuses the truth.
+#
+# What precedes an **offer** is a small closed set: nothing (the start of a line), a blank, a
+# backtick, an opening bracket. So the lookbehind is a whitelist, and the direction of error
+# flips with it: a character missing from this list makes the scan *miss* an offer, which is
+# a false negative and safe, where a character missing from the old list refused a true
+# sentence and was not.
 scan_text() { # scan_text < text → `<kind> <token>` lines, sorted
   perl -ne '
-    while (m{(?<![A-Za-z0-9_./:-])/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g) { print "named $1\n" }
-    while (m{(?<![A-Za-z0-9_./:-])/([A-Za-z0-9_.+-]+)(?![:/?\#A-Za-z0-9_.+-])}g) { print "slash $1\n" }
+    while (m{(?:^|(?<=[\s`([]))/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g)          { print "named $1\n" }
+    while (m{(?:^|(?<=[\s`([]))/([A-Za-z0-9_.+-]+)(?![:/?\#A-Za-z0-9_.+-])}g) { print "slash $1\n" }
   ' | LC_ALL=C sort -u
 }
 SCAN=$(cat "${PROMPTS[@]}" 2>/dev/null | scan_text)   # the per-file witness above is what notices a file this cannot read
@@ -261,6 +274,8 @@ innocent='skills/workflow-init/SKILL.md and agents/developer.md
 ghcr.io/acme/ola-workflow:latest and registry.example.com/ola-workflow:dev
 a log line ola_workflow: started, a key ola-workflow: build, OLA_WORKFLOW: 1
 the file runs/probe/last.json, the path /developer/settings, the url /coordinator?x=1
+the memory goes to $profile_dir/runs/<slug>/developer and runs/<slug>/probe
+and to ${OLA_RUNS}/architect, or */developer under a glob
 image: ola_workflow:latest and the tag ola_workflow:1.2
 log: ola_workflow:started and docker build -t ola_workflow:dev .
 select * from ola_workflow:v1 and ghcr.io/acme/ola_workflow:1.2
@@ -284,7 +299,7 @@ and /developer, which is an agent'
 
 accused=$(printf '%s\n' "$innocent" | verdicts_for | sed -n 's/^ko://p')
 if [ -z "$accused" ]; then
-  ok "the scan accuses none of the 16 lines of correct text it has failed on or nearly did"
+  ok "the scan accuses none of the 18 lines of correct text it has failed on or nearly did"
 else
   ko "the scan accuses correct text: $(printf '%s' "$accused" | tr '\n' ' ')"
 fi
@@ -649,8 +664,16 @@ else
     # match, and a harness that lies about the thing it measures is worse than no harness.
     # The file also lets the failure show what was printed.
     "$BRIEF" "$probe" >"$WORK/out-$want" 2>"$WORK/err-$want" || true
-    if grep -q '## What stops you' "$WORK/out-$want"; then
-      ok "the brief says what stops an agent when guard is $want"
+    # The *content*, not the heading: both branches print the heading, so grepping for it
+    # left the suite green on a brief that told a log-mode agent "The guard refuses…" — the
+    # exact defect the comment above cites. An assertion that cannot tell the two arms apart
+    # is an assertion about a heading.
+    case $want in
+      enforce) expect='guard refuses' ;;
+      log)     expect='Nothing\.' ;;
+    esac
+    if grep -q '## What stops you' "$WORK/out-$want" && grep -qE "$expect" "$WORK/out-$want"; then
+      ok "the brief says what stops an agent when guard is $want, and says the right thing"
     else
       ko "the brief says nothing about what stops an agent when guard is $want: $(head -c 100 "$WORK/err-$want" "$WORK/out-$want" | tr '\n' ' ')"
     fi

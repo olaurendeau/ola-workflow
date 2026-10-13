@@ -258,10 +258,14 @@ plugin's name followed by a version".
 This paragraph is itself under the rule, which is why it names no example. Writing one would
 fail the check — and that is the clearest demonstration of the limit there is.
 
-A path is the one case that *is* decidable, because a path has more path after it: a file
-under a run directory, a URL segment, a registry reference with a tag all pass. A role name
-standing alone after a slash does not, and that is the limit rather than a sixth attempt at a
-rule about it.
+What makes a path decidable is **the character before the slash**, and the question is asked
+the safe way round: an offer is preceded by nothing, a blank, a backtick or an opening
+bracket, and anything else is a path. Five earlier versions listed what precedes a *path*
+instead, and each was one character short of refusing a true sentence — the last one refused
+`$profile_dir/runs/<slug>/developer`, a path the brief itself writes.
+
+A whitelist errs by missing an offer, which is a false negative; a blacklist errs by accusing
+a sentence, which is not. That asymmetry is the whole reason it is written this way round.
 
 What is deliberately **not** checked at all: the namespace spelled wrong. That rule existed
 for three cycles and failed on ordinary sentences about image tags, log lines and SQL every
