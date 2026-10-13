@@ -282,6 +282,7 @@ innocent='skills/workflow-init/SKILL.md and agents/developer.md
 ghcr.io/acme/ola-workflow:latest and registry.example.com/ola-workflow:dev
 a log line ola_workflow: started, a key ola-workflow: build, OLA_WORKFLOW: 1
 the file runs/probe/last.json, the path /developer/settings, the url /coordinator?x=1
+a mount -v /tmp:/developer and a label app:/probe
 the memory goes to $profile_dir/runs/<slug>/developer and runs/<slug>/probe
 and to ${OLA_RUNS}/architect, or */developer under a glob
 image: ola_workflow:latest and the tag ola_workflow:1.2
@@ -299,16 +300,24 @@ dispatch `ola-workflow:developer` and offer `/ola-workflow:workflow-init`'
 # `/no-such-skill` and not `/verify-ui`: the second is a skill `README.md` plans to ship, and
 # a table that hard-codes it would make this suite fail on the correct change that adds it.
 # A fixture must name something that stays false.
-guilty='run /workflow-init to set up
+# A here-document, not a single-quoted string: one of the characters under test **is** the
+# apostrophe, and a shell single-quoted string cannot hold one. Writing `\x27` there put the
+# four literal characters in the fixture instead, so the form it was added to cover was still
+# not covered — the second time in two commits that this quoting bit the same way.
+guilty=$(cat <<'GUILTY'
+run /workflow-init to set up
 later /no-such-skill will exist
 offer /ola-workflow:nope and dispatch ola-workflow:nope
 /ola-workflow:Workflow_Init and /ola-workflow:workflow-init.v2
 and /developer, which is an agent
-offer "/workflow-init" or `/ola-workflow:nope` in quotes'
+offer "/ola-workflow:nope-dq" and '/ola-workflow:nope-sq' and `/ola-workflow:nope-bt`
+and (/ola-workflow:nope-par) and [/ola-workflow:nope-brk]
+GUILTY
+)
 
 accused=$(printf '%s\n' "$innocent" | verdicts_for | sed -n 's/^ko://p')
 if [ -z "$accused" ]; then
-  ok "the scan accuses none of the 18 lines of correct text it has failed on or nearly did"
+  ok "the scan accuses none of the 19 lines of correct text it has failed on or nearly did"
 else
   ko "the scan accuses correct text: $(printf '%s' "$accused" | tr '\n' ' ')"
 fi
@@ -320,8 +329,19 @@ fi
 # spellings of `nope`, slashed and bare, are one verdict because they are one missing name;
 # and `ola_workflow:workflow-init` is written bare here on purpose, because the bare form is
 # the one `subagent_type` uses and the rule now covers it.
+# One distinct token per member of the whitelist, because the verdict set is deduplicated by
+# token: the line added to "close the quoted forms" produced `named:nope` and
+# `slash:workflow-init`, which two other lines already produced, so it guarded nothing.
+# Measured — five of the six members could be deleted from the lookbehind with no assertion
+# moving, and the commit that added two of them claimed to have closed them. A fixture whose
+# verdict is already in the set is a fixture that is not read.
 expected='named:Workflow_Init
 named:nope
+named:nope-brk
+named:nope-bt
+named:nope-dq
+named:nope-par
+named:nope-sq
 named:workflow-init.v2
 slash:developer
 slash:workflow-init'
@@ -331,7 +351,7 @@ slash:workflow-init'
 # verdict depends on the environment's locale is a test that is right by accident.
 caught=$(printf '%s\n' "$guilty" | verdicts_for | sed -n 's/^ko://p' | LC_ALL=C sort -u | grep . || true)
 if [ "$caught" = "$expected" ]; then
-  ok "the scan catches exactly the 5 broken spellings it claims, and no others"
+  ok "the scan catches exactly the 10 broken spellings it claims, and no others"
 else
   ko "the scan's verdicts changed: got [$(printf '%s' "$caught" | tr '\n' ' ')] want [$(printf '%s' "$expected" | tr '\n' ' ')]"
 fi

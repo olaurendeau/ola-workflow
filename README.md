@@ -259,10 +259,14 @@ This paragraph is itself under the rule, which is why it names no example. Writi
 fail the check — and that is the clearest demonstration of the limit there is.
 
 What makes a path decidable is **the character before the slash**, and the question is asked
-the safe way round: an offer is preceded by nothing, a blank, a backtick or an opening
-bracket, and anything else is a path. Five earlier versions listed what precedes a *path*
-instead, and each was one character short of refusing a true sentence — the last one refused
-`$profile_dir/runs/<slug>/developer`, a path the brief itself writes.
+the safe way round: an offer is preceded by the start of a line, a blank, a quote or an
+opening bracket — and everything else is treated as a path. Five earlier versions listed what
+precedes a *path* instead, and each was one character short of refusing a true sentence; the
+last one refused `$profile_dir/runs/<slug>/developer`, a path the brief itself writes.
+
+The list is in `tests/agents.test.sh`, and each of its members has its own failing fixture, so
+this paragraph cannot drift from it without a test saying so. It did: the sentence named four
+members while the code had six.
 
 A whitelist errs by missing an offer, which is a false negative; a blacklist errs by accusing
 a sentence, which is not. That asymmetry is the whole reason it is written this way round.
