@@ -59,11 +59,11 @@ session=$(field '.session_id')
 # profile's own mtime, because a cache that serves a stale profile applies the rules of a
 # project that no longer exists, which is worse than being slow.
 #
-# Two things are deliberately not cached, both because they have nothing to key an
-# invalidation on: the absence of a profile (see below), and — still outstanding — the
-# appearance of a *higher-precedence* profile beside a cached lower-precedence one. The
-# second needs the candidate list rather than the resolved file, and the guard must not
-# restate where profiles live to get it.
+# Two things are deliberately not cached, and in both cases the invalidation has to watch a
+# directory rather than the resolved file: the absence of a profile (see below), and — still
+# outstanding — the appearance of a *higher-precedence* profile beside a cached
+# lower-precedence one. Both need the candidate list, and the guard must not restate where
+# profiles live to get it.
 cache=${TMPDIR:-/tmp}/ola-workflow-guard-${session:-nosession}.cache
 NL='
 '
@@ -148,9 +148,18 @@ if [ -z "$cached" ]; then
   # does: it writes the profile, reports it written, and the guard it switches on does not
   # come on until the next session. `gh pr merge` included.
   #
-  # Nothing is lost by not caching it: resolution is cheapest in exactly that case — with no
-  # ~/.claude/workflow-profiles directory the remote is never looked up at all — and a
-  # project with no profile is one the guard has no rules for anyway.
+  # This is not free, and the first version of this comment claimed it was. Measured, with a
+  # ~/.claude/workflow-profiles directory present: **3 git subprocesses on every Bash call**
+  # of every project that has no profile, about 56 ms here against 30 ms warm — some 5
+  # seconds over a 200-command session, which is the argument that made the cache exist in
+  # the first place. The cost is only paid once someone keeps a discreet profile somewhere,
+  # because without that directory the remote is never looked up.
+  #
+  # Correctness over 40 ms, deliberately, until the invalidation can be right: what has to
+  # be watched is the **container directory** of each candidate, whose mtime does change
+  # when a file appears in it (measured) — not the resolved file, which is what does not
+  # exist. That needs the candidate list, and the guard must not restate where profiles live
+  # to get it, so it waits for `ola_profile_candidates`.
   IFS=$'\t' read -r _ fresh_file _ _ _ _ <<<"$cached"
   [ -n "$session" ] && [ -n "$fresh_file" ] &&
     { printf '%s\n' "$cached" >"$cache" 2>/dev/null || true; }
@@ -243,7 +252,7 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # accident — a reminder that moving to a cleaner interface can lose coverage the messy one
 # had, so the forms belong in the tests and not in anyone's memory.
 opt_values() {
-  local i=0 n w step
+  local i=0 n w step letter prefix suffix
   while [ "$i" -lt "${#words[@]}" ]; do
     w=${words[$i]}
     step=1
@@ -257,10 +266,22 @@ opt_values() {
         "$n"=*) printf '%s\n' "${w#*=}"; break ;;
       esac
       # Glued, and only for a short option: `--methodPUT` is not a spelling of anything.
+      # The value may also be glued after a *group* of short flags, which is the sixth
+      # spelling and the one the list of five missed: pflag reads
+      # `gh api -ifstate=success` as `-i -f state=success`, and it really sends the field —
+      # measured. So the letter is looked for anywhere in a run of letters, and what
+      # follows it is the value.
       case $n in
         -[!-])
+          letter=${n#-}
           case $w in
-            "$n"?*) printf '%s\n' "${w#"$n"}"; break ;;
+            -*"$letter"*)
+              prefix=${w%%"$letter"*}
+              case ${prefix#-} in
+                *[!A-Za-z]*) ;;                 # not a group of short flags: a value
+                *) suffix=${w#*"$letter"}
+                   [ -n "$suffix" ] && { printf '%s\n' "${suffix#=}"; break; } ;;
+              esac ;;
           esac ;;
       esac
     done
