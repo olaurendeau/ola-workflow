@@ -52,7 +52,6 @@ sees() {
   esac
   TOKENIZE_LOG=$WORK/log; : >"$TOKENIZE_LOG"
   ( cd "$WORK" && TOKENIZE_LOG=$WORK/log PATH="$WORK/stubs:$PATH" bash -c "$line" >/dev/null 2>&1 )
-  total=$((total + 1))
   if grep -qx "$want" "$WORK/log" 2>/dev/null; then
     ok "$label: and the shell agrees it runs $want"
   else
@@ -79,7 +78,6 @@ names() {
 asks() {
   local label=$1 line=$2 why=$3 reasons
   reasons=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r 'select(.readable == false) | .reason' | tr '\n' '|')
-  total=$((total + 1))
   if [ -n "$reasons" ] && [ "${reasons#*"$why"}" != "$reasons" ]; then
     ok "$label: declared unreadable — $why"
   else
@@ -154,7 +152,6 @@ sees 'nohup'          'nohup gh --version' gh
 names 'timeout'       'timeout 5 gh --version' gh
 names 'timeout -k'    'timeout -k 5 10 gh --version' gh
 names 'sudo -u'       'sudo -u root gh --version' gh
-total=$((total + 1))
 if grep -q "sees 'nice'" "$0" && grep -q "sees 'env -u'" "$0"; then
   ok "the value-taking-option class is still measured by the nice and env rows"
 else
@@ -192,20 +189,17 @@ sees 'case alternation' 'case x in a|x) gh --version ;; esac' gh
 sees 'case later arm'   'case x in a) true ;; x) gh --version ;; esac' gh
 
 echo "--- the separator that is not one, and the text that is not code"
-total=$((total + 1))
 if [ "$(commands_of "gh pr comment -b 'a; gh pr merge 7'" | tr -d ' ')" = gh ] &&
    [ "$(printf '%s' "gh pr comment -b 'a; gh pr merge 7'" | perl "$TOKENIZE" | wc -l | tr -d ' ')" = 1 ]; then
   ok "a separator inside quotes is text: one segment"
 else
   ko "a quoted separator was treated as a separator"
 fi
-total=$((total + 1))
 if [ "$(commands_of 'gh pr comment -b "a" ; gh pr merge 7')" = "gh gh " ]; then
   ok "a separator outside quotes is a separator: two segments"
 else
   ko "a real separator did not split: $(commands_of 'gh pr comment -b "a" ; gh pr merge 7')"
 fi
-total=$((total + 1))
 if [ "$(commands_of 'gh pr comment --body-file - <<EOF
 gh pr merge 7
 EOF')" = "gh " ]; then
@@ -216,7 +210,6 @@ fi
 
 echo "--- nothing to judge is not the same as unreadable"
 for line in 'c=gh' '}' 'done' '2>/dev/null'; do
-  total=$((total + 1))
   verdict=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"')
   if [ "$verdict" = "/true" ]; then
     ok "'$line' runs no command, and is not reported as unreadable"
@@ -256,7 +249,6 @@ for prefix_form in \
     '/usr/local/bin/gh pr merge 7 --admin' \
     '"gh" pr merge 7 --admin'; do
   got=$(printf '%s' "$prefix_form" | perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised' | head -1)
-  total=$((total + 1))
   if [ "$got" = "$reference" ]; then
     ok "the operands survive: $prefix_form"
   else
@@ -266,7 +258,6 @@ done
 
 # The witness this reference needs: it must not be empty, or every row above compares
 # nothing with nothing and passes.
-total=$((total + 1))
 if [ "$reference" = 'gh pr merge 7 --admin' ]; then
   ok "witness: the reference is the whole line, so the rows above compare something"
 else
@@ -278,7 +269,6 @@ fi
 # hollowed out by the splitter — it is a segment of its own, and what it computes is not in
 # this text — so what must survive here is the empty `$()`, with its closing paren: a rule
 # that reads a path must still see that the path ends in something it cannot know.
-total=$((total + 1))
 balanced=$(printf '%s' 'gh api repos/o/r/statuses/$(git rev-parse HEAD)' | perl "$TOKENIZE" |
   jq -r 'select(.command == "gh") | .normalised')
 case $balanced in
@@ -288,7 +278,6 @@ esac
 
 echo "--- the three fields, and which one a rule may use"
 record=$(printf '%s' 'g\h pr merge 7' | perl "$TOKENIZE")
-total=$((total + 1))
 if [ "$(jq -r .raw <<<"$record")" = 'g\h pr merge 7' ] &&
    [ "$(jq -r .command <<<"$record")" = gh ] &&
    [ -n "$(jq -r .resolved <<<"$record")" ]; then
@@ -296,7 +285,6 @@ if [ "$(jq -r .raw <<<"$record")" = 'g\h pr merge 7' ] &&
 else
   ko "the three fields are not what they claim: $record"
 fi
-total=$((total + 1))
 if printf '%s' 'x' | perl "$TOKENIZE" | jq -e 'has("raw") and has("command") and has("resolved") and has("readable") and has("reason")' >/dev/null; then
   ok "every record carries all five fields, so a reader need not test for them"
 else

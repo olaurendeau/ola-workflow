@@ -237,74 +237,93 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 # opt_values <name> … → every value those options carry, one per line, in order.
 #
-# An option carries its value five ways, and reading only one of them is a false negative
-# with nothing to show for it. Measured against the real `gh`:
+# An option carries its value in seven ways, and reading only some of them is a false
+# negative with nothing to show for it. Measured against the real `gh` with GH_DEBUG=api:
 #
-#   -X PUT        separate word
-#   -X=PUT        glued with an equals sign
-#   -XPUT         glued, short options only — `gh api -XGET` really sends a GET
-#   --method PUT  separate word
-#   --method=PUT  glued with an equals sign
+#   -X PUT          separate word
+#   -X=PUT          glued with an equals sign
+#   -XPUT           glued, short options only
+#   -iXPUT          glued after a group of short flags
+#   -iX PUT         the letter ends the group, the value is the next word
+#   --method PUT    separate word
+#   --method=PUT    glued with an equals sign
 #
-# The first version compared whole words, so the three glued forms vanished: `-XPUT` merged
-# and `-Fstate=success -Fcontext=agent-review` wrote the status the merge gate reads, both
-# allowed to every role. The regex this replaced had `[= ]?` and caught two of the three by
-# accident — a reminder that moving to a cleaner interface can lose coverage the messy one
-# had, so the forms belong in the tests and not in anyone's memory.
+# Five of the seven were missed at some point, one per review cycle, each time by a list of
+# spellings that was one short. So the group is *parsed* rather than pattern-matched: a short
+# option group is read left to right, and the first letter that takes a value consumes the
+# rest of the word or the next word. That is what `-tX -X PUT` requires — `-t` takes `X` as
+# its value, so the `-X` in that word is not an option at all, and reading it as one both
+# missed the real method and skipped the word carrying it. A merge, allowed.
+#
+# Which letters take a value is a table, because guessing is the dangerous direction and the
+# guess that every letter before the target is boolean is exactly what broke. A letter in
+# neither table makes the reading unknown, and unknown is asked.
+GH_SHORT_VALUE=fFHXpqt      # gh api: --raw-field --field --header --method --preview --jq --template
+GH_SHORT_BOOL=i             # gh api: --include
+OPT_UNREADABLE=no
+
 opt_values() {
-  local i=0 n w step letter prefix suffix
+  local i=0 n w step group rest letter j held
+  OPT_UNREADABLE=no
   while [ "$i" -lt "${#words[@]}" ]; do
     w=${words[$i]}
     step=1
-    for n in "$@"; do
-      if [ "$w" = "$n" ]; then
-        [ $((i + 1)) -lt "${#words[@]}" ] && printf '%s\n' "${words[$((i + 1))]}"
-        step=2
-        break
-      fi
-      case $w in
-        "$n"=*) printf '%s\n' "${w#*=}"; break ;;
-      esac
-      # Short options group, and the value follows the letter wherever that letter sits in
-      # the group. Two spellings, and enumerating them cost two review cycles:
-      #
-      #   -ifstate=success   the letter is inside the group, the value glued after it
-      #   -if state=success  the letter ends the group, the value is the next word
-      #
-      # Both are real: measured with GH_DEBUG=api, `gh api -iX PUT …` sends a PUT and
-      # `gh api -if state=success` sends the field. The first version read only the glued
-      # form, and on the next-word form it printed nothing, did not break, and did not set
-      # `step`, so neither reading happened — a merge and a review-status write, allowed to
-      # every role. `--methodPUT` is not a spelling of anything, so this is short-only.
-      case $n in
-        -[!-])
-          letter=${n#-}
+    case $w in
+      --*)
+        for n in "$@"; do
+          case $n in --*) ;; *) continue ;; esac
+          if [ "$w" = "$n" ]; then
+            [ $((i + 1)) -lt "${#words[@]}" ] && printf '%s\n' "${words[$((i + 1))]}"
+            step=2
+            break
+          fi
           case $w in
-            -*"$letter"*)
-              prefix=${w%%"$letter"*}
-              case ${prefix#-} in
-                *[!A-Za-z]*) ;;                 # not a group of short flags: a value
-                *) suffix=${w#*"$letter"}
-                   if [ -n "$suffix" ]; then
-                     printf '%s\n' "${suffix#=}"
-                   else
-                     # The letter ends the group: the value is the next word, and that word
-                     # must be stepped over or it is read again as an option of its own.
-                     [ $((i + 1)) -lt "${#words[@]}" ] && printf '%s\n' "${words[$((i + 1))]}"
-                     step=2
-                   fi
-                   break ;;
+            "$n"=*) printf '%s\n' "${w#*=}"; break ;;
+          esac
+        done ;;
+      -?*)
+        # A short group. Walk its letters; the first value-taking one ends the group.
+        group=${w#-}
+        j=0
+        while [ "$j" -lt "${#group}" ]; do
+          letter=${group:$j:1}
+          rest=${group:$((j + 1))}
+          case $GH_SHORT_VALUE in
+            *"$letter"*)
+              # This letter carries the value. Emit it only if it is one the caller asked
+              # for; either way the group is over.
+              held=""
+              if [ -n "$rest" ]; then
+                held=${rest#=}
+              elif [ $((i + 1)) -lt "${#words[@]}" ]; then
+                held=${words[$((i + 1))]}
+                step=2
+              fi
+              for n in "$@"; do
+                [ "$n" = "-$letter" ] && printf '%s\n' "$held"
+              done
+              j=${#group} ;;
+            *)
+              case $GH_SHORT_BOOL in
+                *"$letter"*) j=$((j + 1)) ;;
+                *) OPT_UNREADABLE=yes; j=${#group} ;;
               esac ;;
-          esac ;;
-      esac
-    done
+          esac
+        done ;;
+    esac
     i=$((i + step))
   done
 }
 
+has_word() { # has_word <value> → that exact word is present
+  local w
+  for w in ${words[@]+"${words[@]}"}; do [ "$w" = "$1" ] && return 0; done
+  return 1
+}
+
 # opt_value <name> … → what the LAST of those options carries, because that is the one the
-# tool uses: `gh api -X GET -X PUT …` sends a PUT, measured in both orders. Taking the
-# first turned every repeated option into a way past the rule.
+# tool uses: `gh api -X GET -X PUT …` sends a PUT, measured in both orders. Taking the first
+# turned every repeated option into a way past the rule.
 opt_value() {
   local last
   last=$(opt_values "$@" | tail -1)
@@ -451,6 +470,19 @@ while IFS= read -r segment; do
     elif ! gh_subcommand; then
       decide ask "ola-workflow: this gh call carries an option I do not know (${words[*]}), so which operation it performs cannot be read and no rule can be applied to it."
     fi
+    # The short-option tables are `gh api`'s, so they are consulted for `gh api` and nowhere
+    # else. Applied to every `gh` call they asked about `gh -R owner/repo pr merge`, because
+    # `-R` is a root flag and not one of `api`'s — a table used outside the command it
+    # describes is a table about the wrong thing. Other subcommands carry long flags
+    # (`--admin`, `--squash`), which need no splitting.
+    case $GH_SUB in
+      api|api\ *)
+        opt_values -X --method >/dev/null
+        if [ "$OPT_UNREADABLE" = yes ]; then
+          decide ask "ola-workflow: this gh api call groups short options I cannot split (${words[*]}), so neither the method nor the fields can be read and no rule can be applied to it."
+        fi ;;
+    esac
+
     # The API form merges exactly as the CLI does, so a rule that knew only the CLI would
     # be a rule about spelling. The method is compared folded, because gh accepts `-X put`.
     if printf '%s' "${words[*]}" | grep -qE 'pulls/[^ /]+/merge' && ! help_is_the_operation; then
@@ -482,6 +514,7 @@ while IFS= read -r segment; do
   # is one word, and a membership test on `state=…` never saw it.
   writes_status=no
   names_it=no
+  from_elsewhere=no
   if printf '%s' "${words[*]}" | grep -qE '(^| )[^ ]*statuses/'; then
     case $(lower "$(opt_value -X --method || true)") in
       post|put|patch) writes_status=yes ;;
@@ -490,11 +523,21 @@ while IFS= read -r segment; do
       [ -n "$field" ] || continue
       case $field in
         state=*) writes_status=yes ;;
+        # `-F key=@file` reads the value from a file, and `@-` from stdin: the value is not
+        # in this text at all. So is the whole body under `--input`. The rule was detecting
+        # the write and then guessing the rest, against this file's own doctrine that an
+        # unknown is asked and never guessed — measured, `--input body.json` really sends
+        # the status and was allowed to every role.
+        *=@*) from_elsewhere=yes ;;
       esac
       [ "$field" = "context=$review_status" ] && names_it=yes
     done <<EOF
 $(opt_values -f -F --field --raw-field)
 EOF
+    has_word --input && from_elsewhere=yes
+  fi
+  if [ "$writes_status" = yes ] && [ "$from_elsewhere" = yes ] && [ "$role" != pr-reviewer ]; then
+    decide ask "ola-workflow: this writes a commit status and takes its content from a file or from stdin, so whether it sets the $review_status status cannot be read here. Confirm only if you know it does not."
   fi
   if [ "$writes_status" = yes ] && [ "$names_it" = yes ] && [ -n "$review_status" ]; then
     if [ "$role" != pr-reviewer ]; then

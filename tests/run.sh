@@ -19,11 +19,42 @@ case $(jq --version 2>/dev/null) in
     ;;
 esac
 
+# One convention across the suites, and it was broken in two of them for a long time:
+# `ok()` and `ko()` count the assertion themselves, so a `total=$((total + 1))` beside a call
+# to either counts it twice. Only a block printing its own line with a bare `echo` increments
+# by hand. The suites announced 87 assertions they never ran — and a test count is read, by
+# whoever decides whether a change is covered, and quoted in every pull request this project
+# opens. It was wrong and nothing was looking, so now something is.
+note() { # note <suite> <message> — fails the suite once, however many things are wrong
+  echo "  !! $1 $2" >&2
+  case " ${failed[*]-} " in
+    *" $1 "*) ;;
+    *) failed+=("$1") ;;
+  esac
+}
+
 failed=()
 for suite in tests/*.test.sh; do
   [ -f "$suite" ] || continue
   echo "==> $suite"
-  if "$suite"; then :; else failed+=("$suite"); fi
+  out=$("$suite") || status=$?
+  status=${status:-0}
+  printf '%s\n' "$out"
+  if [ "$status" -ge 2 ]; then
+    note "$suite" "could not run (exit $status)"
+    echo
+    unset status
+    continue
+  fi
+  [ "$status" = 0 ] || note "$suite" "reported failing assertions"
+  announced=$(printf '%s\n' "$out" | sed -n 's/^all \([0-9]*\) .*passed$/\1/p;s/^\([0-9]*\) of \([0-9]*\) .*failed$/\2/p' | tail -1)
+  printed=$(printf '%s\n' "$out" | grep -cE '^(ok|FAIL) ')
+  if [ -z "$announced" ]; then
+    note "$suite" "announced no count at all"
+  elif [ "$announced" != "$printed" ]; then
+    note "$suite" "announces $announced assertions and printed $printed"
+  fi
+  unset status
   echo
 done
 

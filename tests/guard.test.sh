@@ -491,10 +491,18 @@ enforced ask ola-workflow:developer 'gh --made-up pr view 7'
 # of the word or the next word — rather than being another row in a list that will miss an
 # eighth.
 #
+# The eighth broke the construct itself, not another spelling: the group was read as "every
+# letter before the target is boolean", and in `gh api` only `-i` is. `-t`, `-q`, `-p`, `-H`,
+# `-f`, `-F` all take values, so `-tX -X PUT` is `-t` carrying `X` — the `-X` in that word is
+# not an option at all. Reading it as one both missed the real method and **skipped the word
+# carrying it**. The group is parsed now, left to right, against a table of which letters
+# take a value; a letter in neither table makes the reading unknown, and unknown is asked.
+#
 # Every row below is a form the real `gh` accepts, checked with GH_DEBUG=api. `-vXPUT` was
 # in this table for one cycle and is not: `gh` answers `unknown shorthand flag: 'v'`, so it
 # asserted a refusal of something nobody can run.
-for form in '-X PUT' '-X=PUT' '-XPUT' '--method PUT' '--method=PUT' '-iXPUT' '-iX PUT'; do
+for form in '-X PUT' '-X=PUT' '-XPUT' '--method PUT' '--method=PUT' '-iXPUT' '-iX PUT' \
+            '-tX -X PUT' '-qX -X PUT' '-pX -X PUT' '-HX:1 -X PUT'; do
   enforced deny ola-workflow:developer "gh api $form repos/o/r/pulls/7/merge"
   enforced allow ola-workflow:coordinator "gh api $form repos/o/r/pulls/7/merge"
 done
@@ -508,7 +516,9 @@ for form in '-f state=success -f context=relu-par-agent' \
             '-ifstate=success -ifcontext=relu-par-agent' \
             '-iFstate=success -iFcontext=relu-par-agent' \
             '-if state=success -if context=relu-par-agent' \
-            '-iF state=success -iF context=relu-par-agent'; do
+            '-iF state=success -iF context=relu-par-agent' \
+            '-tf -F state=success -F context=relu-par-agent' \
+            '-qf -f state=success -f context=relu-par-agent'; do
   enforced deny ola-workflow:developer "gh api -X POST repos/o/r/statuses/abc $form" "$STATUS"
   enforced allow ola-workflow:pr-reviewer "gh api -X POST repos/o/r/statuses/abc $form" "$STATUS"
 done
@@ -576,7 +586,29 @@ fi
 # and deleting the whole validation from guard.sh left the suite green: the check that
 # watches for a thing with no reader had no reader. So the file written is the one the helper
 # actually makes the guard read, named once here and used by both rows.
+# The rows that read the validation must have a **valid first field**, because the cwd check
+# runs before it: four earlier rows all began with something other than the cwd, so the
+# pre-existing directory invalidation threw them away and the validation was never reached.
+# Deleting it from guard.sh left the suite green — the check that watches for a thing with no
+# reader had no reader, twice in a row, and the second time the negative test that was
+# supposed to prove otherwise only passed by deleting one line too many and causing a syntax
+# error. So the line below is a *truncated* cache entry whose first four fields are real: it
+# is the shape the stat dialect actually produced, and without the validation its empty
+# review_status silently disarms the status rule.
+# The mtime has to be the real one too, or the mtime check discards the line first and the
+# field count is still never reached — which is exactly what the previous attempt did, so
+# removing the validation *again* left the suite green. Every earlier field must be valid for
+# the last check to be the one under test.
 enforced_cache=${TMPDIR:-/tmp}/ola-workflow-guard-t.cache
+shape_profile=$SHAPE/.claude/workflow.json
+shape_mtime=$(stat -c %Y "$shape_profile" 2>/dev/null)
+case $shape_mtime in ''|*[!0-9]*) shape_mtime=$(stat -f %m "$shape_profile" 2>/dev/null) ;; esac
+truncated=$(printf '%s\t%s\tintegrated\t%s\tyes' "$SHAPE" "$shape_profile" "$shape_mtime")
+printf '%s\n' "$truncated" >"$enforced_cache"
+enforced deny ola-workflow:developer \
+  'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=agent-review' "$SHAPE"
+# And the shapes whose first field is wrong are discarded by the cwd check, which is the
+# other half of the same guarantee: either way, nothing cached is served.
 printf 'one\ttwo\n' >"$enforced_cache"
 enforced allow ola-workflow:developer 'git status' "$SHAPE"
 printf 'a\tb\tc\nd\te\tf\n' >"$enforced_cache"
@@ -625,6 +657,41 @@ else
   echo "FAIL  a project that enrolled mid-session is still ruleless in that session"
   failures=$((failures + 1))
 fi
+
+# --- A short-option group this guard cannot split is asked about ---------------------
+# The tables say which of `gh api`'s short options take a value, and a letter in neither is
+# an admission rather than a guess — the guess that every letter before the target is boolean
+# is what let `-tX -X PUT` merge.
+enforced ask ola-workflow:developer 'gh api -zX PUT repos/o/r/pulls/7/merge'
+enforced ask ola-workflow:developer 'gh api -iz repos/o/r/statuses/abc'
+enforced ask ola-workflow:coordinator 'gh api -zX PUT repos/o/r/pulls/7/merge'
+
+# And the tables are `gh api`'s, so they are not consulted elsewhere: `-R` is a root flag and
+# not one of `api`'s, and asking about `gh -R owner/repo pr merge` is a table used outside
+# the command it describes. Measured — that is what the first version of this did.
+enforced deny ola-workflow:developer 'gh -R owner/repo pr merge 7'
+enforced allow ola-workflow:coordinator 'gh -R owner/repo pr merge 7'
+enforced allow ola-workflow:developer 'gh pr list --search merge'
+enforced allow ola-workflow:developer 'gh pr edit 7 --add-label "ready to merge"'
+
+# --- A payload that is not in the text is asked about, not guessed -------------------
+# `-F key=@file` reads the value from a file and `@-` from stdin; `--input` sends a whole
+# body from one. Measured: `gh api -X POST …/statuses/abc --input body.json` really sets the
+# status, and the rule detected the write and then **guessed** the rest — against this
+# guard's own doctrine that an unknown is asked and never guessed, written three screens up.
+for cmd in 'gh api -X POST repos/o/r/statuses/abc --input body.json' \
+           'gh api -X POST repos/o/r/statuses/abc -F state=success -F context=@ctx.txt' \
+           'gh api -X POST repos/o/r/statuses/abc -F state=success -F context=@-'; do
+  enforced ask ola-workflow:developer "$cmd" "$STATUS"
+  enforced ask ola-workflow:coordinator "$cmd" "$STATUS"
+  # The reviewer owns the status, so for it there is nothing to ask about.
+  enforced allow ola-workflow:pr-reviewer "$cmd" "$STATUS"
+done
+# A write whose content *is* in the text is still decided, not asked.
+enforced deny ola-workflow:developer \
+  'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=relu-par-agent' "$STATUS"
+enforced allow ola-workflow:developer \
+  'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=other-ci' "$STATUS"
 
 # --- A refusal has to say what to do instead ------------------------------------------
 # A refusal that names no way forward is a refusal an agent works around, which is how a
