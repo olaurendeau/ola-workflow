@@ -158,14 +158,22 @@ fi
 # can look like is open-ended, and every hole in it accuses the truth.
 #
 # What precedes an **offer** is a small closed set: nothing (the start of a line), a blank, a
-# backtick, an opening bracket. So the lookbehind is a whitelist, and the direction of error
-# flips with it: a character missing from this list makes the scan *miss* an offer, which is
-# a false negative and safe, where a character missing from the old list refused a true
-# sentence and was not.
+# backtick, an opening bracket, a quote (`\x27` for the apostrophe, which cannot be written
+# literally inside the single-quoted perl program). So the lookbehind is a whitelist, and the
+# direction
+# of error flips with it: a character missing from this list makes the scan *miss* an offer,
+# which is a false negative and safe, where a character missing from the old list refused a
+# true sentence and was not.
+#
+# What it misses, measured rather than left to be discovered: an offer glued to `**` (bold),
+# to `:`, to `,` or to `>`. `*` is deliberately **not** in the list — `*/developer` under a
+# glob is in the innocent table below, and adding `*` would reopen the exact false positive
+# this version closed. The other three are rare enough in these files to be worth less than
+# the risk of widening the list again.
 scan_text() { # scan_text < text → `<kind> <token>` lines, sorted
   perl -ne '
-    while (m{(?:^|(?<=[\s`([]))/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g)          { print "named $1\n" }
-    while (m{(?:^|(?<=[\s`([]))/([A-Za-z0-9_.+-]+)(?![:/?\#A-Za-z0-9_.+-])}g) { print "slash $1\n" }
+    while (m{(?:^|(?<=[\s`(["\x27]))/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g)          { print "named $1\n" }
+    while (m{(?:^|(?<=[\s`(["\x27]))/([A-Za-z0-9_.+-]+)(?![:/?\#A-Za-z0-9_.+-])}g) { print "slash $1\n" }
   ' | LC_ALL=C sort -u
 }
 SCAN=$(cat "${PROMPTS[@]}" 2>/dev/null | scan_text)   # the per-file witness above is what notices a file this cannot read
@@ -295,7 +303,8 @@ guilty='run /workflow-init to set up
 later /no-such-skill will exist
 offer /ola-workflow:nope and dispatch ola-workflow:nope
 /ola-workflow:Workflow_Init and /ola-workflow:workflow-init.v2
-and /developer, which is an agent'
+and /developer, which is an agent
+offer "/workflow-init" or `/ola-workflow:nope` in quotes'
 
 accused=$(printf '%s\n' "$innocent" | verdicts_for | sed -n 's/^ko://p')
 if [ -z "$accused" ]; then
