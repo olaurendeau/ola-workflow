@@ -52,7 +52,6 @@ sees() {
   esac
   TOKENIZE_LOG=$WORK/log; : >"$TOKENIZE_LOG"
   ( cd "$WORK" && TOKENIZE_LOG=$WORK/log PATH="$WORK/stubs:$PATH" bash -c "$line" >/dev/null 2>&1 )
-  total=$((total + 1))
   if grep -qx "$want" "$WORK/log" 2>/dev/null; then
     ok "$label: and the shell agrees it runs $want"
   else
@@ -79,7 +78,6 @@ names() {
 asks() {
   local label=$1 line=$2 why=$3 reasons
   reasons=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r 'select(.readable == false) | .reason' | tr '\n' '|')
-  total=$((total + 1))
   if [ -n "$reasons" ] && [ "${reasons#*"$why"}" != "$reasons" ]; then
     ok "$label: declared unreadable — $why"
   else
@@ -154,7 +152,6 @@ sees 'nohup'          'nohup gh --version' gh
 names 'timeout'       'timeout 5 gh --version' gh
 names 'timeout -k'    'timeout -k 5 10 gh --version' gh
 names 'sudo -u'       'sudo -u root gh --version' gh
-total=$((total + 1))
 if grep -q "sees 'nice'" "$0" && grep -q "sees 'env -u'" "$0"; then
   ok "the value-taking-option class is still measured by the nice and env rows"
 else
@@ -192,20 +189,17 @@ sees 'case alternation' 'case x in a|x) gh --version ;; esac' gh
 sees 'case later arm'   'case x in a) true ;; x) gh --version ;; esac' gh
 
 echo "--- the separator that is not one, and the text that is not code"
-total=$((total + 1))
 if [ "$(commands_of "gh pr comment -b 'a; gh pr merge 7'" | tr -d ' ')" = gh ] &&
    [ "$(printf '%s' "gh pr comment -b 'a; gh pr merge 7'" | perl "$TOKENIZE" | wc -l | tr -d ' ')" = 1 ]; then
   ok "a separator inside quotes is text: one segment"
 else
   ko "a quoted separator was treated as a separator"
 fi
-total=$((total + 1))
 if [ "$(commands_of 'gh pr comment -b "a" ; gh pr merge 7')" = "gh gh " ]; then
   ok "a separator outside quotes is a separator: two segments"
 else
   ko "a real separator did not split: $(commands_of 'gh pr comment -b "a" ; gh pr merge 7')"
 fi
-total=$((total + 1))
 if [ "$(commands_of 'gh pr comment --body-file - <<EOF
 gh pr merge 7
 EOF')" = "gh " ]; then
@@ -216,7 +210,6 @@ fi
 
 echo "--- nothing to judge is not the same as unreadable"
 for line in 'c=gh' '}' 'done' '2>/dev/null'; do
-  total=$((total + 1))
   verdict=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"')
   if [ "$verdict" = "/true" ]; then
     ok "'$line' runs no command, and is not reported as unreadable"
@@ -225,9 +218,66 @@ for line in 'c=gh' '}' 'done' '2>/dev/null'; do
   fi
 done
 
+echo "--- a prefix changes how the command is reached, never what it is given"
+# This is the invariant `normalised` exists for, and it is the one a rule depends on: rules
+# match this field, so a word that disappears from it is a rule that stops applying, with
+# nothing to show that it has. The property is stated against a reference rather than per
+# form — every grammatical prefix must leave the operands of the bare line untouched — so
+# a new prefix branch is covered the day it is written, including the one that miscounts.
+#
+# It was not stated, and two forms were wrong at once: `(gh pr merge 7)` came out as
+# `gh merge 7`, the `pr` gone because the walk renders `(gh` as two words and the
+# normaliser recovered its position by counting them; and `--admin)` kept its paren, so
+# every rule anchored on a word boundary walked past it.
+reference=$(printf '%s' 'gh pr merge 7 --admin' | perl "$TOKENIZE" | jq -r '.normalised')
+for prefix_form in \
+    'gh pr merge 7 --admin' \
+    '(gh pr merge 7 --admin)' \
+    '((gh pr merge 7 --admin))' \
+    'exec gh pr merge 7 --admin' \
+    '(exec gh pr merge 7 --admin)' \
+    'command gh pr merge 7 --admin' \
+    'env FOO=1 gh pr merge 7 --admin' \
+    'FOO=1 gh pr merge 7 --admin' \
+    '2>/dev/null gh pr merge 7 --admin' \
+    'then gh pr merge 7 --admin' \
+    'nice -n 10 gh pr merge 7 --admin' \
+    'xargs -r gh pr merge 7 --admin' \
+    'case $x in a) gh pr merge 7 --admin' \
+    'f () { gh pr merge 7 --admin' \
+    "g\\h pr merge 7 --admin" \
+    '/usr/local/bin/gh pr merge 7 --admin' \
+    '"gh" pr merge 7 --admin'; do
+  got=$(printf '%s' "$prefix_form" | perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised' | head -1)
+  if [ "$got" = "$reference" ]; then
+    ok "the operands survive: $prefix_form"
+  else
+    ko "'$prefix_form' normalised to '$got', not '$reference'"
+  fi
+done
+
+# The witness this reference needs: it must not be empty, or every row above compares
+# nothing with nothing and passes.
+if [ "$reference" = 'gh pr merge 7 --admin' ]; then
+  ok "witness: the reference is the whole line, so the rows above compare something"
+else
+  ko "witness: the reference is '$reference' — the rows above prove nothing"
+fi
+
+# A `)` that closes a substitution is balanced inside its own word and stays, because what
+# marks punctuation is the imbalance, not the character. The substitution's body is already
+# hollowed out by the splitter — it is a segment of its own, and what it computes is not in
+# this text — so what must survive here is the empty `$()`, with its closing paren: a rule
+# that reads a path must still see that the path ends in something it cannot know.
+balanced=$(printf '%s' 'gh api repos/o/r/statuses/$(git rev-parse HEAD)' | perl "$TOKENIZE" |
+  jq -r 'select(.command == "gh") | .normalised')
+case $balanced in
+  *'statuses/$()') ok "a balanced ) belongs to its word and is kept" ;;
+  *) ko "a balanced ) was taken for punctuation: $balanced" ;;
+esac
+
 echo "--- the three fields, and which one a rule may use"
 record=$(printf '%s' 'g\h pr merge 7' | perl "$TOKENIZE")
-total=$((total + 1))
 if [ "$(jq -r .raw <<<"$record")" = 'g\h pr merge 7' ] &&
    [ "$(jq -r .command <<<"$record")" = gh ] &&
    [ -n "$(jq -r .resolved <<<"$record")" ]; then
@@ -235,7 +285,6 @@ if [ "$(jq -r .raw <<<"$record")" = 'g\h pr merge 7' ] &&
 else
   ko "the three fields are not what they claim: $record"
 fi
-total=$((total + 1))
 if printf '%s' 'x' | perl "$TOKENIZE" | jq -e 'has("raw") and has("command") and has("resolved") and has("readable") and has("reason")' >/dev/null; then
   ok "every record carries all five fields, so a reader need not test for them"
 else

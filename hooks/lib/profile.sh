@@ -320,7 +320,8 @@ ola_profile_mode() {
 # caller written after this distinction existed collapsed it in two lines, and a truncated
 # profile then announced a base branch the project did not have.
 ola_profile_get_state() {
-  local key=$1 dir=${2:-$PWD} slot=${3:-} file out status
+  local key=$1 dir=${2:-$PWD} slot=${3:-} file out
+  local status=0
   [ -n "$key" ] || return 2
   file=$(ola_profile_path "$dir") || return 1
   # The gate and the read are one jq, so an unusable profile cannot be read at all: it
@@ -333,8 +334,7 @@ ola_profile_get_state() {
       elif type == "array" and (map(type == "object" or type == "array") | any | not) then .[]
       elif type == "object" or type == "array" then tojson
       else .
-      end' "$file" 2>/dev/null)
-  status=$?
+      end' "$file" 2>/dev/null) || status=$?
   case $status in
     0) ;;
     6) return 3 ;;
@@ -366,8 +366,13 @@ ola_profile_get_state() {
 # empty answer means empty. Do not re-derive that check at each read; do not skip it.
 ola_profile_get() {
   local key=$1 dir=${2:-$PWD} slot=${3:-} default=${4:-} status out
-  out=$(ola_profile_get_state "$key" "$dir" "$slot")
-  status=$?
+  # `|| status=$?` and not a bare assignment followed by `$?`: under `set -e` an assignment
+  # whose command substitution fails kills the shell **before** the next line runs. The
+  # guard is the first caller to use `set -e`, and the symptom was every command in the
+  # session blocked by the fail-closed trap — a library that is only safe without `set -e`
+  # is a library that cannot be used by the one caller that must fail closed.
+  status=0
+  out=$(ola_profile_get_state "$key" "$dir" "$slot") || status=$?
   case $status in
     0) printf '%s\n' "$out"; return 0 ;;
     3) [ $# -ge 4 ] || return 1
