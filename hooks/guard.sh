@@ -21,10 +21,20 @@
 # hole this guard exists to close. So the honest answer is to ask, and to say what could
 # not be read.
 #
-# OLA_WORKFLOW_GUARD=enforce turns the decisions on. Until then the guard **logs what it
-# would have decided** and allows, because the rate of `ask` on real sessions is not known
-# yet: at 1% it is free, at 20% a human switches the guard off and gets no guard at all.
-# Measure first. OLA_WORKFLOW_GUARD_LOG names the file; without it, logging is silent.
+# Whether the decisions are applied is **the project's** to say, in its profile:
+#
+#   "guard": "enforce"   refuse and ask. The default, because a profile is how a project
+#                        opts in, and a rule nothing applies is not a rule.
+#   "guard": "log"       decide exactly the same way, let the command run, and write the
+#                        decision to OLA_WORKFLOW_GUARD_LOG if that is set.
+#
+# It shipped log-only at first, waiting on a number: at 1% of commands asking the question is
+# free, at 20% a human switches the guard off and has no guard at all. Measured since, by
+# three independent samples, between 3% and 7% depending on how many indirection commands the
+# sample holds — and no command refused wrongly. So the default is enforcement.
+#
+# OLA_WORKFLOW_GUARD=enforce|log still overrides the profile, for one session: it is how the
+# tests pin a mode, and how a human watches before letting it act.
 set -uo pipefail
 
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -131,26 +141,28 @@ mtime_of() {
 # So a rule may read nothing but this record. A new rule that needs a new value adds a
 # field here, which is visible, rather than reaching for the profile again, which is not.
 resolve() {
-  local file mode readable status
+  local file mode readable status guard
   if file=$(ola_profile_path "$cwd"); then
     mode=$(ola_profile_mode "$cwd")
     if ola_profile_readable "$file"; then
       readable=yes
       status=$(ola_profile_get merge.review_status "$cwd" "" agent-review)
+      guard=$(ola_profile_get guard "$cwd" "" enforce)
     else
       readable=no
       status=""
+      guard=enforce
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$cwd" "$file" "$mode" "$(mtime_of "$file")" "$readable" "$status"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$cwd" "$file" "$mode" "$(mtime_of "$file")" "$readable" "$status" "$guard"
   else
-    printf '%s\t\t\t\t\t\n' "$cwd"
+    printf '%s\t\t\t\t\t\t\n' "$cwd"
   fi
 }
 
 cached=""
 if [ -n "$session" ] && [ -r "$cache" ]; then
   cached=$(cat "$cache" 2>/dev/null)
-  # One line, six fields, or it is not a cache entry. A field holding a tab or a newline
+  # One line, seven fields, or it is not a cache entry. A field holding a tab or a newline
   # shifts every field after it, and the fields after the first two decide whether a rule
   # applies at all — so a line that does not parse must read as "nothing cached" and not as
   # a profile whose values have slid one column to the left. That is how a `stat` dialect
@@ -160,11 +172,11 @@ if [ -n "$session" ] && [ -r "$cache" ]; then
   esac
   if [ -n "$cached" ]; then
     fields=$(printf '%s' "$cached" | awk -F'\t' '{print NF}')
-    [ "$fields" = 6 ] || cached=""
+    [ "$fields" = 7 ] || cached=""
   fi
 fi
 if [ -n "$cached" ]; then
-  IFS=$'\t' read -r c_cwd c_file _ c_mtime _ _ <<<"$cached"
+  IFS=$'\t' read -r c_cwd c_file _ c_mtime _ _ _ <<<"$cached"
   # Three ways a cache stops being about this project: another directory, a profile that
   # moved or disappeared, a profile that was edited.
   if [ "$c_cwd" != "$cwd" ] ||
@@ -193,11 +205,11 @@ if [ -z "$cached" ]; then
   # when a file appears in it (measured) — not the resolved file, which is what does not
   # exist. That needs the candidate list, and the guard must not restate where profiles live
   # to get it, so it waits for `ola_profile_candidates`.
-  IFS=$'\t' read -r _ fresh_file _ _ _ _ <<<"$cached"
+  IFS=$'\t' read -r _ fresh_file _ _ _ _ _ <<<"$cached"
   [ -n "$session" ] && [ -n "$fresh_file" ] &&
     { printf '%s\n' "$cached" >"$cache" 2>/dev/null || true; }
 fi
-IFS=$'\t' read -r _ profile mode _ profile_readable review_status <<<"$cached"
+IFS=$'\t' read -r _ profile mode _ profile_readable review_status guard_mode <<<"$cached"
 
 # No profile: this project has not opted into the workflow, so the guard has nothing to
 # apply and says nothing. This is the branch that keeps the plugin invisible everywhere it
@@ -210,8 +222,17 @@ IFS=$'\t' read -r _ profile mode _ profile_readable review_status <<<"$cached"
 set -e
 trap 'echo "ola-workflow: the guard failed, so this command is blocked. Run: ola-profile validate" >&2; exit 2' ERR
 
-enforcing=no
-[ "${OLA_WORKFLOW_GUARD:-}" = enforce ] && enforcing=yes
+# The profile decides, the environment overrides. The order matters: a project that wrote
+# `"guard": "log"` must not be silently enforced by an exported variable it never set, and a
+# human watching one session must be able to say so without editing the project's file.
+enforcing=yes
+case $guard_mode in
+  log) enforcing=no ;;
+esac
+case ${OLA_WORKFLOW_GUARD:-} in
+  enforce) enforcing=yes ;;
+  log)     enforcing=no ;;
+esac
 
 # The role. agent_type carries the namespaced name of a plugin agent
 # (ola-workflow:developer), measured by the A1 spike, so the role is what follows the last

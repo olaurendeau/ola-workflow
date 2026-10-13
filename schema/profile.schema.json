@@ -12,6 +12,10 @@
       "description": "integrated: the agents may write to the forge, and the coordinator may merge. discreet: memory stays local, no issue/label/status is ever written, push and PR creation need a human, and nothing is ever merged. Either value is legal in either location, though a committed profile is normally integrated and one you keep for someone else's repository is normally discreet.",
       "enum": ["integrated", "discreet"]
     },
+    "guard": {
+      "description": "enforce: the PreToolUse guard refuses what a role does not own, and asks about a command it cannot read. log: it decides exactly the same way and lets the command run, writing the decision to OLA_WORKFLOW_GUARD_LOG when that is set. Defaults to enforce, because a profile is how a project opts in and a rule nothing applies is not a rule. Set log to watch what it would do before letting it do it.",
+      "enum": ["enforce", "log"]
+    },
     "language": {
       "description": "Languages to write in. Defaults to English everywhere.",
       "type": "object",
