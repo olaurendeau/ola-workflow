@@ -27,7 +27,11 @@
       ".github/**",
       ".claude-plugin/**",
       ".claude/**",
-      "hooks/guard.sh",
+      "hooks/**",
+      "bin/**",
+      "agents/**",
+      "skills/**",
+      "schema/**",
       "Makefile"
     ]
   },
