@@ -31,6 +31,12 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 # quietly escape either set.
 WORKFLOW_ROLES="coordinator product-designer architect developer pr-reviewer"
 DIAGNOSTICS="probe"
+# Declared the same way as the roles, and for the same reason: the witness below compares
+# what is on disk against what is declared, and deriving the skills *from disk* made that
+# comparison tautological — an undeclared `skills/undeclared/SKILL.md` left it green saying
+# "the 8 commands on disk are exactly the declared ones". A witness that reads its
+# expectation from the thing it is checking is not a witness.
+WORKFLOW_SKILLS="workflow-init"
 
 AGENTS=()
 for role in $WORKFLOW_ROLES; do AGENTS+=("$ROOT/agents/$role.md"); done
@@ -47,6 +53,281 @@ for f in "${ALL[@]}"; do
 done
 for role in $WORKFLOW_ROLES; do
   if [ -f "$ROOT/agents/$role.md" ]; then ok "$role has a file"; else ko "$role is a declared role with no file"; fi
+done
+
+# --- A prompt may not name a command that does not exist -----------------------------
+# Three shipped artefacts offered `/ola-workflow:workflow-init` before any such skill
+# existed — the coordinator, the brief's no-profile refusal, and the README. Nothing
+# noticed, because a slash command has no reader until an agent offers it to a human; then
+# the one moment the plugin had to explain itself is the moment it fails.
+#
+# This check took four tries, and the two failures are worth keeping written down because
+# they are the same failure twice:
+#
+#   - a pattern looking for `/<name>` cannot tell an offer from a path, so
+#     `skills/workflow-init/SKILL.md` in the README failed the suite;
+#   - then "a bare `/name` **with a hyphen** is an offer" — and the hyphen is in
+#     `${TMPDIR:-/tmp}/ola-brief.XXXXXX`, the mktemp idiom every suite here uses. One such
+#     line in a scanned file and `make check` fails on correct code, with no rephrasing
+#     available. The justifying comment claimed the only hyphenated tokens on the tree were
+#     `-` and `ola-workflow`; measured, `ola-workflow` occurs zero times in the scanned set.
+#     I asserted a measurement instead of making one.
+#
+# An assertion against a lie that can forbid the truth is worse than no assertion: it puts
+# the author between deleting true text and switching the check off, and under pressure the
+# check loses.
+#
+# A third rule lived here for three cycles and is **gone**: "a namespace spelled almost
+# right" (`ola_workflow:x`, `Ola-Workflow:x`). Every anchor it was given had legitimate text
+# on the other side of it — slashed, it failed on `/8080:8080`, a Docker port mapping;
+# unslashed, on `image: ola_workflow:latest`, `log: ola_workflow:started`,
+# `docker build -t ola_workflow:dev` and a SQL reference. Five measured instances of one
+# defect, each closed by narrowing and each reopened next door.
+#
+# What it bought was small: a misspelled namespace, which rule 1 cannot see because it only
+# looks at the exact prefix. What it cost was a check that fails on an ordinary sentence. So
+# it is a **stated limit** rather than a sixth attempt — a prompt that spells this plugin's
+# namespace wrong is not detected — and the two rules that remain do no guessing at all.
+#
+# The general lesson, written here because it was learned five times: when a check is meant
+# to separate a mention from an offer, it cannot, because they are the same characters. Only
+# the two ends of that spectrum are decidable — a name that must resolve, and a name this
+# plugin provides written without its namespace.
+PROMPTS=("$ROOT"/agents/*.md "$BRIEF" "$ROOT/README.md")
+for skill in "$ROOT"/skills/*/SKILL.md; do [ -f "$skill" ] && PROMPTS+=("$skill"); done
+
+# Every scanned file must be *readable* and have content. Without this the scan reads
+# whatever it can and the verdicts below pass on the rest: dropping $BRIEF from the list left
+# the suite green, because a witness counting tokens cannot notice a file that went missing.
+#
+# Three conditions, and this witness needed three tries to get them. `[ -s ]` alone asks the
+# size, which stat answers for a file nobody can open, so `chmod 000 README.md` left the
+# suite green with the README silently out of the scan. `[ -r ] && [ -s ]` then both pass for
+# a **directory** named like a scanned file, which `cat` cannot read either. `[ -f ]` is the
+# one that says "a regular file", and the three together are what the label claims.
+#
+# The pattern is worth naming: each round closed the case that had just been measured and
+# left the one next to it, because the label ("readable, has content") was treated as the
+# specification instead of being derived from what `cat` actually needs.
+for f in "${PROMPTS[@]}"; do
+  label=$f
+  case $label in */skills/*) label=skills/${label#*/skills/} ;; *) label=${label##*/} ;; esac
+  if [ -f "$f" ] && [ -r "$f" ] && [ -s "$f" ]; then
+    ok "$label is a regular file, readable and non-empty, so the scan below covers it"
+  else
+    ko "$label is scanned for offers and is not a readable, non-empty file"
+  fi
+done
+
+# What this plugin provides, from the filesystem rather than from a list here. `:` separates
+# a nested name: an agent at agents/sub/x.md is ola-workflow:sub:x, which the README
+# documents as a template.
+# An array, not a string: `for name in $provided` splits on blanks and expands globs, so a
+# skill directory named `my skill` would be looked for as two names that do not exist and
+# the real one would never be checked. A name is one element, whatever is in it.
+PROVIDED=()
+for f in "$ROOT"/skills/*/SKILL.md; do [ -f "$f" ] && { n=${f%/SKILL.md}; PROVIDED+=("${n##*/}"); }; done
+for f in "$ROOT"/agents/*.md; do n=${f##*/}; PROVIDED+=("${n%.md}"); done
+
+# Its own witness, and it asserts the **exact set** rather than a floor. `>= 6` for a real 7
+# is a threshold, which is a number one tunes until it passes — and it would have let a
+# command disappear from disk without a word, which is the one thing this witness exists to
+# notice. The expected set is derived from what this file already declares at the top, so a
+# role added there and not shipped, or shipped and not declared, fails on one side or the
+# other.
+# Quoted and one per line: `for r in $WORKFLOW_ROLES` splits on blanks and expands globs,
+# which is what the comment eleven lines above forbids — and a declared name holding a `*`
+# would have been expanded against the working directory.
+# shellcheck disable=SC2086  # the three are blank-separated lists and must split here
+expected_provided=$(printf '%s\n' $WORKFLOW_ROLES $DIAGNOSTICS $WORKFLOW_SKILLS | LC_ALL=C sort -u)
+got_provided=$(printf '%s\n' "${PROVIDED[@]}" | LC_ALL=C sort -u)
+if [ "$got_provided" = "$expected_provided" ]; then
+  ok "witness: the ${#PROVIDED[@]} commands on disk are exactly the declared ones"
+else
+  ko "witness: on disk [$(printf '%s' "$got_provided" | tr '\n' ' ')] against declared [$(printf '%s' "$expected_provided" | tr '\n' ' ')]"
+fi
+
+# One scan, two patterns. The lookbehind rejects a `/` that follows a path character,
+# which is what separates an offer from a path and is why this is perl and not grep.
+scan_text() { # scan_text < text → `<kind> <token>` lines, sorted
+  perl -ne '
+    while (m{(?<![A-Za-z0-9_./:-])/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g) { print "named $1\n" }
+    while (m{(?<![A-Za-z0-9_./:-])/([A-Za-z0-9_.+-]+)(?![:/?\#A-Za-z0-9_.+-])}g) { print "slash $1\n" }
+  ' | LC_ALL=C sort -u
+}
+SCAN=$(cat "${PROMPTS[@]}" 2>/dev/null | scan_text)   # the per-file witness above is what notices a file this cannot read
+
+# A witness per pattern, because a dead pattern is the defect this block already had: when
+# only the `named` count was checked, neutering the slash pattern left the suite green and
+# printing "both verdicts read something". Three patterns, three counts.
+for pair in named:1 slash:1; do
+  kind=${pair%:*}
+  got=$(printf '%s\n' "$SCAN" | grep -c "^$kind " || true)
+  if [ "$got" -ge "${pair#*:}" ]; then
+    ok "witness: the $kind pattern read $got token(s), so its verdict below reads something"
+  else
+    ko "witness: the $kind pattern read nothing — its verdict below is blind"
+  fi
+done
+
+# The two rules, written once and fed two ways: the shipped prompts, and the fixture tables
+# below. They were written twice for one cycle — inline here and again inside the fixture
+# helper — and the two promptly disagreed: a skip added to one left the other accusing a
+# version tag. A rule stated in two places is a rule agreed in one.
+#
+# Each verdict is a line `ok|ko:<rule>:<token>`, so a caller can print them all or keep only
+# the refusals.
+verdicts_for() { # verdicts_for < text → one `ok|ko:<rule>:<token>` line per verdict
+  local scan; scan=$(scan_text)
+
+  # 1. Named: every `ola-workflow:<x>` must resolve, with or without the leading slash. Both
+  # spellings are real — a slash command is typed `/ola-workflow:x`, the Agent tool's
+  # subagent_type is the bare `ola-workflow:x` — and either way the thing has to exist. The
+  # class is greedy, `.` and `+` included, so a malformed name fails by its own name rather
+  # than being quietly captured as the valid prefix of itself.
+  printf '%s\n' "$scan" | sed -n 's/^named ola-workflow://p' | while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    # No skip here, and the one that was here was wrong twice over. It read "a command name
+    # never begins with a digit", which is false — `skills/2fa-setup/SKILL.md` with
+    # `name: 2fa-setup` passes `claude plugin validate --strict` with no warning — and it let
+    # `/ola-workflow:2fa-nope` through, which is this check's original defect walking back in.
+    #
+    # There is nothing to put in its place: `ola-workflow:latest` (an image tag) and
+    # `ola-workflow:workflow-init` (a command) are the same shape, and no reading of the text
+    # tells them apart. So the rule flags every `ola-workflow:<x>` that is not a command, and
+    # that is the **limit**: do not write this plugin's namespace followed by something that
+    # is not one of its commands. It is in the README, next to the reason.
+    as_path=$(printf '%s' "$t" | tr ':' '/')
+    if [ -f "$ROOT/skills/$as_path/SKILL.md" ] || [ -f "$ROOT/agents/$as_path.md" ]; then
+      echo "ok:named:$t"
+    else
+      echo "ko:named:$t"
+    fi
+  done
+
+  # 2. A command this plugin provides must never be written as a bare `/name`, which resolves
+  # to nothing. Exact equality against the filesystem — no guessing about what a name looks
+  # like, which is what two earlier versions of this check did.
+#
+# The lookahead rejects a token followed by more path (`/probe/last.json`,
+# `/developer/settings`, `/coordinator?x=1`): a path has path after it, and that *is*
+# decidable, unlike the token standing alone.
+  #
+  # The gap, stated rather than guessed around: a bare offer of something that does not exist
+  # *yet* — `/verify-ui` before that skill ships — is not detected, because nothing can tell
+  # it from `/tmp` or `/usr`. The day the skill ships, this rule covers it.
+  for name in "${PROVIDED[@]}"; do
+    if printf '%s\n' "$scan" | grep -qxF "slash $name"; then
+      echo "ko:slash:$name"
+    else
+      echo "ok:slash:$name"
+    fi
+  done
+  return 0
+}
+
+while IFS= read -r verdict; do
+  [ -n "$verdict" ] || continue
+  rest=${verdict#*:}
+  token=${rest#*:}
+  case $verdict in
+    ok:named:*)  ok "ola-workflow:$token is named by a prompt, and exists" ;;
+    ko:named:*)  ko "ola-workflow:$token is named by a shipped prompt, and nothing provides it. Either add it, or — if the point was to name a wrong example — describe it rather than write it, since a mention and an offer are the same characters here." ;;
+    ok:slash:*)  ok "$token is never named without its namespace" ;;
+    ko:slash:*)  ko "/$token is named by a shipped prompt and resolves to nothing: a command of this plugin is typed /ola-workflow:$token. If you meant to show the mistake, describe it rather than write it." ;;
+    *)           ko "unrecognised verdict from verdicts_for: $verdict" ;;
+  esac
+done <<EOF
+$(cat "${PROMPTS[@]}" 2>/dev/null | verdicts_for)
+EOF
+
+# --- The scan itself, against text it must not accuse ---------------------------------
+# This check could forbid true text three times running: once on a path
+# (`skills/workflow-init/SKILL.md`), once on the mktemp idiom
+# (`${TMPDIR:-/tmp}/ola-brief.XXXXXX`), once on a Docker port mapping (`/8080:8080`) in a
+# README that already talks about Docker. Each time it was green on the tree *as it stood*
+# and one sentence away from failing, and each time it was found by a reader rather than by
+# the suite — because the suite only ever scanned the files that happen to exist today.
+#
+# So the scan is fed text directly. A false positive here is the dangerous direction: it puts
+# the author between deleting a true sentence and switching the check off, and under pressure
+# the check loses. Hence two tables, and the innocent one first.
+#
+# The innocent table is the record of what this check has cost: each line was green on the
+# tree as it stood and one sentence away from failing, and each was found by a reader rather
+# than by the suite. Adding a line here is cheaper than the cycle that finds it.
+# shellcheck disable=SC2016  # ${TMPDIR:-/tmp} is the text under test, not an expansion
+innocent='skills/workflow-init/SKILL.md and agents/developer.md
+ghcr.io/acme/ola-workflow:latest and registry.example.com/ola-workflow:dev
+a log line ola_workflow: started, a key ola-workflow: build, OLA_WORKFLOW: 1
+the file runs/probe/last.json, the path /developer/settings, the url /coordinator?x=1
+image: ola_workflow:latest and the tag ola_workflow:1.2
+log: ola_workflow:started and docker build -t ola_workflow:dev .
+select * from ola_workflow:v1 and ghcr.io/acme/ola_workflow:1.2
+the designer/developer split, runs/probe/last.json
+W=$(mktemp -d "${TMPDIR:-/tmp}/ola-brief.XXXXXX")
+docker run -p /8080:8080 -v /host:/container img
+ports: - /8080:8080 and a path /a:b and a link [x](/a:b)
+see file:///tmp/x and https://example.com/a and C:/win/path
+2>/dev/null and s/a/b/ and a date 12/10/2026
+a ratio 1:2, a time 12:30, fd00::1, file:line, <!-- spike:begin -->
+paths /tmp/x, /usr/bin, /srv, ~/.claude/plugins
+dispatch `ola-workflow:developer` and offer `/ola-workflow:workflow-init`'
+# `/no-such-skill` and not `/verify-ui`: the second is a skill `README.md` plans to ship, and
+# a table that hard-codes it would make this suite fail on the correct change that adds it.
+# A fixture must name something that stays false.
+guilty='run /workflow-init to set up
+later /no-such-skill will exist
+offer /ola-workflow:nope and dispatch ola-workflow:nope
+/ola-workflow:Workflow_Init and /ola-workflow:workflow-init.v2
+and /developer, which is an agent'
+
+accused=$(printf '%s\n' "$innocent" | verdicts_for | sed -n 's/^ko://p')
+if [ -z "$accused" ]; then
+  ok "the scan accuses none of the 16 lines of correct text it has failed on or nearly did"
+else
+  ko "the scan accuses correct text: $(printf '%s' "$accused" | tr '\n' ' ')"
+fi
+
+# The exact set, not a count over a threshold: a threshold is a number one tunes until it
+# passes, and it hides both a rule that stopped firing and a rule that started firing twice.
+# `/no-such-skill` is deliberately absent from the expected set — it is the gap rule 2 names,
+# and nothing can tell a bare offer of a command that does not exist yet from `/tmp`. The two
+# spellings of `nope`, slashed and bare, are one verdict because they are one missing name;
+# and `ola_workflow:workflow-init` is written bare here on purpose, because the bare form is
+# the one `subagent_type` uses and the rule now covers it.
+expected='named:Workflow_Init
+named:nope
+named:workflow-init.v2
+slash:developer
+slash:workflow-init'
+# LC_ALL=C, because the collation of the user's locale decides whether `Workflow_Init`
+# sorts before `nope` — and this assertion compared a sorted list against a written one, so
+# it passed in `make` and failed in an interactive shell on the same files. A test whose
+# verdict depends on the environment's locale is a test that is right by accident.
+caught=$(printf '%s\n' "$guilty" | verdicts_for | sed -n 's/^ko://p' | LC_ALL=C sort -u | grep . || true)
+if [ "$caught" = "$expected" ]; then
+  ok "the scan catches exactly the 5 broken spellings it claims, and no others"
+else
+  ko "the scan's verdicts changed: got [$(printf '%s' "$caught" | tr '\n' ' ')] want [$(printf '%s' "$expected" | tr '\n' ' ')]"
+fi
+
+# A skill resolves by its frontmatter name, not by its directory, so the two disagreeing is
+# a command that exists under a name nothing offers.
+for skill in "$ROOT"/skills/*/SKILL.md; do
+  [ -f "$skill" ] || continue
+  dir=${skill%/SKILL.md}; dir=${dir##*/}
+  declared=$(awk '/^---$/{c++; next} c==1 && /^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}' "$skill")
+  if [ "$declared" = "$dir" ]; then
+    ok "skills/$dir: its declared name is the one that resolves"
+  else
+    ko "skills/$dir: declares name '$declared', so it resolves as ola-workflow:$declared"
+  fi
+  if [ -n "$(awk '/^---$/{c++; next} c==1 && /^description:/' "$skill")" ]; then
+    ok "skills/$dir: has a description, which is what decides whether it is loaded"
+  else
+    ko "skills/$dir: has no description, so nothing can decide to load it"
+  fi
 done
 
 frontmatter() { awk '/^---$/{c++; if (c==2) exit} c==1' "$1"; }

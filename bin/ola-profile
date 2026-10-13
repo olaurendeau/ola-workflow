@@ -16,6 +16,8 @@ usage: ola-profile [-C <dir>] [--slot <n>] <command> [args]
 commands:
   path                  the profile file in use
   dir                   the directory holding it (in discreet mode, also the agents' memory)
+  where [user|project]  where a profile would go, whether one is there or not
+  schema                the schema file this CLI validates against
   id                    <host>/<owner>/<repo>, from `git remote get-url upstream || origin`
   mode                  integrated | discreet
   get <key> [default]   one value, dotted path; an array prints one item per line
@@ -79,6 +81,41 @@ shift
 case $command in
   path) ola_profile_path "$dir" ;;
   dir) ola_profile_dir "$dir" ;;
+  # `where` answers before a profile exists, which is what `path` cannot do and what
+  # creating the first one needs. With a scope it prints that one path and nothing else, so
+  # a caller writing a file never has to pick a line out of a list.
+  # So that whoever writes a profile can point an editor at the schema without restating
+  # where the plugin keeps it. `validate` already resolves it; this prints the same answer.
+  # Status 1 when the file is not there, like every other answer this CLI gives about a
+  # value it cannot supply. Printing a path that leads nowhere, successfully, is what sends
+  # a caller to write it into a file.
+  schema)
+    [ -f "$OLA_PROFILE_SCHEMA" ] || {
+      echo "ola-profile schema: $OLA_PROFILE_SCHEMA is not there" >&2
+      exit 1
+    }
+    printf '%s\n' "$OLA_PROFILE_SCHEMA" ;;
+  where)
+    if [ $# -gt 0 ]; then
+      case $1 in
+        user|project) ;;
+        *) echo "ola-profile where: scope is user or project, not '$1'" >&2; exit 2 ;;
+      esac
+      line=$(ola_profile_candidates "$dir" | grep "^$1 ") || {
+        echo "ola-profile where: no $1 path applies here (is this a git repository with a remote?)" >&2
+        exit 1
+      }
+      printf '%s\n' "${line#* }"
+    else
+      # Status 1 when there is no candidate at all, because that is this CLI's contract for
+      # "the value you asked for is not available" — and printing nothing, successfully, is
+      # the one answer a caller must never get. Outside a repository it used to do exactly
+      # that.
+      out=$(ola_profile_candidates "$dir")
+      [ -n "$out" ] || exit 1
+      printf '%s\n' "$out"
+    fi
+    ;;
   id) ola_profile_id "$dir" ;;
   mode) ola_profile_mode "$dir" ;;
   get)
