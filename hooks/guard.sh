@@ -58,6 +58,12 @@ session=$(field '.session_id')
 # unless a human edits it, so the answer is cached — and the cache is invalidated by the
 # profile's own mtime, because a cache that serves a stale profile applies the rules of a
 # project that no longer exists, which is worse than being slow.
+#
+# Two things are deliberately not cached, both because they have nothing to key an
+# invalidation on: the absence of a profile (see below), and — still outstanding — the
+# appearance of a *higher-precedence* profile beside a cached lower-precedence one. The
+# second needs the candidate list rather than the resolved file, and the guard must not
+# restate where profiles live to get it.
 cache=${TMPDIR:-/tmp}/ola-workflow-guard-${session:-nosession}.cache
 
 mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
@@ -105,7 +111,18 @@ if [ -n "$cached" ]; then
 fi
 if [ -z "$cached" ]; then
   cached=$(resolve)
-  [ -n "$session" ] && { printf '%s\n' "$cached" >"$cache" 2>/dev/null || true; }
+  # "No profile" is never cached. Its invalidation has nothing to key on — there is no file
+  # to watch the mtime of — so a cached one survived the whole session, and a project
+  # enrolled *during* it stayed ruleless to the end. That is what /ola-workflow:workflow-init
+  # does: it writes the profile, reports it written, and the guard it switches on does not
+  # come on until the next session. `gh pr merge` included.
+  #
+  # Nothing is lost by not caching it: resolution is cheapest in exactly that case — with no
+  # ~/.claude/workflow-profiles directory the remote is never looked up at all — and a
+  # project with no profile is one the guard has no rules for anyway.
+  IFS=$'\t' read -r _ fresh_file _ _ _ _ <<<"$cached"
+  [ -n "$session" ] && [ -n "$fresh_file" ] &&
+    { printf '%s\n' "$cached" >"$cache" 2>/dev/null || true; }
 fi
 IFS=$'\t' read -r _ profile mode _ profile_readable review_status <<<"$cached"
 
@@ -176,30 +193,78 @@ segments=$(printf '%s' "$command_line" | perl "$TOKENIZE")
 #
 # So: `gh_subcommand` for an operation, `has_word` for a flag, `opt_value` for what an
 # option carries. All three compare with `=`, never with a pattern.
-has_word() { # has_word <value>
-  local w
-  for w in ${words[@]+"${words[@]}"}; do [ "$w" = "$1" ] && return 0; done
-  return 1
-}
-opt_value() { # opt_value <name> … → what the first of those options carries
-  local i=0 n w
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# opt_values <name> … → every value those options carry, one per line, in order.
+#
+# An option carries its value five ways, and reading only one of them is a false negative
+# with nothing to show for it. Measured against the real `gh`:
+#
+#   -X PUT        separate word
+#   -X=PUT        glued with an equals sign
+#   -XPUT         glued, short options only — `gh api -XGET` really sends a GET
+#   --method PUT  separate word
+#   --method=PUT  glued with an equals sign
+#
+# The first version compared whole words, so the three glued forms vanished: `-XPUT` merged
+# and `-Fstate=success -Fcontext=agent-review` wrote the status the merge gate reads, both
+# allowed to every role. The regex this replaced had `[= ]?` and caught two of the three by
+# accident — a reminder that moving to a cleaner interface can lose coverage the messy one
+# had, so the forms belong in the tests and not in anyone's memory.
+opt_values() {
+  local i=0 n w step
   while [ "$i" -lt "${#words[@]}" ]; do
     w=${words[$i]}
+    step=1
     for n in "$@"; do
       if [ "$w" = "$n" ]; then
-        i=$((i + 1))
-        [ "$i" -lt "${#words[@]}" ] && printf '%s' "${words[$i]}"
-        return 0
+        [ $((i + 1)) -lt "${#words[@]}" ] && printf '%s\n' "${words[$((i + 1))]}"
+        step=2
+        break
       fi
       case $w in
-        "$n"=*) printf '%s' "${w#*=}"; return 0 ;;
+        "$n"=*) printf '%s\n' "${w#*=}"; break ;;
+      esac
+      # Glued, and only for a short option: `--methodPUT` is not a spelling of anything.
+      case $n in
+        -[!-])
+          case $w in
+            "$n"?*) printf '%s\n' "${w#"$n"}"; break ;;
+          esac ;;
       esac
     done
-    i=$((i + 1))
+    i=$((i + step))
   done
-  return 1
 }
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# opt_value <name> … → what the LAST of those options carries, because that is the one the
+# tool uses: `gh api -X GET -X PUT …` sends a PUT, measured in both orders. Taking the
+# first turned every repeated option into a way past the rule.
+opt_value() {
+  local last
+  last=$(opt_values "$@" | tail -1)
+  [ -n "$last" ] || return 1
+  printf '%s' "$last"
+}
+
+# has_flag <--name> → that boolean flag is set. A boolean is also written `--name=true`, and
+# `--name=false` *unsets* it — so neither a membership test nor a prefix test will do, and
+# `gh pr merge --admin=true` walked past `has_word --admin` while really merging past the
+# checks. The last occurrence decides, as it does for a value.
+has_flag() {
+  local w verdict=1
+  for w in ${words[@]+"${words[@]}"}; do
+    [ "$w" = "$1" ] && { verdict=0; continue; }
+    case $w in
+      "$1"=*)
+        case $(lower "${w#*=}") in
+          false|0|f|no) verdict=1 ;;
+          *)            verdict=0 ;;
+        esac ;;
+    esac
+  done
+  return "$verdict"
+}
 
 # The subcommand path of `gh`, which is what a rule about an operation needs: `gh pr merge`
 # is three positions, not a substring. `gh` lets a flag come before the subcommand
@@ -219,29 +284,52 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # So the walk collects the leading run of non-option words and stops at the first option;
 # the tables are consulted only while nothing has been collected yet, which is exactly
 # where an unknown option could still hide the subcommand.
-gh_subcommand() { # gh_subcommand → the leading non-option words after `gh`; 1 if unreadable
+# Sets GH_SUB and GH_PATH_END rather than printing, because `sub=$(gh_subcommand)` runs the
+# function in a subshell and the index it works out there does not come back — which left
+# `help_is_the_operation` reading a stale 0 and refusing `gh pr merge --help` again. A
+# function with two results has two variables; one of them on stdout buys nothing.
+GH_SUB=""
+GH_PATH_END=0
+gh_subcommand() { # gh_subcommand → 0 and sets GH_SUB/GH_PATH_END; 1 when unreadable
   local i=1 w out=""
+  GH_SUB=""
+  GH_PATH_END=${#words[@]}
   while [ "$i" -lt "${#words[@]}" ]; do
     w=${words[$i]}
     case $w in
       -*)
-        [ -n "$out" ] && break          # the subcommand is already known
+        [ -n "$out" ] && { GH_PATH_END=$i; break; }   # the subcommand is already known
         case $w in
           -*=*)             i=$((i + 1)) ;;   # the value is inside the word
           -R|--repo)        i=$((i + 2)) ;;   # takes a value: skip it too
-          --help|--version) i=$((i + 1)) ;;   # takes none
+          --help|--version) GH_PATH_END=$i; i=$((i + 1)) ;;   # takes none
           *)                return 1 ;;       # neither table knows it: say so, never assume
         esac ;;
       *) out="$out $w"; i=$((i + 1)) ;;
     esac
   done
-  printf '%s' "${out# }"
+  GH_SUB=${out# }
+  return 0
 }
 
-# A help request performs nothing, whatever it asks about. Without this `gh pr merge --help`
-# was refused for not being the coordinator — a refusal that teaches an agent the guard does
-# not understand what it is reading, which is how refusals stop being read.
-asks_for_help() { has_word --help || has_word -h; }
+# A help request performs nothing, so `gh pr merge --help` must not be refused for not
+# being the coordinator — a refusal an agent cannot make sense of is how refusals stop being
+# read. But `-h` anywhere is not a help request: `gh pr merge 7 --squash --subject -h` gives
+# `-h` to `--subject` as its value and **merges**, measured, and the first version of this
+# disarmed the rule on exactly that line. Whether a `-h` is a flag or a value depends on
+# which options take values, which is a table per subcommand that cannot be kept correct.
+#
+# So help is honoured only where it is unambiguous: immediately after the subcommand path,
+# which is where a human writes it to read the help. Any later `-h` may be an operand, and a
+# merge that is refused for mentioning help is a false positive of no consequence, while a
+# merge allowed for mentioning help is the hole.
+help_is_the_operation() {
+  [ "$GH_PATH_END" -lt "${#words[@]}" ] || return 1
+  case ${words[$GH_PATH_END]} in
+    --help|-h) return 0 ;;
+  esac
+  return 1
+}
 
 while IFS= read -r segment; do
   [ -n "$segment" ] || continue
@@ -270,6 +358,14 @@ while IFS= read -r segment; do
     decide ask "ola-workflow: this command cannot be read, so no rule can be applied to it — $reason (at: $resolved). Confirm only if you know what it runs."
   fi
 
+  # A segment with no words runs no command — a bare assignment, a `done`, a closing brace.
+  # There is nothing for a rule to be about, and going on costs more than a skipped loop:
+  # under bash 3.2, the only bash macOS ships, `"${words[*]}"` on an empty array trips
+  # `set -u` and the fail-closed trap, so every `if … fi`, `for … done` and `esac` in a
+  # command line printed `words[*]: unbound variable` — in the shipped mode, on stderr,
+  # where nothing in this suite was reading.
+  [ "${#words[@]}" -gt 0 ] || continue
+
   # ------------------------------------------------------------------ merging
   # A merge is the one action that makes a change permanent, so it belongs to the one role
   # that has seen the review. The API form counts: a PUT on a pulls/N/merge path merges
@@ -280,19 +376,19 @@ while IFS= read -r segment; do
   # own bug. Which is what happened, and what the suite said on the first run: the
   # fail-closed branch is not theoretical, and it is reached by a shell idiom.
   merging=no
-  if [ "$cmd" = gh ] && ! asks_for_help; then
-    if sub=$(gh_subcommand); then
+  if [ "$cmd" = gh ]; then
+    if gh_subcommand && ! help_is_the_operation; then
       # The subcommand, by position. `gh pr merge` and nothing that merely contains those
       # words: a label named "ready to merge", a search for `merge`, `gh pr merge --help`.
-      case $sub in
+      case $GH_SUB in
         'pr merge'|'pr merge '*) merging=yes ;;
       esac
-    else
-      decide ask "ola-workflow: this gh call carries an option I do not know ($(printf '%s' "${words[*]}")), so which operation it performs cannot be read and no rule can be applied to it."
+    elif ! gh_subcommand; then
+      decide ask "ola-workflow: this gh call carries an option I do not know (${words[*]}), so which operation it performs cannot be read and no rule can be applied to it."
     fi
     # The API form merges exactly as the CLI does, so a rule that knew only the CLI would
     # be a rule about spelling. The method is compared folded, because gh accepts `-X put`.
-    if printf '%s' "${words[*]}" | grep -qE 'pulls/[^ /]+/merge'; then
+    if printf '%s' "${words[*]}" | grep -qE 'pulls/[^ /]+/merge' && ! help_is_the_operation; then
       case $(lower "$(opt_value -X --method || true)") in
         put|patch|post) merging=yes ;;
       esac
@@ -302,7 +398,7 @@ while IFS= read -r segment; do
     # --admin and --auto are refused to everyone, the coordinator included: one bypasses
     # the checks the gate is made of, the other merges later, when nobody is watching and
     # the review no longer applies to the commit that lands.
-    if has_word --admin || has_word --auto; then
+    if has_flag --admin || has_flag --auto; then
       decide deny "ola-workflow: --admin and --auto are refused to every role. --admin merges past the checks this project requires, and --auto merges at a moment when the review no longer applies to what lands. Merge with --match-head-commit on the SHA you checked."
     fi
     if [ "$role" != coordinator ]; then
@@ -317,17 +413,25 @@ while IFS= read -r segment; do
   # Each half compared as a value. The status name comes from the project's profile and is
   # therefore arbitrary text — `c++-review` is schema-valid — so it may never reach a regex:
   # as a pattern it matched nothing it was meant to, and an empty one matched everything.
+  # The fields are read through opt_values, not looked for among the words: `-Fstate=success`
+  # is one word, and a membership test on `state=…` never saw it.
   writes_status=no
+  names_it=no
   if printf '%s' "${words[*]}" | grep -qE '(^| )[^ ]*statuses/'; then
     case $(lower "$(opt_value -X --method || true)") in
       post|put|patch) writes_status=yes ;;
     esac
-    for w in ${words[@]+"${words[@]}"}; do
-      case $w in state=*) writes_status=yes ;; esac
-    done
+    while IFS= read -r field; do
+      [ -n "$field" ] || continue
+      case $field in
+        state=*) writes_status=yes ;;
+      esac
+      [ "$field" = "context=$review_status" ] && names_it=yes
+    done <<EOF
+$(opt_values -f -F --field --raw-field)
+EOF
   fi
-  if [ "$writes_status" = yes ] && [ -n "$review_status" ] &&
-     has_word "context=$review_status"; then
+  if [ "$writes_status" = yes ] && [ "$names_it" = yes ] && [ -n "$review_status" ]; then
     if [ "$role" != pr-reviewer ]; then
       decide deny "ola-workflow: only the pr-reviewer sets the $review_status status, because it is what the merge gate reads. Ask the coordinator to dispatch a review."
     fi

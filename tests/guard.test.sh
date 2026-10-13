@@ -14,6 +14,21 @@ failures=0
 total=0
 
 # Classify one guard run: allow (no decision on stdout) | deny | ask | error(exit N).
+# Every run checks its own stderr. A guard that writes to stderr while deciding correctly
+# is a guard whose own bug is invisible: `"${words[*]}"` on an empty array trips `set -u`
+# under bash 3.2 — the only bash macOS ships — so every `if … fi` and `for … done` in a
+# command line printed `words[*]: unbound variable`, in the shipped mode, while the suite
+# stayed green because every run redirected stderr to /dev/null. The thing had no reader.
+# Exit 2 is the exception: that path exists to explain itself on stderr.
+noisy() { # noisy <stderr file> <rc> <label>
+  local err=$1 rc=$2 label=$3
+  [ -s "$err" ] || return 0
+  [ "$rc" = 2 ] && return 0
+  total=$((total + 1))
+  failures=$((failures + 1))
+  echo "FAIL  the guard wrote to stderr while deciding: $(head -1 "$err")  $label"
+}
+
 classify() {
   local output=$1 rc=$2 decision
   if [ "$rc" -ne 0 ]; then
@@ -45,12 +60,15 @@ report() {
 # An empty agent omits the key entirely, which is what Claude Code sends on a main
 # session with no agent (agent_type is optional and absent, not "").
 check() {
-  local expected=$1 agent=$2 cmd=$3 input output rc
+  local expected=$1 agent=$2 cmd=$3 input output rc err
   input=$(jq -n --arg c "$cmd" --arg a "$agent" \
     '{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}
      + (if $a == "" then {} else {agent_type: $a} end)')
-  output=$("$GUARD" <<<"$input" 2>/dev/null)
+  err=$(mktemp "${TMPDIR:-/tmp}/ola-err.XXXXXX")
+  output=$("$GUARD" <<<"$input" 2>"$err")
   rc=$?
+  noisy "$err" "$rc" "[${agent:-main}] ${cmd//$'\n'/ ⏎ }"
+  rm -f "$err"
   report "$expected" "$(classify "$output" "$rc")" "[${agent:-main}] ${cmd//$'\n'/ ⏎ }"
 }
 
@@ -188,13 +206,16 @@ INTEGRATED=$(profiled integrated)
 # enforced <expected> <role> <command> [cwd]
 # Same three-way classification as check(), with a profile and enforcement on.
 enforced() {
-  local expected=$1 agent=$2 cmd=$3 dir=${4:-$INTEGRATED} input output rc
+  local expected=$1 agent=$2 cmd=$3 dir=${4:-$INTEGRATED} input output rc err
   input=$(jq -n --arg c "$cmd" --arg a "$agent" --arg d "$dir" \
     '{hook_event_name: "PreToolUse", tool_name: "Bash", session_id: "t", cwd: $d,
       tool_input: {command: $c}}
      + (if $a == "" then {} else {agent_type: $a} end)')
-  output=$(OLA_WORKFLOW_GUARD=enforce "$GUARD" <<<"$input" 2>/dev/null)
+  err=$(mktemp "${TMPDIR:-/tmp}/ola-err.XXXXXX")
+  output=$(OLA_WORKFLOW_GUARD=enforce "$GUARD" <<<"$input" 2>"$err")
   rc=$?
+  noisy "$err" "$rc" "[enforce ${agent:-main}] ${cmd//$'\n'/ ⏎ }"
+  rm -f "$err"
   report "$expected" "$(classify "$output" "$rc")" "[enforce ${agent:-main}] ${cmd//$'\n'/ ⏎ }"
 }
 
@@ -443,6 +464,89 @@ enforced allow ola-workflow:developer \
 # operation this is — so it is asked. After the subcommand it cannot, which is why every
 # real `gh` call above is answered rather than asked.
 enforced ask ola-workflow:developer 'gh --made-up pr view 7'
+
+# --- The five ways an option carries its value ---------------------------------------
+# Moving the rules from a joined string to words lost coverage the messy version had by
+# accident: its `[= ]?` was optional, so it caught two of the three glued forms, while a
+# whole-word comparison caught none. Four authorisation regressions in one change, each one
+# a role merging or writing the review status. So the forms live here and not in anyone's
+# memory, and every one is a form `gh` really accepts — measured with GH_DEBUG=api.
+for form in '-X PUT' '-X=PUT' '-XPUT' '--method PUT' '--method=PUT'; do
+  enforced deny ola-workflow:developer "gh api $form repos/o/r/pulls/7/merge"
+  enforced allow ola-workflow:coordinator "gh api $form repos/o/r/pulls/7/merge"
+done
+# The same five, for the fields that name the review status.
+for form in '-f state=success -f context=relu-par-agent' \
+            '-f=state=success -f=context=relu-par-agent' \
+            '-fstate=success -fcontext=relu-par-agent' \
+            '--field state=success --field context=relu-par-agent' \
+            '--field=state=success --field=context=relu-par-agent' \
+            '-Fstate=success -Fcontext=relu-par-agent'; do
+  enforced deny ola-workflow:developer "gh api -X POST repos/o/r/statuses/abc $form" "$STATUS"
+  enforced allow ola-workflow:pr-reviewer "gh api -X POST repos/o/r/statuses/abc $form" "$STATUS"
+done
+
+# An option repeated: the tool uses the last one, measured in both orders, so reading the
+# first turned every repetition into a way past the rule.
+enforced deny ola-workflow:developer 'gh api -X GET -X PUT repos/o/r/pulls/7/merge'
+enforced deny ola-workflow:developer 'gh api --method=GET --method=PUT repos/o/r/pulls/7/merge'
+enforced allow ola-workflow:developer 'gh api -X PUT -X GET repos/o/r/pulls/7/merge'
+
+# A boolean is also written `--name=true`, and `--name=false` unsets it. `--admin=true`
+# really merges past the checks, and walked past a membership test on `--admin`.
+for form in '--admin' '--admin=true' '--admin=1' '--auto' '--auto=true' '--auto=yes'; do
+  enforced deny ola-workflow:coordinator "gh pr merge 7 $form"
+done
+enforced allow ola-workflow:coordinator 'gh pr merge 7 --admin=false'
+enforced allow ola-workflow:coordinator 'gh pr merge 7 --auto=0'
+
+# `-h` is a help request only where it cannot be an operand. `--subject -h` gives `-h` to
+# `--subject` as its value and **merges** — measured — and honouring help anywhere disarmed
+# the rule on exactly that line.
+enforced allow ola-workflow:developer 'gh pr merge --help'
+enforced allow ola-workflow:developer 'gh pr merge -h'
+enforced allow ola-workflow:developer 'gh pr merge 7 --help'
+enforced deny ola-workflow:developer 'gh pr merge 7 --squash --subject -h'
+enforced deny ola-workflow:developer 'gh pr merge 7 --subject --help'
+
+# --- A project that enrols during a session gets its rules at once -------------------
+# The absence of a profile is not cached, because its invalidation has nothing to key on:
+# there is no file to watch. A cached absence survived the whole session, so a project
+# enrolled during it stayed ruleless to the end — which is exactly what
+# /ola-workflow:workflow-init does: it writes the profile, reports it written, and the guard
+# it switches on does not come on until the next session. `gh pr merge` included.
+LATE=$(cd "$(mktemp -d "$WORK/late.XXXXXX")" && pwd -P)
+git -C "$LATE" -c init.defaultBranch=main init -q 2>/dev/null
+late_run() { # late_run <command> → the decision, on one fixed session id
+  # Through classify(), not through a second jq of its own: `jq -r '… // "allow"'` prints
+  # *nothing* on empty input — the default applies to a value that is null, not to the
+  # absence of any value — so an allow came back as the empty string and the witness failed
+  # while the guard was right. One classifier, the harness's.
+  local out rc
+  out=$(jq -n --arg c "$1" --arg d "$LATE" \
+    '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"late",cwd:$d,
+      agent_type:"ola-workflow:developer",tool_input:{command:$c}}' |
+    OLA_WORKFLOW_GUARD=enforce "$GUARD" 2>/dev/null)
+  rc=$?
+  classify "$out" "$rc"
+}
+total=$((total + 1))
+late_first=$(late_run 'gh pr merge 7')
+if [ "$late_first" = allow ]; then
+  echo "ok    witness: with no profile the guard decides nothing, so the next line measures the change"
+else
+  echo "FAIL  witness: the guard decided '$late_first' for a project with no profile"
+  failures=$((failures + 1))
+fi
+mkdir -p "$LATE/.claude"
+printf '%s\n' '{"mode":"integrated"}' >"$LATE/.claude/workflow.json"
+total=$((total + 1))
+if [ "$(late_run 'gh pr merge 7')" = deny ]; then
+  echo "ok    a profile written mid-session applies to the very next command"
+else
+  echo "FAIL  a project that enrolled mid-session is still ruleless in that session"
+  failures=$((failures + 1))
+fi
 
 # --- A refusal has to say what to do instead ------------------------------------------
 # A refusal that names no way forward is a refusal an agent works around, which is how a
