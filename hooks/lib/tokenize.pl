@@ -241,17 +241,21 @@ my %wrapper = map { $_ => 1 } qw(
 # have matched does not — a false negative, silently. `sudo -u x gh pr merge` gave `x`
 # until this table existed. An option this table does not know makes the segment
 # unreadable rather than guessed, which costs an ask and never a miss.
+# Both spellings of each option, because a table of short forms is a table that is right
+# half the time: `sudo -u postgres psql` read as `psql` while `sudo --user postgres psql`
+# — the same command, the long spelling — was declared unreadable and cost an ask. Measured,
+# and it is the commoner spelling in anything written to be read.
 my %value_opts = (
-  sudo    => qr/^-(?:u|g|p|C|h|r|t|U)$/,
-  doas    => qr/^-(?:u|C)$/,
-  nice    => qr/^-(?:n)$/,
-  ionice  => qr/^-(?:c|n|p|P|u)$/,
-  timeout => qr/^-(?:s|k)$/,
-  env     => qr/^-(?:u|C)$/,
-  stdbuf  => qr/^-(?:i|o|e)$/,
-  xargs   => qr/^-(?:I|i|L|n|P|s|d|E|a)$/,
-  exec    => qr/^-(?:a)$/,
-  time    => qr/^-(?:f|o)$/,
+  sudo    => qr/^(?:-(?:u|g|p|C|h|r|t|U)|--(?:user|group|prompt|close-from|host|role|type|other-user))$/,
+  doas    => qr/^(?:-(?:u|C))$/,
+  nice    => qr/^(?:-n|--adjustment)$/,
+  ionice  => qr/^(?:-(?:c|n|p|P|u)|--(?:class|classdata|pid|pgid|uid))$/,
+  timeout => qr/^(?:-(?:s|k)|--(?:signal|kill-after))$/,
+  env     => qr/^(?:-(?:u|C)|--(?:unset|chdir))$/,
+  stdbuf  => qr/^(?:-(?:i|o|e)|--(?:input|output|error))$/,
+  xargs   => qr/^(?:-(?:I|i|L|n|P|s|d|E|a)|--(?:replace|max-lines|max-args|max-procs|max-chars|delimiter|eof|arg-file))$/,
+  exec    => qr/^(?:-a)$/,
+  time    => qr/^(?:-(?:f|o)|--(?:format|output))$/,
 );
 
 # And which take none. The two tables together are the point: an option in neither makes
@@ -260,22 +264,22 @@ my %value_opts = (
 # `sudo -u x`, returning through the fallback instead of through a missing row. The safe
 # default for an unknown option is an admission, never a guess.
 my %bool_opts = (
-  sudo    => qr/^-(?:A|b|E|H|i|k|K|l|n|P|S|s|V|v)$/,
-  doas    => qr/^-(?:L|n|s)$/,
+  sudo    => qr/^(?:-(?:A|b|E|H|i|k|K|l|n|P|S|s|V|v)|--(?:askpass|background|preserve-env|set-home|login|reset-timestamp|remove-timestamp|list|non-interactive|preserve-groups|stdin|shell|version|validate))$/,
+  doas    => qr/^(?:-(?:L|n|s))$/,
   nice    => qr/^$/,
-  ionice  => qr/^-(?:t)$/,
-  timeout => qr/^-(?:-foreground|-preserve-status|v)$/,
+  ionice  => qr/^(?:-t|--ignore)$/,
+  timeout => qr/^(?:-v|--(?:foreground|preserve-status|verbose))$/,
   # -S is boolean *here* because its value has already been taken out: the splitter
   # recognises it as running a program, parses it as its own segment, and leaves `""`
   # behind. Judged where it runs, not twice — and not asked about, which is what happens to
   # an option neither table knows.
-  env     => qr/^-(?:i|0|v|S)$/,
+  env     => qr/^(?:-(?:i|0|v|S)|--(?:ignore-environment|null|debug|split-string))$/,
   stdbuf  => qr/^$/,
-  xargs   => qr/^-(?:0|p|r|t|x)$/,
+  xargs   => qr/^(?:-(?:0|p|r|t|x)|--(?:null|interactive|no-run-if-empty|verbose|exit))$/,
   exec    => qr/^-(?:c|l)$/,
   command => qr/^-(?:p|v|V)$/,
   nohup   => qr/^$/,
-  setsid  => qr/^-(?:c|f|w)$/,
+  setsid  => qr/^(?:-(?:c|f|w)|--(?:ctty|fork|wait))$/,
   builtin => qr/^$/,
 );
 

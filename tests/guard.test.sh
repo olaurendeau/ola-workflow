@@ -693,6 +693,67 @@ enforced deny ola-workflow:developer \
 enforced allow ola-workflow:developer \
   'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=other-ci' "$STATUS"
 
+# --- A missing tool blocks, it does not pass -----------------------------------------
+# The guard failed **open**, which is the one thing its whole design forbids: with `jq` off
+# the PATH every field read returns empty, so the command line read as empty, so it took the
+# "nothing to read" exit — 0, silently, with enforcement on and a profile present.
+# `gh pr merge 7 --admin` ran. The check is conditional on a profile like every other
+# refusal, which it can be: resolving the profile's *path* needs git and the filesystem, not
+# jq.
+BARE=$(cd "$(mktemp -d "$WORK/bare.XXXXXX")" && pwd -P)
+git -C "$BARE" -c init.defaultBranch=main init -q 2>/dev/null
+toolless=$WORK/toolless
+mkdir -p "$toolless"
+for t in bash cat git stat sed grep tr awk head tail wc mktemp dirname perl env; do
+  src=$(command -v "$t" 2>/dev/null) && ln -sf "$src" "$toolless/$t"
+done
+
+# Run **from** the directory, not with it in the payload: without jq the payload cannot be
+# read at all, so the guard asks about its working directory — which is the directory Claude
+# Code runs a hook in. A fixture that puts the project in the payload and runs somewhere else
+# measures a shape that does not occur, and it measured the wrong project: the repository
+# this suite lives in, which has a profile.
+without_jq() { # without_jq <cwd> <command> → the exit status, with jq off the PATH
+  local payload
+  payload=$(jq -n --arg c "$2" --arg d "$1" \
+    '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"nojq",cwd:$d,
+      agent_type:"ola-workflow:developer",tool_input:{command:$c}}')
+  ( cd "$1" && printf '%s' "$payload" |
+      PATH="$toolless" OLA_WORKFLOW_GUARD=enforce "$GUARD" >/dev/null 2>&1 )
+  echo $?
+}
+total=$((total + 1))
+if [ "$(without_jq "$INTEGRATED" 'gh pr merge 7 --admin')" = 2 ]; then
+  echo "ok    a project with a profile is blocked when a tool the guard needs is missing"
+else
+  echo "FAIL  a missing tool let a refused command through: the guard failed open"
+  failures=$((failures + 1))
+fi
+# And a project that never opted in still costs nothing: no profile, no opinion, whatever is
+# missing. This is the half that keeps the plugin invisible where it was not asked for.
+total=$((total + 1))
+if [ "$(without_jq "$BARE" 'gh pr merge 7 --admin')" = 0 ]; then
+  echo "ok    a project with no profile is untouched when a tool is missing"
+else
+  echo "FAIL  a project with no profile was blocked over a missing tool"
+  failures=$((failures + 1))
+fi
+
+# --- A write whose method gh supplies itself is still a write ------------------------
+# `gh api` sends POST as soon as any parameter is added — its own help says so — so reading
+# the method alone meant `--input body.json` was not a write at all, the question was never
+# asked, and a developer set the status the merge gate reads. Measured against the real
+# endpoint.
+for cmd in 'gh api repos/o/r/statuses/abc --input body.json' \
+           'gh api repos/o/r/statuses/abc --input=body.json' \
+           'gh api repos/o/r/statuses/abc --input -'; do
+  enforced ask ola-workflow:developer "$cmd" "$STATUS"
+  enforced allow ola-workflow:pr-reviewer "$cmd" "$STATUS"
+done
+# Reading one is still not writing one.
+enforced allow ola-workflow:developer 'gh api repos/o/r/statuses/abc' "$STATUS"
+enforced allow ola-workflow:developer 'gh api -X GET repos/o/r/commits/abc/statuses' "$STATUS"
+
 # --- A refusal has to say what to do instead ------------------------------------------
 # A refusal that names no way forward is a refusal an agent works around, which is how a
 # guard turns into an obstacle rather than a rule.
