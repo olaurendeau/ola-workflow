@@ -265,12 +265,17 @@ opt_values() {
       case $w in
         "$n"=*) printf '%s\n' "${w#*=}"; break ;;
       esac
-      # Glued, and only for a short option: `--methodPUT` is not a spelling of anything.
-      # The value may also be glued after a *group* of short flags, which is the sixth
-      # spelling and the one the list of five missed: pflag reads
-      # `gh api -ifstate=success` as `-i -f state=success`, and it really sends the field —
-      # measured. So the letter is looked for anywhere in a run of letters, and what
-      # follows it is the value.
+      # Short options group, and the value follows the letter wherever that letter sits in
+      # the group. Two spellings, and enumerating them cost two review cycles:
+      #
+      #   -ifstate=success   the letter is inside the group, the value glued after it
+      #   -if state=success  the letter ends the group, the value is the next word
+      #
+      # Both are real: measured with GH_DEBUG=api, `gh api -iX PUT …` sends a PUT and
+      # `gh api -if state=success` sends the field. The first version read only the glued
+      # form, and on the next-word form it printed nothing, did not break, and did not set
+      # `step`, so neither reading happened — a merge and a review-status write, allowed to
+      # every role. `--methodPUT` is not a spelling of anything, so this is short-only.
       case $n in
         -[!-])
           letter=${n#-}
@@ -280,7 +285,15 @@ opt_values() {
               case ${prefix#-} in
                 *[!A-Za-z]*) ;;                 # not a group of short flags: a value
                 *) suffix=${w#*"$letter"}
-                   [ -n "$suffix" ] && { printf '%s\n' "${suffix#=}"; break; } ;;
+                   if [ -n "$suffix" ]; then
+                     printf '%s\n' "${suffix#=}"
+                   else
+                     # The letter ends the group: the value is the next word, and that word
+                     # must be stepped over or it is read again as an option of its own.
+                     [ $((i + 1)) -lt "${#words[@]}" ] && printf '%s\n' "${words[$((i + 1))]}"
+                     step=2
+                   fi
+                   break ;;
               esac ;;
           esac ;;
       esac

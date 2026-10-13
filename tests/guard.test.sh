@@ -483,11 +483,18 @@ enforced ask ola-workflow:developer 'gh --made-up pr view 7'
 # a role merging or writing the review status. So the forms live here and not in anyone's
 # memory, and every one is a form `gh` really accepts — measured with GH_DEBUG=api.
 #
-# The sixth was missed by the list of five: pflag **groups** short options, so
-# `gh api -ifstate=success` is `-i -f state=success` and really sends the field. A list of
-# spellings always misses one, which is why the pattern is now "the letter anywhere in a run
-# of letters" rather than another row.
-for form in '-X PUT' '-X=PUT' '-XPUT' '--method PUT' '--method=PUT' '-iXPUT' '-vXPUT'; do
+# The sixth was missed by the list of five, and the seventh by the list of six — which is
+# the whole lesson. pflag **groups** short options, and the value follows the letter
+# wherever it sits: glued when the letter is inside the group (`-ifstate=success`), the next
+# word when it ends it (`-if state=success`). Both really send the field. So the reading is
+# derived from the construct — the letter anywhere in a run of letters, then either the rest
+# of the word or the next word — rather than being another row in a list that will miss an
+# eighth.
+#
+# Every row below is a form the real `gh` accepts, checked with GH_DEBUG=api. `-vXPUT` was
+# in this table for one cycle and is not: `gh` answers `unknown shorthand flag: 'v'`, so it
+# asserted a refusal of something nobody can run.
+for form in '-X PUT' '-X=PUT' '-XPUT' '--method PUT' '--method=PUT' '-iXPUT' '-iX PUT'; do
   enforced deny ola-workflow:developer "gh api $form repos/o/r/pulls/7/merge"
   enforced allow ola-workflow:coordinator "gh api $form repos/o/r/pulls/7/merge"
 done
@@ -499,7 +506,9 @@ for form in '-f state=success -f context=relu-par-agent' \
             '--field=state=success --field=context=relu-par-agent' \
             '-Fstate=success -Fcontext=relu-par-agent' \
             '-ifstate=success -ifcontext=relu-par-agent' \
-            '-iFstate=success -iFcontext=relu-par-agent'; do
+            '-iFstate=success -iFcontext=relu-par-agent' \
+            '-if state=success -if context=relu-par-agent' \
+            '-iF state=success -iF context=relu-par-agent'; do
   enforced deny ola-workflow:developer "gh api -X POST repos/o/r/statuses/abc $form" "$STATUS"
   enforced allow ola-workflow:pr-reviewer "gh api -X POST repos/o/r/statuses/abc $form" "$STATUS"
 done
@@ -539,7 +548,10 @@ enforced deny ola-workflow:developer 'gh pr merge 7 --subject --help'
 # enumerated: one line, six fields. A command that succeeds while answering something else
 # is caught by its answer, not by its name.
 SHAPE=$(profiled integrated)
-enforced allow ola-workflow:developer 'git status' "$SHAPE" >/dev/null 2>&1 || true
+# The guard is called directly to warm the cache, not through `enforced`. That helper counts
+# an assertion, and `enforced … >/dev/null` therefore counted a verdict whose line went to
+# /dev/null: the suite announced 317 and printed 316, in the very block whose subject is a
+# field that slid. An assertion whose output is discarded is an assertion that is not read.
 jq -n --arg d "$SHAPE" '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"shape",
   cwd:$d,agent_type:"ola-workflow:developer",tool_input:{command:"git status"}}' |
   OLA_WORKFLOW_GUARD=enforce "$GUARD" >/dev/null 2>&1
@@ -557,12 +569,23 @@ else
 fi
 
 # And a line that does not parse reads as nothing cached, never as a profile whose values
-# have slid one column. Without this the recovery depends on the cause of the corruption.
-printf 'one\ttwo\n' >"$shape_file"
+# have slid one column.
+#
+# The first version of these two rows wrote the corrupt line to `…-shape.cache` while
+# `enforced` sends `session_id: "t"` and the guard therefore reads `…-t.cache`. They passed,
+# and deleting the whole validation from guard.sh left the suite green: the check that
+# watches for a thing with no reader had no reader. So the file written is the one the helper
+# actually makes the guard read, named once here and used by both rows.
+enforced_cache=${TMPDIR:-/tmp}/ola-workflow-guard-t.cache
+printf 'one\ttwo\n' >"$enforced_cache"
 enforced allow ola-workflow:developer 'git status' "$SHAPE"
-printf 'a\tb\tc\nd\te\tf\n' >"$shape_file"
+printf 'a\tb\tc\nd\te\tf\n' >"$enforced_cache"
 enforced deny ola-workflow:developer 'gh pr merge 7' "$SHAPE"
-rm -f "$shape_file"
+printf 'a\tb\tc\td\te\tf\tg\n' >"$enforced_cache"
+enforced deny ola-workflow:developer 'gh pr merge 7' "$SHAPE"
+: >"$enforced_cache"
+enforced deny ola-workflow:developer 'gh pr merge 7' "$SHAPE"
+rm -f "$enforced_cache" "$shape_file"
 
 # --- A project that enrols during a session gets its rules at once -------------------
 # The absence of a profile is not cached, because its invalidation has nothing to key on:
