@@ -208,6 +208,29 @@ else
   ko "a heredoc body was read as a command"
 fi
 
+echo "--- both spellings of a wrapper option, because a table of one is right half the time"
+# `sudo -u postgres psql` read as psql while `sudo --user postgres psql` — the same command,
+# the long spelling, and the commoner one in anything written to be read — was declared
+# unreadable and cost an ask. A table of short forms is a table that is right half the time.
+#
+# `names` and not `sees`: these long forms are GNU's, and the host this runs on is macOS,
+# where `nice --adjustment` and `env --unset` do not exist. A row whose execution cannot be
+# measured here is the exact case `names` exists for — and the measured rows of the same
+# class are the short spellings a few lines above, which `sees` does run.
+names "sudo, long"    'sudo --user postgres git status' git
+names "env, long"     'env --unset FOO git status' git
+names "nice, long"    'nice --adjustment 10 git status' git
+names "timeout, long" 'timeout --signal TERM 60 git status' git
+names "xargs, long"   'xargs --replace {} git status' git
+names "sudo boolean, long" 'sudo --login git status' git
+# The witness for those six: the short spelling of the same construct is measured, so the
+# walk itself is not taken on trust — only the table's long column is. `nice -n` and not
+# `sudo -u`, because sudo cannot be run here either and a witness that cannot run is not a
+# witness.
+sees "nice, short, measured" 'nice -n 5 gh --version' gh
+# And an option neither table knows is still an admission, whichever spelling it wears.
+asks "a long option neither table knows" 'sudo --made-up x git status' 'whether it takes a value is unknown'
+
 echo "--- nothing to judge is not the same as unreadable"
 for line in 'c=gh' '}' 'done' '2>/dev/null'; do
   verdict=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"')

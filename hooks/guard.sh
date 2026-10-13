@@ -38,15 +38,48 @@ if [ -n "${OLA_WORKFLOW_PROBE_LOG:-}" ]; then
   printf '%s\n' "$input" >>"$OLA_WORKFLOW_PROBE_LOG" 2>/dev/null || true
 fi
 
+# The tools this guard cannot work without, checked before anything is read.
+#
+# Without this it failed **open**, which is the one thing the whole design forbids: with `jq`
+# off the PATH every `field` call returns empty, so `command_line` is empty, so the guard
+# took the "nothing to read" exit — exit 0, silently, with enforcement on and a profile
+# present. `gh pr merge 7 --admin` ran. Measured.
+#
+# The check has to be conditional on a profile the way every other refusal is, and it can
+# be: resolving the profile's *path* needs git and the filesystem, not jq. So a missing tool
+# in a project that never opted in still costs nothing, and in a project that did it blocks
+# and says which tool.
+#
+# Which project, though, is asked of the **working directory** and not of the payload: the
+# payload is JSON and jq is what reads it. That is not a guess — Claude Code runs a hook in
+# the session's own directory, so the two agree in practice — and when they do not, the
+# answer errs towards blocking, which is the direction this branch exists for. A second JSON
+# parser in shell would be a second reader of the same thing, and those drift.
+missing_tools=""
+for tool in jq perl; do
+  command -v "$tool" >/dev/null 2>&1 || missing_tools="$missing_tools $tool"
+done
+
 field() { printf '%s' "$input" | jq -r "$1 // empty" 2>/dev/null; }
+
+cwd=$(field '.cwd')
+[ -n "$cwd" ] || cwd=$(pwd)
+
+if [ -n "$missing_tools" ]; then
+  # shellcheck source=hooks/lib/profile.sh
+  . "$SELF_DIR/lib/profile.sh"
+  if ola_profile_path "$cwd" >/dev/null 2>&1; then
+    echo "ola-workflow: the guard needs$missing_tools on PATH and cannot find it, so it cannot judge this command. $cwd has a profile, so the command is blocked rather than allowed." >&2
+    exit 2
+  fi
+  exit 0
+fi
 
 command_line=$(field '.tool_input.command')
 # Nothing to read: another tool, or a payload shape this guard does not know. Not its
 # business, and guessing would be.
 [ -n "$command_line" ] || exit 0
 
-cwd=$(field '.cwd')
-[ -n "$cwd" ] || cwd=$PWD
 session=$(field '.session_id')
 
 # shellcheck source=hooks/lib/profile.sh
@@ -231,7 +264,7 @@ segments=$(printf '%s' "$command_line" | perl "$TOKENIZE")
 #   - a joined string cannot be case-folded one field at a time, and `gh` accepts
 #     `-X put` — measured — which a rule written for `PUT` walked straight past.
 #
-# So: `gh_subcommand` for an operation, `has_word` for a flag, `opt_value` for what an
+# So: `gh_subcommand` for an operation, `has_flag` for a boolean, `opt_value` for what an
 # option carries. All three compare with `=`, never with a pattern.
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
@@ -315,11 +348,6 @@ opt_values() {
   done
 }
 
-has_word() { # has_word <value> → that exact word is present
-  local w
-  for w in ${words[@]+"${words[@]}"}; do [ "$w" = "$1" ] && return 0; done
-  return 1
-}
 
 # opt_value <name> … → what the LAST of those options carries, because that is the one the
 # tool uses: `gh api -X GET -X PUT …` sends a PUT, measured in both orders. Taking the first
@@ -519,6 +547,17 @@ while IFS= read -r segment; do
     case $(lower "$(opt_value -X --method || true)") in
       post|put|patch) writes_status=yes ;;
     esac
+    # `gh api` sends POST as soon as any parameter is added — its own help says so — so a
+    # `statuses/` call carrying a field or a body **is** a write with no `-X` in sight.
+    # Reading the method alone meant `--input body.json` was not a write at all, so the
+    # question below was never asked and a developer set the status the merge gate reads.
+    # Measured against the real endpoint.
+    # `opt_value --input`, not `has_word --input`: the glued `--input=body.json` is one word,
+    # and a membership test never sees it. The same lesson as the eight option spellings,
+    # relearned one line later.
+    if opt_value --input >/dev/null 2>&1 || [ -n "$(opt_values -f -F --field --raw-field)" ]; then
+      writes_status=yes
+    fi
     while IFS= read -r field; do
       [ -n "$field" ] || continue
       case $field in
@@ -534,7 +573,7 @@ while IFS= read -r segment; do
     done <<EOF
 $(opt_values -f -F --field --raw-field)
 EOF
-    has_word --input && from_elsewhere=yes
+    opt_value --input >/dev/null 2>&1 && from_elsewhere=yes
   fi
   if [ "$writes_status" = yes ] && [ "$from_elsewhere" = yes ] && [ "$role" != pr-reviewer ]; then
     decide ask "ola-workflow: this writes a commit status and takes its content from a file or from stdin, so whether it sets the $review_status status cannot be read here. Confirm only if you know it does not."
