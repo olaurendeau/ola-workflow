@@ -96,6 +96,12 @@ write comes from something you ran or something the human told you, and nothing 
    - `slots`, `pr`, `merge`, `commands`, `db_hosts_allowed`, `verify_ui` — nothing in a
      repository states these. Omitted, they produce a notice in the brief; invented, they
      produce a rule.
+   - `guard` — leave it out, which means `enforce`: the guard refuses what a role does not
+     own and asks about a command it cannot read. Write `"guard": "log"` only if the human
+     asks to watch it before letting it act, and say what that costs — every rule in the
+     brief then applies only as far as the agents choose to apply it. Tell them either way
+     which of the two they are getting; an agent that expects to be stopped and is not reads
+     the silence as permission.
 
    In `discreet` mode, `context.*` paths point inside the profile directory, not into the
    repository — the repository is not yours to add documents to.
