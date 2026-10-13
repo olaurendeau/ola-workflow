@@ -8,9 +8,17 @@
 #
 #   raw        the segment as written, for a message a human reads
 #   command    the command word, normalised
-#   normalised the whole segment, every word unquoted and the command word resolved —
-#              THE ONLY FIELD A RULE MAY MATCH, because a rule needs the operation and not
-#              just the tool: `gh pr view` and `gh pr merge` differ in their arguments
+#   words      the command word followed by its operands, one array element per word —
+#              THE ONLY FIELD A RULE MAY MATCH
+#   normalised the same words joined by a space, for a message a human reads
+#
+# A rule matches `words`, not `normalised`, and the difference is not stylistic. A joined
+# string cannot express a position, so `gh pr edit 7 --add-label "ready to merge"` fired a
+# rule about `pr … merge`; it cannot hold a literal, so a review status named `c++-review`
+# arrived at `grep -E` as a pattern and matched nothing it was meant to; and it cannot be
+# case-folded safely, so `-X put` — which `gh` accepts, measured — walked past a rule
+# written for `PUT`. Each of those was a false negative or a false positive found in
+# review, and all three are unexpressible once a rule reads words.
 #   resolved  what the normalisation walked through to get there, for the same message
 #   readable  false when the command word cannot be known without running it
 #   reason    why, when readable is false
@@ -106,7 +114,19 @@ sub closing_backtick {
 }
 
 # A quoted string is code when it is the argument of something that runs code.
-my $runs_code = qr{(?:^|[\s;&|(])(?:(?:ba|z|da|k)?sh(?:\s+-[-a-zA-Z]+)*\s+-[a-zA-Z]*c[a-zA-Z]*|eval)\s+\z};
+# `(?:\s+--)?` after the option: `--` ends options, so `bash -c -- "gh pr merge 7"` runs
+# exactly what `bash -c "gh pr merge 7"` runs. Without it the string stayed a string, the
+# command word was `bash`, and every rule about the inner command was silently out of
+# reach — measured on bash, sh and env alike. `--` is the form an enumeration of option
+# spellings always misses, because it is the one that is not an option.
+# `env -S` belongs here and not among env's value-taking options: its argument is a
+# program, not a value. Consumed as a value it left a segment with no command word at all,
+# which this file reports as "nothing to judge" — the answer meant for `c=gh` and `done`,
+# handed to a line that runs something.
+my $runs_code = qr{(?:^|[\s;&|(])(?:
+    (?:(?:ba|z|da|k)?sh|env)(?:\s+-[-a-zA-Z]+)*\s+-[a-zA-Z]*[cS][a-zA-Z]*
+  | eval
+)(?:\s+--)?\s+\z}x;
 
 sub split_line {
   my ($s) = @_;
@@ -227,7 +247,7 @@ my %value_opts = (
   nice    => qr/^-(?:n)$/,
   ionice  => qr/^-(?:c|n|p|P|u)$/,
   timeout => qr/^-(?:s|k)$/,
-  env     => qr/^-(?:u|C|S)$/,
+  env     => qr/^-(?:u|C)$/,
   stdbuf  => qr/^-(?:i|o|e)$/,
   xargs   => qr/^-(?:I|i|L|n|P|s|d|E|a)$/,
   exec    => qr/^-(?:a)$/,
@@ -245,7 +265,11 @@ my %bool_opts = (
   nice    => qr/^$/,
   ionice  => qr/^-(?:t)$/,
   timeout => qr/^-(?:-foreground|-preserve-status|v)$/,
-  env     => qr/^-(?:i|0|v)$/,
+  # -S is boolean *here* because its value has already been taken out: the splitter
+  # recognises it as running a program, parses it as its own segment, and leaves `""`
+  # behind. Judged where it runs, not twice — and not asked about, which is what happens to
+  # an option neither table knows.
+  env     => qr/^-(?:i|0|v|S)$/,
   stdbuf  => qr/^$/,
   xargs   => qr/^-(?:0|p|r|t|x)$/,
   exec    => qr/^-(?:c|l)$/,
@@ -331,7 +355,14 @@ sub words {
 # a rule about merging matched it. This is the one stage of the port whose purpose is to
 # prevent a false positive rather than to close an evasion — and a guard that refuses a
 # comment for quoting a command is a guard whose refusals stop being read.
-my $text_option = qr/^(?:-m|--message|-b|--body|--body-file|-t|--title|--notes|-F|--field)$/;
+# Only options whose value is prose a human wrote. `-F`/`--field` were here and had to go:
+# in `gh api` they carry `state=success`, which is precisely what the rule protecting the
+# review status has to read, and in `gh pr create` they carry a file path. Neither is prose,
+# and emptying them meant one file of this plugin blanked the very word the other asked a
+# rule to match. The lesson is the one this file keeps relearning: an option's meaning
+# belongs to its command, so a table of spellings shared across commands may hold only
+# spellings that mean the same thing everywhere.
+my $text_option = qr/^(?:-m|--message|-b|--body|--body-file|-t|--title|--notes)$/;
 my %text_command = map { $_ => 1 } qw(echo printf grep egrep fgrep rg awk gawk sed);
 
 # normalise_segment <command word> <operand words>
@@ -341,7 +372,9 @@ my %text_command = map { $_ => 1 } qw(echo printf grep egrep fgrep rg awk gawk s
 # renders `(gh` as two words `( gh`, so one word too many was dropped and `(gh pr merge 7)`
 # normalised to `gh merge 7`, with the `pr` a merge rule matches on simply gone. Counting a
 # display string to recover a position is the defect; being given the position is the fix.
-sub normalise_segment {
+# Returns the words: the command word, then its operands, each with quoting removed and
+# prose emptied. `normalise_segment` joins them for display; a rule reads the list.
+sub segment_words {
   my ($cmd, $operands) = @_;
   my @w = @{ $operands // [] };
 
@@ -370,7 +403,14 @@ sub normalise_segment {
     push @out, $bare;
     $next_is_text = 1 if $bare =~ $text_option;
   }
-  return join(' ', @out);
+  return @out;
+}
+
+sub normalise_segment { return join(' ', segment_words(@_)) }
+
+sub json_array {
+  my (@w) = @_;
+  return '[' . join(',', map { json_string($_) } @w) . ']';
 }
 
 sub command_word {
@@ -508,11 +548,28 @@ sub command_word {
               [@w[1 .. $#w]]);
     }
 
+    # A command word cannot hold a blank. The shell would look for a file literally named
+    # `gh pr merge 7`, which is not what the writer meant and not what runs — so a word
+    # like that is always a program string this file failed to recognise as one. Declaring
+    # it unreadable is the net under the whole family: `env -u X -S "gh pr merge 7"` put
+    # the operand `X` between the options and walked past the pattern that spots a program,
+    # and the next spelling to do that is covered too, without having been listed. The
+    # alternative was a silent allow, since no rule matches a command named `gh pr merge 7`.
+    if ($bare =~ /\s/) {
+      return ($name, join(' ', @walked, $w),
+              'this holds a whole command line where a command word goes, so what runs is a program this text quotes rather than a command',
+              [@w[1 .. $#w]]);
+    }
+
     # Everything the shell would still expand before this becomes a command word.
     my $why;
     $why = 'a parameter or command substitution' if $bare =~ /\$/;
     $why = 'a brace expansion'                   if !$why && $bare =~ /\{[^}]*,/;
-    $why = 'a pathname pattern'                  if !$why && $bare =~ /[*?\[]/;
+    # A bracket expression has to close to be one. `[` on its own is the POSIX test
+    # builtin and bash runs it as a command word — `[ -f x ]` was answered `ask`, about a
+    # builtin, which spends the human's attention on the shell's own grammar. The test is
+    # the construct (does this word glob?), not the character.
+    $why = 'a pathname pattern'                  if !$why && $bare =~ /[*?]|\[[^]]*\]/;
     return ($name, join(' ', @walked, $w), "the command word is built by $why",
             [@w[1 .. $#w]])
       if $why;
@@ -531,9 +588,10 @@ for my $seg (@segments) {
   my ($cmd, $resolved, $reason, $operands) = command_word($seg);
   my $trimmed = $seg;
   $trimmed =~ s/^\s+|\s+$//g;
-  my $normalised = normalise_segment($cmd, $operands);
-  printf "{\"raw\":%s,\"command\":%s,\"normalised\":%s,\"resolved\":%s,\"readable\":%s,\"reason\":%s}\n",
-    json_string($trimmed), json_string($cmd), json_string($normalised), json_string($resolved),
+  my @words = segment_words($cmd, $operands);
+  my $normalised = join(' ', @words);
+  printf "{\"raw\":%s,\"command\":%s,\"words\":%s,\"normalised\":%s,\"resolved\":%s,\"readable\":%s,\"reason\":%s}\n",
+    json_string($trimmed), json_string($cmd), json_array(@words), json_string($normalised), json_string($resolved),
     (defined $reason ? 'false' : 'true'),
     (defined $reason ? json_string($reason) : 'null');
 }

@@ -364,6 +364,86 @@ enforced allow ola-workflow:developer \
 enforced allow ola-workflow:developer \
   'gh api -X GET repos/o/r/commits/abc/statuses' "$STATUS"
 
+# --- What a word-level rule can say, and a joined string could not -------------------
+# Every row here is a defect found in review of the first version, which matched a joined
+# string with regexes. They are grouped because they share one cause and one fix, and kept
+# as behaviour rather than as a note so the interface cannot quietly go back.
+
+# A substring is not a position. A label named in the project's own process vocabulary, a
+# search, a help request: none of them merges, and all three were refused.
+for cmd in 'gh pr edit 7 --add-label "ready to merge"' \
+           'gh pr edit 7 --add-label "do not merge"' \
+           'gh pr list --search merge' \
+           'gh issue list --search "pr merge"' \
+           'gh issue create -t "merge the thing" -b "about pr merge"' \
+           'gh pr merge --help' \
+           'gh pr merge -h' \
+           'gh pr comment 7 -b "ask the coordinator to gh pr merge this"'; do
+  enforced allow ola-workflow:developer "$cmd"
+done
+
+# `gh` folds the case of an API method — measured against the real forge — so a rule
+# written for PUT and read as text walked past `-X put`.
+for cmd in 'gh api -X put repos/o/r/pulls/7/merge' \
+           'gh api -X Put repos/o/r/pulls/7/merge' \
+           'gh api --method=post repos/o/r/pulls/7/merge' \
+           'gh api --method patch repos/o/r/pulls/7/merge'; do
+  enforced deny ola-workflow:developer "$cmd"
+  enforced allow ola-workflow:coordinator "$cmd"
+done
+
+# `-F`/`--field` carry `state=success` in `gh api`, so emptying them as prose blinded the
+# one rule that has to read a field. One file of this plugin was blanking the word the
+# other asked a rule to match.
+for cmd in 'gh api -X POST repos/o/r/statuses/abc -F state=success -F context=relu-par-agent' \
+           'gh api repos/o/r/statuses/abc --field state=success --field context=relu-par-agent'; do
+  enforced allow ola-workflow:pr-reviewer "$cmd" "$STATUS"
+  enforced deny ola-workflow:developer "$cmd" "$STATUS"
+done
+
+# `--` ends options, so these run exactly what the same line without it runs. It is the
+# form an enumeration of option spellings always misses, being the one that is not an
+# option — and `env -S` takes a program, not a value.
+for cmd in 'bash -c -- "gh pr merge 7"' 'sh -c -- "gh pr merge 7"' 'env -S "gh pr merge 7"'; do
+  enforced deny ola-workflow:developer "$cmd"
+done
+
+# A command word cannot hold a blank: the shell would look for a file of that name. So it
+# is always a program this tokenizer failed to recognise, and asking is the net under the
+# whole family rather than under the spellings that have been thought of.
+enforced ask ola-workflow:developer 'env -u X -S "gh pr merge 7"'
+
+# `[` is the POSIX test builtin and bash runs it as a command word. It was answered `ask`,
+# about the shell's own grammar, because `[` is also a glob metacharacter — and a bracket
+# expression has to close to be one.
+for cmd in '[ -f x ]' '[ "$a" = b ] && make check' '[[ -f x ]]'; do
+  enforced allow ola-workflow:developer "$cmd"
+done
+
+# A review status is arbitrary text from a project's profile, so it may never reach a
+# regex. Both of these are schema-valid, and as patterns one matched nothing it was meant
+# to while the other matched every status write there is.
+LITERAL=$(profiled integrated)
+printf '%s\n' '{"mode":"integrated","merge":{"review_status":"c++ review"}}' \
+  >"$LITERAL/.claude/workflow.json"
+enforced deny ola-workflow:developer \
+  'gh api -X POST repos/o/r/statuses/abc -f state=success -f "context=c++ review"' "$LITERAL"
+enforced allow ola-workflow:pr-reviewer \
+  'gh api -X POST repos/o/r/statuses/abc -f state=success -f "context=c++ review"' "$LITERAL"
+# And a status that is not this project's stays none of the rule's business.
+enforced allow ola-workflow:developer \
+  'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=cpp-review' "$LITERAL"
+
+EMPTY=$(profiled integrated)
+printf '%s\n' '{"mode":"integrated","merge":{"review_status":""}}' >"$EMPTY/.claude/workflow.json"
+enforced allow ola-workflow:developer \
+  'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=build' "$EMPTY"
+
+# An option neither table knows, *before* the subcommand, could still be hiding which
+# operation this is — so it is asked. After the subcommand it cannot, which is why every
+# real `gh` call above is answered rather than asked.
+enforced ask ola-workflow:developer 'gh --made-up pr view 7'
+
 # --- A refusal has to say what to do instead ------------------------------------------
 # A refusal that names no way forward is a refusal an agent works around, which is how a
 # guard turns into an obstacle rather than a rule.
