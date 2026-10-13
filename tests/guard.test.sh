@@ -509,6 +509,43 @@ enforced allow ola-workflow:developer 'gh pr merge 7 --help'
 enforced deny ola-workflow:developer 'gh pr merge 7 --squash --subject -h'
 enforced deny ola-workflow:developer 'gh pr merge 7 --subject --help'
 
+# --- The cache line keeps its shape ---------------------------------------------------
+# The cache is one tab-separated line, so a field holding a tab or a newline shifts every
+# field after it — and the fields after the first two decide whether a rule applies at all.
+# That is not hypothetical: `stat -f %m` selects a format on BSD and means --file-system on
+# GNU and busybox, where it **succeeds** and prints a multi-line report about the device. On
+# Linux every command of every test came back `ask: this profile cannot be read`, while this
+# suite was green on macOS. The suite could not see it; the CI could, and did.
+#
+# So the shape is asserted on whatever platform this runs, rather than the dialect being
+# enumerated: one line, six fields. A command that succeeds while answering something else
+# is caught by its answer, not by its name.
+SHAPE=$(profiled integrated)
+enforced allow ola-workflow:developer 'git status' "$SHAPE" >/dev/null 2>&1 || true
+jq -n --arg d "$SHAPE" '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"shape",
+  cwd:$d,agent_type:"ola-workflow:developer",tool_input:{command:"git status"}}' |
+  OLA_WORKFLOW_GUARD=enforce "$GUARD" >/dev/null 2>&1
+shape_file=${TMPDIR:-/tmp}/ola-workflow-guard-shape.cache
+total=$((total + 1))
+if [ ! -f "$shape_file" ]; then
+  echo "FAIL  the cache was never written, so its shape is untested"
+  failures=$((failures + 1))
+elif [ "$(wc -l <"$shape_file" | tr -d ' ')" = 1 ] &&
+     [ "$(awk -F'\t' 'END {print NF}' "$shape_file")" = 6 ]; then
+  echo "ok    the cache is one line of six fields, whatever stat prints here"
+else
+  echo "FAIL  the cache is $(wc -l <"$shape_file" | tr -d ' ') line(s) of $(awk -F'\t' 'END {print NF}' "$shape_file") field(s): every field after a corrupt one has slid"
+  failures=$((failures + 1))
+fi
+
+# And a line that does not parse reads as nothing cached, never as a profile whose values
+# have slid one column. Without this the recovery depends on the cause of the corruption.
+printf 'one\ttwo\n' >"$shape_file"
+enforced allow ola-workflow:developer 'git status' "$SHAPE"
+printf 'a\tb\tc\nd\te\tf\n' >"$shape_file"
+enforced deny ola-workflow:developer 'gh pr merge 7' "$SHAPE"
+rm -f "$shape_file"
+
 # --- A project that enrols during a session gets its rules at once -------------------
 # The absence of a profile is not cached, because its invalidation has nothing to key on:
 # there is no file to watch. A cached absence survived the whole session, so a project

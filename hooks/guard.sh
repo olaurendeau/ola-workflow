@@ -65,8 +65,27 @@ session=$(field '.session_id')
 # second needs the candidate list rather than the resolved file, and the guard must not
 # restate where profiles live to get it.
 cache=${TMPDIR:-/tmp}/ola-workflow-guard-${session:-nosession}.cache
+NL='
+'
 
-mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# An mtime is a run of digits, and nothing else is accepted however it was printed. The two
+# `stat` dialects disagree about `-f`: on BSD it selects a format, on GNU and busybox it
+# means --file-system and **succeeds**, printing a multi-line report about the device. So
+# `stat -f %m || stat -c %Y` returned that report on Linux, with tabs and newlines in it,
+# which shifted every field after it in the tab-separated cache line — and the field after
+# it is now whether the profile is readable. Every command of every test came back
+# `ask: this profile cannot be read` on CI while the suite was green on macOS.
+#
+# Trying the dialects in the other order would fix today's case and leave the shape of the
+# defect: a command that succeeds while answering something else. Validating the answer
+# closes it whatever stat does, and the fallback of 0 only ever makes the cache miss.
+mtime_of() {
+  local m
+  m=$(stat -c %Y "$1" 2>/dev/null)
+  case $m in ''|*[!0-9]*) m=$(stat -f %m "$1" 2>/dev/null) ;; esac
+  case $m in ''|*[!0-9]*) m=0 ;; esac
+  printf '%s' "$m"
+}
 
 # Everything the guard reads from the profile is resolved here and kept together, because
 # resolving twice is resolving differently. The readability gate used to test the *cached*
@@ -98,6 +117,18 @@ resolve() {
 cached=""
 if [ -n "$session" ] && [ -r "$cache" ]; then
   cached=$(cat "$cache" 2>/dev/null)
+  # One line, six fields, or it is not a cache entry. A field holding a tab or a newline
+  # shifts every field after it, and the fields after the first two decide whether a rule
+  # applies at all — so a line that does not parse must read as "nothing cached" and not as
+  # a profile whose values have slid one column to the left. That is how a `stat` dialect
+  # mismatch turned into "this project's rules are unknown" on every command.
+  case $cached in
+    *"$NL"*) cached="" ;;
+  esac
+  if [ -n "$cached" ]; then
+    fields=$(printf '%s' "$cached" | awk -F'\t' '{print NF}')
+    [ "$fields" = 6 ] || cached=""
+  fi
 fi
 if [ -n "$cached" ]; then
   IFS=$'\t' read -r c_cwd c_file _ c_mtime _ _ <<<"$cached"
