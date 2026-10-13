@@ -258,15 +258,20 @@ plugin's name followed by a version".
 This paragraph is itself under the rule, which is why it names no example. Writing one would
 fail the check — and that is the clearest demonstration of the limit there is.
 
-What makes a path decidable is **the character before the slash**, and the question is asked
-the safe way round: an offer is preceded by the start of a line, a blank, a quote or an
-opening bracket — and everything else is treated as a path. Five earlier versions listed what
-precedes a *path* instead, and each was one character short of refusing a true sentence; the
-last one refused `$profile_dir/runs/<slug>/developer`, a path the brief itself writes.
+What makes a path decidable is **the character before the slash** — together with whether
+more path follows it — and the question is asked the safe way round: an offer is preceded by
+the start of a line, a blank or a tab, a quote (single, double or back), or an opening paren
+or bracket. Eight positions in all; everything else is a path. Five earlier versions listed
+what precedes a *path* instead, and each was one character short of refusing a true sentence;
+the last one refused `$profile_dir/runs/<slug>/developer`, a path the brief itself writes.
 
-The list is in `tests/agents.test.sh`, and each of its members has its own failing fixture, so
-this paragraph cannot drift from it without a test saying so. It did: the sentence named four
-members while the code had six.
+Those eight are pinned in `tests/agents.test.sh` by **measurement**: every printable character
+is put in front of a role name and the set that makes an offer is compared with the set this
+sentence names. So adding a ninth fails, and dropping one of the eight fails too.
+
+An earlier version of this paragraph claimed it could not drift, while the fixtures only
+guarded *removal* — and the drift that had just happened was an addition: two characters grew
+in the code while this sentence still named four.
 
 A whitelist errs by missing an offer, which is a false negative; a blacklist errs by accusing
 a sentence, which is not. That asymmetry is the whole reason it is written this way round.

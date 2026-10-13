@@ -262,6 +262,38 @@ done <<EOF
 $(cat "${PROMPTS[@]}" 2>/dev/null | verdicts_for)
 EOF
 
+# --- The whitelist has exactly these members, no more and no fewer -------------------
+# The fixtures above guard a member's **removal**: drop `"` from the class and a guilty line
+# stops being caught. They say nothing about an **addition**, and the drift that cost a review
+# cycle was an addition — two characters grew in the code while the README still named four.
+# A sentence claiming "this cannot drift" was false in exactly the direction it was written to
+# cover.
+#
+# So the extent is pinned by measurement, not by a list written twice: every printable
+# character is put in front of a role name and the set that makes it an offer is compared with
+# the one this check means to have. Adding a member fails here; removing one fails above.
+offer_chars=""
+i=32
+while [ "$i" -le 126 ]; do
+  ch=$(awk -v n="$i" 'BEGIN { printf "%c", n }')
+  if printf '%s/developer\n' "$ch" | scan_text | grep -qxF 'slash developer'; then
+    offer_chars="$offer_chars$ch"
+  fi
+  i=$((i + 1))
+done
+# A tab, which no decimal sweep of printables reaches, and the start of a line, which is not a
+# character at all.
+printf '\t/developer\n' | scan_text | grep -qxF 'slash developer' && offer_chars="${offer_chars}<tab>"
+printf '/developer\n'   | scan_text | grep -qxF 'slash developer' && offer_chars="${offer_chars}<bol>"
+
+# Space, double quote, apostrophe, open paren, open bracket, backtick, tab, start of line.
+expected_chars=' "'"'"'([`<tab><bol>'
+if [ "$offer_chars" = "$expected_chars" ]; then
+  ok "exactly these 8 positions make an offer: [$offer_chars]"
+else
+  ko "the whitelist's extent changed: [$offer_chars] against [$expected_chars]"
+fi
+
 # --- The scan itself, against text it must not accuse ---------------------------------
 # This check could forbid true text three times running: once on a path
 # (`skills/workflow-init/SKILL.md`), once on the mktemp idiom
@@ -283,6 +315,7 @@ ghcr.io/acme/ola-workflow:latest and registry.example.com/ola-workflow:dev
 a log line ola_workflow: started, a key ola-workflow: build, OLA_WORKFLOW: 1
 the file runs/probe/last.json, the path /developer/settings, the url /coordinator?x=1
 a mount -v /tmp:/developer and a label app:/probe
+an anchor /developer#section and a file /probe.json and /coordinator.md
 the memory goes to $profile_dir/runs/<slug>/developer and runs/<slug>/probe
 and to ${OLA_RUNS}/architect, or */developer under a glob
 image: ola_workflow:latest and the tag ola_workflow:1.2
@@ -306,7 +339,7 @@ dispatch `ola-workflow:developer` and offer `/ola-workflow:workflow-init`'
 # not covered — the second time in two commits that this quoting bit the same way.
 guilty=$(cat <<'GUILTY'
 run /workflow-init to set up
-later /no-such-skill will exist
+later /no-such-skill will exist (a negative fixture: it must produce no verdict at all)
 offer /ola-workflow:nope and dispatch ola-workflow:nope
 /ola-workflow:Workflow_Init and /ola-workflow:workflow-init.v2
 and /developer, which is an agent
@@ -317,7 +350,7 @@ GUILTY
 
 accused=$(printf '%s\n' "$innocent" | verdicts_for | sed -n 's/^ko://p')
 if [ -z "$accused" ]; then
-  ok "the scan accuses none of the 19 lines of correct text it has failed on or nearly did"
+  ok "the scan accuses none of the 20 lines of correct text it has failed on or nearly did"
 else
   ko "the scan accuses correct text: $(printf '%s' "$accused" | tr '\n' ' ')"
 fi
