@@ -173,7 +173,7 @@ fi
 scan_text() { # scan_text < text → `<kind> <token>` lines, sorted
   perl -ne '
     while (m{(?:^|(?<=[\s`(["\x27]))/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g)          { print "named $1\n" }
-    while (m{(?:^|(?<=[\s`(["\x27]))/([A-Za-z0-9_.+-]+)(?![:/?\#A-Za-z0-9_.+-])}g) { print "slash $1\n" }
+    while (m{(?:^|(?<=[\s`(["\x27]))/([A-Za-z0-9_.+-]+)(?![:/?\#])}g)             { print "slash $1\n" }
   ' | LC_ALL=C sort -u
 }
 SCAN=$(cat "${PROMPTS[@]}" 2>/dev/null | scan_text)   # the per-file witness above is what notices a file this cannot read
@@ -231,8 +231,14 @@ verdicts_for() { # verdicts_for < text → one `ok|ko:<rule>:<token>` line per v
   # like, which is what two earlier versions of this check did.
 #
 # The lookahead rejects a token followed by more path (`/probe/last.json`,
-# `/developer/settings`, `/coordinator?x=1`): a path has path after it, and that *is*
-# decidable, unlike the token standing alone.
+# `/developer/settings`, `/coordinator?x=1`, `/developer#section`): a path has path after it,
+# and that *is* decidable, unlike the token standing alone.
+#
+# Four characters, and only four. It held `A-Za-z0-9_.+-` as well, every one of them dead:
+# they are also in the capture class, which is greedy, so the character after the match can
+# never be one of them. A dead character in a pattern is something a reader has to reason
+# about and cannot check, and `.` was measurably unguarded for exactly that reason — removing
+# it changed nothing because it did nothing.
   #
   # The gap, stated rather than guessed around: a bare offer of something that does not exist
   # *yet* — `/verify-ui` before that skill ships — is not detected, because nothing can tell
@@ -316,6 +322,7 @@ a log line ola_workflow: started, a key ola-workflow: build, OLA_WORKFLOW: 1
 the file runs/probe/last.json, the path /developer/settings, the url /coordinator?x=1
 a mount -v /tmp:/developer and a label app:/probe
 an anchor /developer#section and a file /probe.json and /coordinator.md
+and a mount -v /developer:/mnt, whose host path is a role name
 the memory goes to $profile_dir/runs/<slug>/developer and runs/<slug>/probe
 and to ${OLA_RUNS}/architect, or */developer under a glob
 image: ola_workflow:latest and the tag ola_workflow:1.2
@@ -350,7 +357,7 @@ GUILTY
 
 accused=$(printf '%s\n' "$innocent" | verdicts_for | sed -n 's/^ko://p')
 if [ -z "$accused" ]; then
-  ok "the scan accuses none of the 20 lines of correct text it has failed on or nearly did"
+  ok "the scan accuses none of the 21 lines of correct text it has failed on or nearly did"
 else
   ko "the scan accuses correct text: $(printf '%s' "$accused" | tr '\n' ' ')"
 fi
