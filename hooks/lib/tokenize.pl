@@ -6,8 +6,11 @@
 #
 #   {"raw": …, "command": …, "resolved": …, "readable": true|false, "reason": …}
 #
-#   raw       the segment as written, for a message a human reads
-#   command   the command word, normalised — THE ONLY FIELD A RULE MAY MATCH
+#   raw        the segment as written, for a message a human reads
+#   command    the command word, normalised
+#   normalised the whole segment, every word unquoted and the command word resolved —
+#              THE ONLY FIELD A RULE MAY MATCH, because a rule needs the operation and not
+#              just the tool: `gh pr view` and `gh pr merge` differ in their arguments
 #   resolved  what the normalisation walked through to get there, for the same message
 #   readable  false when the command word cannot be known without running it
 #   reason    why, when readable is false
@@ -317,6 +320,59 @@ sub words {
   return @w;
 }
 
+# The segment with every word unquoted and the command word in place of whatever spelled
+# it. This is what a rule matches, and it must never be the raw text: a rule written as a
+# regex in a project's profile cannot undo quoting, so `gh pr "merge"` would walk past a
+# pattern that `gh pr merge` trips. Measured — it does.
+# Options whose value is a message a human wrote, and commands whose arguments are text
+# rather than code. Their contents are emptied here, because a rule matching the whole
+# segment would otherwise fire on a pull request comment that merely *mentions* a command:
+# `gh pr comment -b "a; gh pr merge"` normalised to `gh pr comment -b a; gh pr merge`, and
+# a rule about merging matched it. This is the one stage of the port whose purpose is to
+# prevent a false positive rather than to close an evasion — and a guard that refuses a
+# comment for quoting a command is a guard whose refusals stop being read.
+my $text_option = qr/^(?:-m|--message|-b|--body|--body-file|-t|--title|--notes|-F|--field)$/;
+my %text_command = map { $_ => 1 } qw(echo printf grep egrep fgrep rg awk gawk sed);
+
+# normalise_segment <command word> <operand words>
+# The operands are handed over by the walk, never recomputed from the segment. They used to
+# be recovered by counting the words of the *rendered* `resolved` string and splicing that
+# many off the front — and that count is not the number of input words consumed: the walk
+# renders `(gh` as two words `( gh`, so one word too many was dropped and `(gh pr merge 7)`
+# normalised to `gh merge 7`, with the `pr` a merge rule matches on simply gone. Counting a
+# display string to recover a position is the defect; being given the position is the fix.
+sub normalise_segment {
+  my ($cmd, $operands) = @_;
+  my @w = @{ $operands // [] };
+
+  # A subshell's or case arm's closing parens stick to the last word, so
+  # `(gh pr merge 7 --admin)` ends in `--admin)` and every rule anchored on a word boundary
+  # walks straight past it. What marks punctuation is that the paren is *unbalanced*: bash
+  # refuses an unquoted `)` inside an argument outright (`echo a)` is a syntax error), while
+  # the `)` of a `$(…)` is balanced inside its own word. So the test is the balance, not a
+  # count of parens the walk happened to open — that count belongs to the whole command line
+  # and `(cd x && gh pr merge --admin)` puts the opening paren in a different segment from
+  # the closing one.
+  if (@w && $w[-1] !~ /["'\\]/) {
+    my $last = $w[-1];
+    while ($last =~ /\)$/ && ($last =~ tr/)//) > ($last =~ tr/(//)) { chop $last }
+    $w[-1] = $last;
+    pop @w unless length $last;
+  }
+
+  my @out = (length $cmd ? ($cmd) : ());
+  my $all_text = (length $cmd && $text_command{$cmd}) ? 1 : 0;
+  my $next_is_text = 0;
+  for my $word (@w) {
+    if ($next_is_text) { push @out, "''"; $next_is_text = 0; next }
+    if ($all_text && $word !~ /^-/) { push @out, "''"; next }
+    my $bare = unquote($word);
+    push @out, $bare;
+    $next_is_text = 1 if $bare =~ $text_option;
+  }
+  return join(' ', @out);
+}
+
 sub command_word {
   my ($segment) = @_;
   my @w = words($segment);
@@ -390,7 +446,8 @@ sub command_word {
 
     if ($indirect{$name}) {
       return ($name, join(' ', @walked, $w),
-              "the command it runs is not in this text ($name)");
+              "the command it runs is not in this text ($name)",
+              [@w[1 .. $#w]]);
     }
     if ($wrapper{$name}) {
       push @walked, $w;
@@ -428,7 +485,8 @@ sub command_word {
         my $boolean = $bool_opts{$name};
         if ($boolean && $w[0] =~ $boolean) { push @walked, shift @w; next }
         return ($name, join(' ', @walked, @w),
-                "$name is given the option $w[0], and whether it takes a value is unknown here");
+                "$name is given the option $w[0], and whether it takes a value is unknown here",
+                [@w[1 .. $#w]]);
       }
       next;
     }
@@ -446,7 +504,8 @@ sub command_word {
     # more precise and loses exactly this, so the loss is declared rather than silent.
     if ($bare =~ /\)$/ && $bare !~ /[\$`]/) {
       return ($name, join(' ', @walked, $w),
-              'this looks like a case arm or a subshell, and the split cut inside it');
+              'this looks like a case arm or a subshell, and the split cut inside it',
+              [@w[1 .. $#w]]);
     }
 
     # Everything the shell would still expand before this becomes a command word.
@@ -454,25 +513,27 @@ sub command_word {
     $why = 'a parameter or command substitution' if $bare =~ /\$/;
     $why = 'a brace expansion'                   if !$why && $bare =~ /\{[^}]*,/;
     $why = 'a pathname pattern'                  if !$why && $bare =~ /[*?\[]/;
-    return ($name, join(' ', @walked, $w), "the command word is built by $why")
+    return ($name, join(' ', @walked, $w), "the command word is built by $why",
+            [@w[1 .. $#w]])
       if $why;
 
-    return ($name, join(' ', @walked, $w), undef);
+    return ($name, join(' ', @walked, $w), undef, [@w[1 .. $#w]]);
   }
   # Nothing left after the prefixes: this segment runs no command at all — a bare
   # assignment, a closing brace, a `done`. That is not something unreadable, it is nothing
   # to judge, and calling it unreadable would spend an ask on `c=gh`.
-  return ('', join(' ', @walked), undef);
+  return ('', join(' ', @walked), undef, []);
 }
 
 # ------------------------------------------------------------------------------- output
 split_line($input);
 for my $seg (@segments) {
-  my ($cmd, $resolved, $reason) = command_word($seg);
+  my ($cmd, $resolved, $reason, $operands) = command_word($seg);
   my $trimmed = $seg;
   $trimmed =~ s/^\s+|\s+$//g;
-  printf "{\"raw\":%s,\"command\":%s,\"resolved\":%s,\"readable\":%s,\"reason\":%s}\n",
-    json_string($trimmed), json_string($cmd), json_string($resolved),
+  my $normalised = normalise_segment($cmd, $operands);
+  printf "{\"raw\":%s,\"command\":%s,\"normalised\":%s,\"resolved\":%s,\"readable\":%s,\"reason\":%s}\n",
+    json_string($trimmed), json_string($cmd), json_string($normalised), json_string($resolved),
     (defined $reason ? 'false' : 'true'),
     (defined $reason ? json_string($reason) : 'null');
 }

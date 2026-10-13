@@ -144,16 +144,63 @@ fi
 # undone there, and a rule written as a regex in a project's profile could undo none of it.
 segments=$(printf '%s' "$command_line" | perl "$TOKENIZE")
 
+# Who owns what. The roles come from the brief's own vocabulary, not from this file: a
+# project renames nothing here, it declares its reviewer's status name in the profile.
+review_status=$(ola_profile_get merge.review_status "$cwd" "" agent-review)
+
+# `has <text> <extended regex>`: the only way a rule reads a segment. It is given the
+# normalised field and never the raw one — a rule written as a regex in a project's profile
+# cannot undo quoting, so `gh pr "merge"` would walk past a pattern `gh pr merge` trips.
+has() { printf '%s' "$1" | grep -qE "$2"; }
+
 while IFS= read -r segment; do
   [ -n "$segment" ] || continue
-  if [ "$(printf '%s' "$segment" | jq -r '.readable')" = false ]; then
+  readable=$(printf '%s' "$segment" | jq -r '.readable')
+  if [ "$readable" = false ]; then
     reason=$(printf '%s' "$segment" | jq -r '.reason')
     resolved=$(printf '%s' "$segment" | jq -r '.resolved')
     decide ask "ola-workflow: this command cannot be read, so no rule can be applied to it — $reason (at: $resolved). Confirm only if you know what it runs."
   fi
-  # The role rules land here, in the task that follows this one. Until then a readable
-  # command is allowed, which is what the guard did before: this change adds the question,
-  # not the prohibitions.
+
+  cmd=$(printf '%s' "$segment" | jq -r '.command')
+  text=$(printf '%s' "$segment" | jq -r '.normalised')
+
+  # ------------------------------------------------------------------ merging
+  # A merge is the one action that makes a change permanent, so it belongs to the one role
+  # that has seen the review. The API form counts: a PUT on a pulls/N/merge path merges
+  # exactly as the CLI does, and a rule that only knew the CLI would be a rule about
+  # spelling rather than about merging.
+  # Written with `if` and not `&&`, because under `set -e` a `grep` that does not match
+  # makes the whole statement fail and the guard exits 2 — blocking every command on its
+  # own bug. Which is what happened, and what the suite said on the first run: the
+  # fail-closed branch is not theoretical, and it is reached by a shell idiom.
+  merging=no
+  if [ "$cmd" = gh ] && has "$text" '(^| )pr( .*)? merge( |$)'; then merging=yes; fi
+  if has "$text" 'pulls/[^ /]+/merge' &&
+     has "$text" '(-X|--method)[= ]?(PUT|PATCH|POST)'; then merging=yes; fi
+  if [ "$merging" = yes ]; then
+    # --admin and --auto are refused to everyone, the coordinator included: one bypasses
+    # the checks the gate is made of, the other merges later, when nobody is watching and
+    # the review no longer applies to the commit that lands.
+    if has "$text" '(^| )--(admin|auto)( |$)'; then
+      decide deny "ola-workflow: --admin and --auto are refused to every role. --admin merges past the checks this project requires, and --auto merges at a moment when the review no longer applies to what lands. Merge with --match-head-commit on the SHA you checked."
+    fi
+    if [ "$role" != coordinator ]; then
+      decide deny "ola-workflow: only the coordinator merges, once the checks and the $review_status status are successful on the head SHA. Report the pull request to the coordinator instead."
+    fi
+  fi
+
+  # ---------------------------------------------------- the review status
+  # The status is what the merge gate reads, so whoever can write it can let anything
+  # through. It belongs to the reviewer alone — including against the coordinator, which
+  # would otherwise be able to approve the change it is about to merge.
+  if has "$text" 'statuses/' &&
+     has "$text" '(-X|--method)[= ]?(POST|PUT|PATCH)|(-f|--field|--raw-field)[= ]?state=' &&
+     has "$text" "$review_status"; then
+    if [ "$role" != pr-reviewer ]; then
+      decide deny "ola-workflow: only the pr-reviewer sets the $review_status status, because it is what the merge gate reads. Ask the coordinator to dispatch a review."
+    fi
+  fi
 done <<<"$segments"
 
 exit 0

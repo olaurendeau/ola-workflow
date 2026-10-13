@@ -169,8 +169,15 @@ export HOME=$WORK/home
 mkdir -p "$HOME"
 
 profiled() { # profiled <mode> → a throwaway project with a profile in that mode
+  # The directory is unique per call, not named after the mode. Two calls with the same
+  # mode used to hand back the same path, so corrupting the profile of the second one
+  # corrupted the first one's too — and every later test got `ask: this profile cannot be
+  # read` while reading as though the rule under test had fired. 100 failures, one cause.
+  # Fixed by construction rather than by a check: a fixture that cannot collide needs no
+  # assertion saying it did not.
   local mode=$1
-  local repo=$WORK/$mode
+  local repo
+  repo=$(cd "$(mktemp -d "$WORK/$mode.XXXXXX")" && pwd -P)
   mkdir -p "$repo/.claude"
   git -C "$repo" -c init.defaultBranch=main init -q 2>/dev/null
   printf '{"mode":"%s","base_branch":"main"}\n' "$mode" >"$repo/.claude/workflow.json"
@@ -191,9 +198,11 @@ enforced() {
   report "$expected" "$(classify "$output" "$rc")" "[enforce ${agent:-main}] ${cmd//$'\n'/ ⏎ }"
 }
 
-# A command whose command word can be read is allowed: this change adds the question, not
-# the prohibitions. The role rules arrive in the task after this one.
-for cmd in 'git status' 'make check' 'gh pr view 5' 'gh pr merge 7 --squash' \
+# A command whose command word can be read, and that no rule claims, is allowed. The two
+# last ones are deliberate: pushing to a base branch and publishing are refusals this guard
+# does not have yet, and listing them here is what will make their arrival visible — the row
+# has to be moved, it cannot stay and pass.
+for cmd in 'git status' 'make check' 'gh pr view 5' \
            'git push --force origin main' 'npm publish'; do
   enforced allow ola-workflow:developer "$cmd"
 done
@@ -278,6 +287,101 @@ else
   echo "FAIL  the role was read as: $(jq -r '.role' "$log" 2>/dev/null)"
   failures=$((failures + 1))
 fi
+
+# --- Merging belongs to the coordinator -----------------------------------------------
+# The role matrix, under every spelling the shell accepts. The normalised command word is
+# what makes the last three of these fail for a developer, where the implementation this
+# is ported from allowed them: its patterns match the text, and `g\h`, `env FOO=1 gh` and
+# `exec gh` are not that text.
+MERGE_FORMS=(
+  'gh pr merge 7 --squash'
+  'gh  pr   merge 7'
+  'gh -R owner/repo pr merge 7'
+  'gh api -X PUT repos/o/r/pulls/7/merge'
+  'gh api --method PUT repos/{owner}/{repo}/pulls/7/merge'
+  'g\h pr merge 7'
+  'env FOO=1 gh pr merge 7'
+  '(exec gh pr merge 7)'
+  'nice -n5 gh pr merge 7'
+  'true && gh pr merge 7'
+  'f () { gh pr merge 7; }; f'
+  'case x in x) gh pr merge 7 ;; esac'
+)
+for cmd in "${MERGE_FORMS[@]}"; do
+  enforced allow ola-workflow:coordinator "$cmd"
+  for role in ola-workflow:developer ola-workflow:pr-reviewer ola-workflow:architect ""; do
+    enforced deny "$role" "$cmd"
+  done
+done
+
+# --admin and --auto are refused to everyone, the coordinator included: one merges past the
+# checks the gate is made of, the other merges when the review no longer applies to what
+# lands.
+for cmd in 'gh pr merge 7 --admin' 'gh pr merge 7 --squash --auto' 'gh pr merge --auto 7'; do
+  for role in ola-workflow:coordinator ola-workflow:developer ""; do
+    enforced deny "$role" "$cmd"
+  done
+done
+
+# What is not merging stays allowed, for every role. A guard whose refusals are not
+# believed is a guard that gets switched off, and the fastest way there is a false
+# positive on an ordinary command.
+for cmd in 'gh pr view 7 --json mergeStateStatus' 'gh pr list' 'gh pr checks 7' \
+           'gh api repos/o/r/pulls/7' 'gh api -X GET repos/o/r/pulls/7/merge' \
+           'git log --grep="pr merge"' 'git merge origin/main' \
+           'gh pr comment 7 -b "someone should gh pr merge this"' \
+           'gh issue create -t "merge" -b "the merge is blocked"' \
+           'echo "gh pr merge 7"'; do
+  for role in ola-workflow:coordinator ola-workflow:developer ""; do
+    enforced allow "$role" "$cmd"
+  done
+done
+
+# --- The review status belongs to the reviewer ----------------------------------------
+# It is what the merge gate reads, so whoever writes it can let anything through — the
+# coordinator included, which would otherwise approve the change it is about to merge.
+STATUS=$(profiled integrated)
+printf '%s\n' '{"mode":"integrated","merge":{"review_status":"relu-par-agent"}}' \
+  >"$STATUS/.claude/workflow.json"
+for cmd in 'gh api repos/o/r/statuses/abc -f state=success -f context=relu-par-agent' \
+           'gh api -X POST repos/o/r/statuses/abc -f context=relu-par-agent -f state=failure' \
+           'gh api --method POST repos/{owner}/{repo}/statuses/$SHA --raw-field state=success --raw-field context=relu-par-agent'; do
+  enforced allow ola-workflow:pr-reviewer "$cmd" "$STATUS"
+  for role in ola-workflow:coordinator ola-workflow:developer ""; do
+    enforced deny "$role" "$cmd" "$STATUS"
+  done
+done
+
+# The name comes from the profile, so a project that calls its status something else is
+# protected on its own name and not on ours.
+enforced allow ola-workflow:developer \
+  'gh api repos/o/r/statuses/abc -f state=success -f context=agent-review' "$STATUS"
+enforced allow ola-workflow:developer \
+  'gh api repos/o/r/statuses/abc -f state=success -f context=something-else' "$STATUS"
+# Reading a status is not writing one.
+enforced allow ola-workflow:developer \
+  'gh api repos/o/r/statuses/abc' "$STATUS"
+enforced allow ola-workflow:developer \
+  'gh api -X GET repos/o/r/commits/abc/statuses' "$STATUS"
+
+# --- A refusal has to say what to do instead ------------------------------------------
+# A refusal that names no way forward is a refusal an agent works around, which is how a
+# guard turns into an obstacle rather than a rule.
+for pair in 'ola-workflow:developer|gh pr merge 7|coordinator' \
+            'ola-workflow:coordinator|gh pr merge 7 --admin|--match-head-commit' \
+            'ola-workflow:coordinator|gh api repos/o/r/statuses/abc -f state=success -f context=relu-par-agent|dispatch a review'; do
+  IFS='|' read -r role cmd want <<<"$pair"
+  got=$(OLA_WORKFLOW_GUARD=enforce "$GUARD" <<<"$(jq -n --arg c "$cmd" --arg a "$role" --arg d "$STATUS" \
+    '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"r",cwd:$d,agent_type:$a,
+      tool_input:{command:$c}}')" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+  total=$((total + 1))
+  if [ "${got#*"$want"}" != "$got" ]; then
+    echo "ok    the refusal of '$cmd' says what to do instead ($want)"
+  else
+    echo "FAIL  the refusal of '$cmd' does not mention $want: $got"
+    failures=$((failures + 1))
+  fi
+done
 
 # --- A3 rule sections, kept empty on purpose ------------------------------------------
 # Merging

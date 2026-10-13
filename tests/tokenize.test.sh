@@ -225,6 +225,67 @@ for line in 'c=gh' '}' 'done' '2>/dev/null'; do
   fi
 done
 
+echo "--- a prefix changes how the command is reached, never what it is given"
+# This is the invariant `normalised` exists for, and it is the one a rule depends on: rules
+# match this field, so a word that disappears from it is a rule that stops applying, with
+# nothing to show that it has. The property is stated against a reference rather than per
+# form — every grammatical prefix must leave the operands of the bare line untouched — so
+# a new prefix branch is covered the day it is written, including the one that miscounts.
+#
+# It was not stated, and two forms were wrong at once: `(gh pr merge 7)` came out as
+# `gh merge 7`, the `pr` gone because the walk renders `(gh` as two words and the
+# normaliser recovered its position by counting them; and `--admin)` kept its paren, so
+# every rule anchored on a word boundary walked past it.
+reference=$(printf '%s' 'gh pr merge 7 --admin' | perl "$TOKENIZE" | jq -r '.normalised')
+for prefix_form in \
+    'gh pr merge 7 --admin' \
+    '(gh pr merge 7 --admin)' \
+    '((gh pr merge 7 --admin))' \
+    'exec gh pr merge 7 --admin' \
+    '(exec gh pr merge 7 --admin)' \
+    'command gh pr merge 7 --admin' \
+    'env FOO=1 gh pr merge 7 --admin' \
+    'FOO=1 gh pr merge 7 --admin' \
+    '2>/dev/null gh pr merge 7 --admin' \
+    'then gh pr merge 7 --admin' \
+    'nice -n 10 gh pr merge 7 --admin' \
+    'xargs -r gh pr merge 7 --admin' \
+    'case $x in a) gh pr merge 7 --admin' \
+    'f () { gh pr merge 7 --admin' \
+    "g\\h pr merge 7 --admin" \
+    '/usr/local/bin/gh pr merge 7 --admin' \
+    '"gh" pr merge 7 --admin'; do
+  got=$(printf '%s' "$prefix_form" | perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised' | head -1)
+  total=$((total + 1))
+  if [ "$got" = "$reference" ]; then
+    ok "the operands survive: $prefix_form"
+  else
+    ko "'$prefix_form' normalised to '$got', not '$reference'"
+  fi
+done
+
+# The witness this reference needs: it must not be empty, or every row above compares
+# nothing with nothing and passes.
+total=$((total + 1))
+if [ "$reference" = 'gh pr merge 7 --admin' ]; then
+  ok "witness: the reference is the whole line, so the rows above compare something"
+else
+  ko "witness: the reference is '$reference' — the rows above prove nothing"
+fi
+
+# A `)` that closes a substitution is balanced inside its own word and stays, because what
+# marks punctuation is the imbalance, not the character. The substitution's body is already
+# hollowed out by the splitter — it is a segment of its own, and what it computes is not in
+# this text — so what must survive here is the empty `$()`, with its closing paren: a rule
+# that reads a path must still see that the path ends in something it cannot know.
+total=$((total + 1))
+balanced=$(printf '%s' 'gh api repos/o/r/statuses/$(git rev-parse HEAD)' | perl "$TOKENIZE" |
+  jq -r 'select(.command == "gh") | .normalised')
+case $balanced in
+  *'statuses/$()') ok "a balanced ) belongs to its word and is kept" ;;
+  *) ko "a balanced ) was taken for punctuation: $balanced" ;;
+esac
+
 echo "--- the three fields, and which one a rule may use"
 record=$(printf '%s' 'g\h pr merge 7' | perl "$TOKENIZE")
 total=$((total + 1))

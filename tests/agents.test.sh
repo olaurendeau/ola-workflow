@@ -268,6 +268,14 @@ else
   ko "the guard suite states no decision in the form read here, so the derivation is blind"
 fi
 
+WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-agents.XXXXXX")" && pwd -P)
+trap 'rm -rf "$WORK"' EXIT
+export HOME=$WORK/home
+mkdir -p "$HOME"
+
+# $HOME is redirected before the probe and not only before the brief, because a profile
+# under the real $HOME wins over the fixture's committed one — the probe would then be
+# measuring this machine's configuration.
 probe_repo=$WORK/guard-probe
 mkdir -p "$probe_repo/.claude"
 git -C "$probe_repo" -c init.defaultBranch=main init -q 2>/dev/null
@@ -342,11 +350,6 @@ fi
 # --- The brief, per mode --------------------------------------------------------------
 # The mode rules live here rather than in five prompts, so this is where they are checked —
 # against the program's real output, not against a sentence about it.
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-agents.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
-export HOME=$WORK/home
-mkdir -p "$HOME"
-
 brief_for() { # brief_for <mode> → the brief of a throwaway project in that mode
   local mode=$1
   local repo=$WORK/$mode
