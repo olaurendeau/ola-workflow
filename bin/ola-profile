@@ -44,17 +44,34 @@ need_value() {
   [ -n "$3" ] || { echo "ola-profile: $2 needs a value" >&2; exit 2; }
 }
 
+# Options are read wherever they appear, before the subcommand or after it, and the
+# arguments are collected as they come. `--slot` used to be read only *before*, and was
+# dropped in silence after — which is the form the README documents and the form a person
+# writes:
+#
+#   ola-profile get check.affected --slot 3
+#
+# It returned `make check SLOT={slot}`, and an agent ran that literally. Reported from a real
+# project. An option that is understood in one position and ignored in the other is worse
+# than one that is refused everywhere: the refusal is a message, the silence is a command
+# with a brace in it.
+ARGS=()
 while [ $# -gt 0 ]; do
   case $1 in
     -C) need_value "$#" -C "${2:-}"; dir=$2; shift 2 ;;
     --slot) need_value "$#" --slot "${2:-}"; slot=$2; shift 2 ;;
+    -C=*) dir=${1#*=}; [ -n "$dir" ] || { echo "ola-profile: -C needs a value" >&2; exit 2; }; shift ;;
+    --slot=*) slot=${1#*=}; [ -n "$slot" ] || { echo "ola-profile: --slot needs a value" >&2; exit 2; }; shift ;;
     -h|--help|help) usage; exit 0 ;;
-    --) shift; break ;;
+    # Everything after `--` is an argument, including something that looks like an option:
+    # that is what `--` is for, and `get -- --slot` must be able to ask for a key so spelt.
+    --) shift; while [ $# -gt 0 ]; do ARGS+=("$1"); shift; done ;;
     -*) echo "ola-profile: unknown option $1" >&2; usage >&2; exit 2 ;;
-    *) break ;;
+    *) ARGS+=("$1"); shift ;;
   esac
 done
 
+set -- ${ARGS[@]+"${ARGS[@]}"}
 [ $# -gt 0 ] || { usage >&2; exit 2; }
 command=$1
 shift

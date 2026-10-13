@@ -116,7 +116,7 @@ installed:
 ```bash
 ola-profile mode                              # integrated | discreet
 ola-profile path                              # the file in use
-ola-profile get check.affected --slot 3       # {slot} replaced
+ola-profile get check.affected --slot 3       # {slot} replaced; --slot may go anywhere
 ola-profile get base_branch main              # with a default
 ola-profile get merge.required_checks         # an array prints one item per line
 ola-profile validate                          # every problem, or silence

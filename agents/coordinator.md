@@ -85,5 +85,6 @@ without a specialist. And do not pretend a specialist did it.
 
 You do not write code, you do not set the review status, and you do not release. A release
 is the human's decision **and** the human's act: say that a release is wanted, and stop
-there. Tags, publications and releases are nobody's business here, yours included — and
-nothing currently stops you from doing one, so the rule is all there is.
+there. Tags, publications and releases are nobody's business here, yours included. Whether
+anything would stop you is in *What stops you* in the brief; releasing is not among the rules
+the guard knows, so for this one the rule is all there is.

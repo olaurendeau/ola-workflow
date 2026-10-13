@@ -172,6 +172,12 @@ forbid_key verify_ui '(playwright|maestro|simctl|ios-simulator|--width [0-9])' \
   'a way of looking at the project'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
 forbid_key mode '(integrated|discreet) mode means' 'what a mode means'
+# The guard's own state is the one a prompt must never state, and for the sharpest reason:
+# an agent told it will be refused, that is not, reads the silence as sanction — and one told
+# nothing will stop it, while the guard refuses, learns that a refusal is a bug to work
+# around. Both are worse than not knowing. The brief reads the key and says which it is.
+forbid_key guard '(OLA_WORKFLOW_GUARD|guard is (on|off|enforcing|inert)|the guard (does not|never) (block|refuse))' \
+  'whether the guard applies'
 
 # Both directions: every value-bearing key has a prohibition, and every prohibition names a
 # key the schema declares.
@@ -334,15 +340,38 @@ if [ "$guard_decides" = no ]; then
     ko "the guard decides nothing yet, and these promise otherwise: $claims"
   fi
 else
-  # The guard decides something now, so the prompts may — and should — say so. This arm is
-  # what A3 turns on, and it is an assertion rather than a note so that the switch is
-  # visible in the suite rather than inferred from its silence.
-  for f in "${AGENTS[@]}" "$BRIEF"; do
-    name=${f##*/}
-    if grep -qE 'guard (refuses|blocks|will ask|asks|prevents)' "$f"; then
-      ok "$name: the guard decides, and this says so"
+  # The guard decides something now, and this arm is what that switch turns on.
+  #
+  # It asks of the **brief** and not of the five prompts, and that is a change from the shape
+  # this assertion was written in ("all six must say so"). The reason is the one this project
+  # keeps: whether the guard applies is a value in the profile, the brief is the single reader
+  # of the profile, and five prompts restating a conditional fact would drift apart one
+  # justified edit at a time — the exact failure the brief exists to prevent.
+  #
+  # It is not a weakening, because the other half is asserted from the other side: the
+  # `forbid_key guard` prohibition above means no prompt may make a claim about enforcement
+  # of its own, in either direction. Together: the one reader states it, and nobody else may.
+  if grep -qE 'guard (refuses|blocks|will ask|asks|prevents)' "$BRIEF"; then
+    ok "the guard decides, and the brief — the one reader of the profile — says so"
+  else
+    ko "the guard decides now, and the brief tells an agent nothing will stop it"
+  fi
+  # And it must say so for *both* values of the key, or the half that matters is missing: an
+  # agent told nothing will stop it, while the guard refuses, learns to treat a refusal as a
+  # bug to work around.
+  for want in enforce log; do
+    probe=$WORK/stops-$want
+    mkdir -p "$probe/.claude"
+    git -C "$probe" -c init.defaultBranch=main init -q 2>/dev/null
+    printf '{"mode":"integrated","guard":"%s"}\n' "$want" >"$probe/.claude/workflow.json"
+    # Through a file, not a pipe: `… | grep -q` reported a miss on output that holds the
+    # match, and a harness that lies about the thing it measures is worse than no harness.
+    # The file also lets the failure show what was printed.
+    "$BRIEF" "$probe" >"$WORK/out-$want" 2>"$WORK/err-$want" || true
+    if grep -q '## What stops you' "$WORK/out-$want"; then
+      ok "the brief says what stops an agent when guard is $want"
     else
-      ko "$name: the guard decides now, and this tells an agent nothing will stop it"
+      ko "the brief says nothing about what stops an agent when guard is $want: $(head -c 100 "$WORK/err-$want" "$WORK/out-$want" | tr '\n' ' ')"
     fi
   done
 fi

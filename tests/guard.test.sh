@@ -27,6 +27,11 @@ total=0
 # remembered. A wrapper covers them by construction, including the ones written next year.
 #
 # Exit 2 is the exception: that path exists to explain itself on stderr.
+# A directory with no profile above it, for the harness that means "this project has not
+# opted in". `mktemp -d` gives one under $TMPDIR, which is not a git repository and has no
+# .claude anywhere up the tree.
+NOWHERE=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-nowhere.XXXXXX")" && pwd -P)
+
 GUARD_HOME=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-wrap.XXXXXX")" && pwd -P)
 GUARD=$GUARD_HOME/guard
 STDERR_LOG=$GUARD_HOME/stderr.log
@@ -74,6 +79,14 @@ report() {
 }
 
 # check <allow|deny|ask> <agent_type|""> <command>
+# A payload with no `cwd`, which is what makes this the "no profile" harness — and it was
+# not one. With no `cwd` the guard falls back to its working directory, which was *this
+# repository*, which has a profile. Every row here was quietly running against it, and they
+# all passed only because the guard was log-only by default: the day the default became
+# enforcement, eleven of them started refusing. The harness never tested what its name said.
+#
+# So it runs from a directory that holds no profile, and the rows mean what they claim.
+#
 # An empty agent omits the key entirely, which is what Claude Code sends on a main
 # session with no agent (agent_type is optional and absent, not "").
 check() {
@@ -81,7 +94,7 @@ check() {
   input=$(jq -n --arg c "$cmd" --arg a "$agent" \
     '{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}
      + (if $a == "" then {} else {agent_type: $a} end)')
-  output=$("$GUARD" <<<"$input" 2>/dev/null)
+  output=$(cd "$NOWHERE" && printf '%s' "$input" | "$GUARD" 2>/dev/null)
   rc=$?
   report "$expected" "$(classify "$output" "$rc")" "[${agent:-main}] ${cmd//$'\n'/ ⏎ }"
 }
@@ -90,7 +103,7 @@ check() {
 # Feeds the guard an arbitrary payload, valid JSON or not.
 check_payload() {
   local expected=$1 label=$2 payload=$3 output rc
-  output=$("$GUARD" <<<"$payload" 2>/dev/null)
+  output=$(cd "$NOWHERE" && printf '%s' "$payload" | "$GUARD" 2>/dev/null)
   rc=$?
   report "$expected" "$(classify "$output" "$rc")" "$label"
 }
@@ -276,16 +289,20 @@ case $broken_reason in
   *) echo "FAIL  an unreadable profile says only: $broken_reason"; failures=$((failures + 1)) ;;
 esac
 
-# The shipped default decides nothing. This is the assertion that makes the log-only
-# default a fact rather than an intention.
+# A profile with no `guard` key is enforced. This assertion is the inverse of the one it
+# replaces — "the shipped default decides nothing", which made the log-only default a fact
+# rather than an intention while the ask rate was unmeasured. It is measured (3–7% depending
+# on how many indirection commands a sample holds, nothing refused wrongly), and a rule
+# nothing applies is not a rule, so the default is enforcement and a project opts out with
+# `"guard": "log"`.
 default_out=$("$GUARD" <<<"$(jq -n --arg d "$INTEGRATED" \
   '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"t3",cwd:$d,
     tool_input:{command:"$(echo gh) pr merge"}}')" 2>/dev/null)
 total=$((total + 1))
-if [ -z "$default_out" ]; then
-  echo "ok    the shipped default allows, so nothing is enforced before it is measured"
+if [ -n "$default_out" ]; then
+  echo "ok    a profile that says nothing about the guard is enforced"
 else
-  echo "FAIL  the default enforced something: $default_out"
+  echo "FAIL  a profile with no guard key decided nothing: the rules apply to no one"
   failures=$((failures + 1))
 fi
 
@@ -298,9 +315,9 @@ OLA_WORKFLOW_GUARD_LOG=$log "$GUARD" <<<"$(jq -n --arg d "$INTEGRATED" \
     agent_type:"ola-workflow:developer",tool_input:{command:"$(echo gh) pr merge"}}')" >/dev/null 2>&1
 total=$((total + 1))
 if [ "$(jq -r '.verdict' "$log" 2>/dev/null)" = ask ] &&
-   [ "$(jq -r '.enforcing' "$log" 2>/dev/null)" = no ] &&
+   [ "$(jq -r '.enforcing' "$log" 2>/dev/null)" = yes ] &&
    [ "$(jq -r '.role' "$log" 2>/dev/null)" = developer ]; then
-  echo "ok    the log records the verdict, the role, and that it was not enforced"
+  echo "ok    the log records the verdict, the role, and whether it was enforced"
 else
   echo "FAIL  the log says: $(cat "$log")"
   failures=$((failures + 1))
@@ -571,8 +588,8 @@ if [ ! -f "$shape_file" ]; then
   echo "FAIL  the cache was never written, so its shape is untested"
   failures=$((failures + 1))
 elif [ "$(wc -l <"$shape_file" | tr -d ' ')" = 1 ] &&
-     [ "$(awk -F'\t' 'END {print NF}' "$shape_file")" = 6 ]; then
-  echo "ok    the cache is one line of six fields, whatever stat prints here"
+     [ "$(awk -F'\t' 'END {print NF}' "$shape_file")" = 7 ]; then
+  echo "ok    the cache is one line of seven fields, whatever stat prints here"
 else
   echo "FAIL  the cache is $(wc -l <"$shape_file" | tr -d ' ') line(s) of $(awk -F'\t' 'END {print NF}' "$shape_file") field(s): every field after a corrupt one has slid"
   failures=$((failures + 1))
@@ -603,7 +620,7 @@ enforced_cache=${TMPDIR:-/tmp}/ola-workflow-guard-t.cache
 shape_profile=$SHAPE/.claude/workflow.json
 shape_mtime=$(stat -c %Y "$shape_profile" 2>/dev/null)
 case $shape_mtime in ''|*[!0-9]*) shape_mtime=$(stat -f %m "$shape_profile" 2>/dev/null) ;; esac
-truncated=$(printf '%s\t%s\tintegrated\t%s\tyes' "$SHAPE" "$shape_profile" "$shape_mtime")
+truncated=$(printf '%s\t%s\tintegrated\t%s\tyes\tagent-review' "$SHAPE" "$shape_profile" "$shape_mtime")
 printf '%s\n' "$truncated" >"$enforced_cache"
 enforced deny ola-workflow:developer \
   'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=agent-review' "$SHAPE"
@@ -613,7 +630,7 @@ printf 'one\ttwo\n' >"$enforced_cache"
 enforced allow ola-workflow:developer 'git status' "$SHAPE"
 printf 'a\tb\tc\nd\te\tf\n' >"$enforced_cache"
 enforced deny ola-workflow:developer 'gh pr merge 7' "$SHAPE"
-printf 'a\tb\tc\td\te\tf\tg\n' >"$enforced_cache"
+printf 'a\tb\tc\td\te\tf\tg\th\n' >"$enforced_cache"
 enforced deny ola-workflow:developer 'gh pr merge 7' "$SHAPE"
 : >"$enforced_cache"
 enforced deny ola-workflow:developer 'gh pr merge 7' "$SHAPE"

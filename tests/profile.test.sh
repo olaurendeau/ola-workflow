@@ -206,6 +206,37 @@ eq '[{"file":"Makefile","regex":"deploy"},{"regex":"git push"}]' \
 rc 1 "get: missing key exits 1" -- "$CLI" -C "$WORK/integrated" get nope.nope
 eq main "$("$CLI" -C "$WORK/integrated" get nope main)" "get: default for a missing key"
 eq "SLOT=7" "$("$CLI" -C "$WORK/integrated" --slot 7 get nope 'SLOT={slot}')" "get: {slot} in the default"
+
+# --- An option is read wherever it is written ----------------------------------------
+# `--slot` was read before the subcommand and dropped **in silence** after it — which is the
+# form the README documents and the form a person writes. It returned `make check SLOT={slot}`
+# and an agent ran that literally, reported from a real project.
+#
+# Every row below writes the option somewhere a person might, and the one that was broken is
+# the second. The suite had a row for the first position only, so the defect was not a
+# missing assertion about a rule: it was an assertion about one spelling of a rule that has
+# four. An option understood in one position and ignored in another is worse than one refused
+# everywhere, because a refusal is a message and the silence is a command with a brace in it.
+for form in "--slot|3|get|check.affected" \
+            "get|check.affected|--slot|3" \
+            "--slot=3|get|check.affected" \
+            "get|check.affected|--slot=3"; do
+  IFS='|' read -r -a argv <<<"$form"
+  eq "make check-affected SLOT=3" "$("$CLI" -C "$WORK/integrated" "${argv[@]}")" \
+    "get: {slot} replaced with the option written as: $(printf '%s ' "${argv[@]}")"
+done
+# The same, reaching the default rather than a key, because that is a second reader of the
+# slot and it was right while the first was wrong.
+eq "SLOT=5" "$("$CLI" -C "$WORK/integrated" get nope 'SLOT={slot}' --slot 5)" \
+  "get: {slot} in the default, option written last"
+# And `--` still means "stop reading options", so a key spelt like one can be asked for.
+rc 1 "an argument after -- is an argument, not an option" -- \
+  "$CLI" -C "$WORK/integrated" get -- --slot
+# An option nobody knows is still refused, wherever it sits.
+rc 2 "an unknown option after the subcommand is still refused" -- \
+  "$CLI" -C "$WORK/integrated" get check.affected --made-up 3
+rc 2 "a missing value after the subcommand is still refused" -- \
+  "$CLI" -C "$WORK/integrated" get check.affected --slot
 eq master "$("$CLI" -C "$WORK/integrated" get base_branch fallback)" "get: default unused when set"
 eq fallback "$("$CLI" -C "$WORK/integrated" get base_branch.deeper fallback)" \
   "get: a key path through a scalar is just absent"
