@@ -157,10 +157,11 @@ fi
 # and which the sibling file this check also scans already writes. A blacklist of what a path
 # can look like is open-ended, and every hole in it accuses the truth.
 #
-# What precedes an **offer** is a small closed set: nothing (the start of a line), a blank, a
-# backtick, an opening bracket, a quote (`\x27` for the apostrophe, which cannot be written
-# literally inside the single-quoted perl program). So the lookbehind is a whitelist, and the
-# direction
+# What precedes an **offer** is a small closed set: nothing (the start of a line), a space, a
+# tab, a backtick, an apostrophe, a double quote, an opening paren, an opening bracket. Eight
+# positions, and both ends of the pattern are pinned by measurement further down — the
+# apostrophe is written `\x27`, which it must be, since it cannot appear literally inside the
+# single-quoted perl program. So the lookbehind is a whitelist, and the direction
 # of error flips with it: a character missing from this list makes the scan *miss* an offer,
 # which is a false negative and safe, where a character missing from the old list refused a
 # true sentence and was not.
@@ -296,26 +297,56 @@ EOF
 # So the extent is pinned by measurement, not by a list written twice: every printable
 # character is put in front of a role name and the set that makes it an offer is compared with
 # the one this check means to have. Adding a member fails here; removing one fails above.
-offer_chars=""
-i=32
-while [ "$i" -le 126 ]; do
-  ch=$(awk -v n="$i" 'BEGIN { printf "%c", n }')
-  if printf '%s/developer\n' "$ch" | scan_text | grep -qxF 'slash developer'; then
-    offer_chars="$offer_chars$ch"
-  fi
-  i=$((i + 1))
-done
-# A tab, which no decimal sweep of printables reaches, and the start of a line, which is not a
-# character at all.
-printf '\t/developer\n' | scan_text | grep -qxF 'slash developer' && offer_chars="${offer_chars}<tab>"
-printf '/developer\n'   | scan_text | grep -qxF 'slash developer' && offer_chars="${offer_chars}<bol>"
+# All 256 bytes, in perl, and not 32..126 in awk. The printable range cannot see `\r`, `\f`
+# or `\v`, which perl's `\s` matches — so the version of this sweep that stopped at 126 left
+# the `[ \t]`-not-`\s` fix unguarded, and restoring `\s` passed green while the assertion
+# printed "exactly these 8". A sweep that cannot see a character cannot pin it.
+# Done in one perl process rather than 512 shell round trips: the scan is one regex, and
+# reimplementing it here would be the second copy this file exists to avoid — so the pattern
+# is read out of this file and applied, which also means a change to it cannot be missed.
+extent=$(perl -e '
+  my $src = do { local (@ARGV, $/) = ($ARGV[0]); <> };
+  my ($before) = $src =~ /my \$before = (qr\{.*?\});/s;
+  my ($slash)  = $src =~ /while \(m\{\$before(\/\(\[A-Za-z0-9_\.\+-\]\+\)\(\?\![^}]*\))\}g\)/s;
+  die "pattern not found in the file under test\n" unless $before && $slash;
+  my $re = qr{${\ eval $before }$slash};
+  my (@makes, @blocks);
+  for my $i (0 .. 255) {
+    my $pre = chr($i) . "/developer\n";
+    push @makes, $i if $pre =~ /$re/ && $1 eq "developer";
+    # A trailing /me, not just the character: with the character alone the greedy capture
+    # class absorbs it whatever the lookahead says, so the probe cannot tell the two apart,
+    # and that is why the first version of this block measured zero for six members. The
+    # trailing path forces the match to recede, and receding is where the lookahead decides
+    # between aborting and truncating. (No apostrophes in here: this is inside a
+    # single-quoted shell string, and one would close it. Third time.)
+    my $post = " /developer" . chr($i) . "/me\n";
+    push @blocks, $i unless $post =~ /$re/ && $1 eq "developer";
+  }
+  push @makes, "bol" if "/developer\n" =~ /$re/ && $1 eq "developer";
+  printf "%s|%s\n", join(",", @makes), join(",", @blocks);
+' "$0")
+makes=${extent%%|*}
+blocks=${extent#*|}
 
-# Space, double quote, apostrophe, open paren, open bracket, backtick, tab, start of line.
-expected_chars=' "'"'"'([`<tab><bol>'
-if [ "$offer_chars" = "$expected_chars" ]; then
-  ok "exactly these 8 positions make an offer: [$offer_chars]"
+# 9 tab, 32 space, 34 ", 39 ', 40 (, 91 [, 96 `, plus the start of a line.
+want_makes='9,32,34,39,40,91,96,bol'
+if [ "$makes" = "$want_makes" ]; then
+  ok "exactly 8 positions make an offer, over all 256 bytes"
 else
-  ko "the whitelist's extent changed: [$offer_chars] against [$expected_chars]"
+  ko "the lookbehind's extent changed: [$makes] against [$want_makes]"
+fi
+
+# And the other end, which had no reader at all. The 70 bytes below are exactly the
+# lookahead's own character set, so dropping any member — `A-Z`, `0-9`, `_`, `.`, `+`, `-`
+# included — moves the set and fails here. Each of those six was droppable with the suite
+# staying green, and `/developer.md#modes` was a measured false positive; the granularity is
+# where the defect hid, since `A-Za-z0-9_.+-` reads as one member while it is six.
+want_blocks='35,43,45,46,47,48,49,50,51,52,53,54,55,56,57,58,63,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,95,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122'
+if [ "$blocks" = "$want_blocks" ]; then
+  ok "exactly 70 bytes keep a role name from being a verdict, over all 256"
+else
+  ko "the lookahead's extent changed: [$blocks] against [$want_blocks]"
 fi
 
 # --- The scan itself, against text it must not accuse ---------------------------------
