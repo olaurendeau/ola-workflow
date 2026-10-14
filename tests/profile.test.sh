@@ -326,6 +326,12 @@ if [ "$(id -u)" != 0 ]; then
     chmod 755 "$level"
   done
   eq discreet "$("$CLI" -C "$WORK/discreet" mode)" "precedence: still fine afterwards"
+else
+  # Said rather than skipped in silence. Seven assertions vanishing between two platforms is
+  # how a gap goes unnoticed — found by diffing the printed labels of a macOS run against a
+  # container run, after a `stat` dialect made 193 guard tests fail on Linux while the suite
+  # was green here. A skip with no reader is a gap.
+  ok "precedence: the unenterable-directory block needs an ordinary user, and this is root"
 fi
 
 # Not a regular file at all: giving up is the only answer that keeps the order meaningful.
@@ -860,6 +866,109 @@ for claim in ':(glob)' 'no wildcard crosses' '**/Dockerfile*' 'named literally' 
        failures=$((failures + 1)) ;;
   esac
 done
+
+# --- `where` and `path` agree on the layout -------------------------------------------
+# The layout "a user profile lives at ~/.claude/workflow-profiles/<id>/profile.json" is
+# written in two functions: the one that resolves an existing profile, and the one that says
+# where a new one would go. Two copies are how an init command writes a file to a path the
+# resolver does not read — the profile would be created, reported as created, and never
+# applied.
+#
+# The first version of this block asserted membership, which is insensitive to order: with
+# the two halves of `ola_profile_candidates` swapped, the whole suite stayed green although
+# the function then announced the repository's file as the winner. And it borrowed another
+# section's fixture to cover "both candidates present", a fixture whose repository half had
+# been removed 500 lines earlier — so the case it claimed to test did not exist. Both are
+# fixed the same way: the precedence is asserted as an order, on a fixture built here for it.
+BOTH=$WORK/both
+mkrepo "$BOTH" "https://github.com/someone/both.git"
+mkdir -p "$BOTH/.claude"
+printf '%s\n' '{"mode": "integrated", "base_branch": "from-project"}' >"$BOTH/.claude/workflow.json"
+user_profile "github.com/someone/both" '{"mode": "discreet", "base_branch": "from-user"}'
+
+listed=$("$CLI" -C "$BOTH" where)
+eq 2 "$(printf '%s\n' "$listed" | grep -c .)" "witness: both candidates exist, so the order is testable"
+eq from-user "$("$CLI" -C "$BOTH" get base_branch)" "witness: and the user profile is the one in use"
+eq "$("$CLI" -C "$BOTH" path)" "$(printf '%s\n' "$listed" | sed -n '1s/^[a-z]* //p')" \
+  "where lists the winning candidate first, so the order carries the precedence"
+eq "user" "$(printf '%s\n' "$listed" | sed -n '1s/ .*//p')" "where names the scope that wins"
+
+# The round trip, in the direction an init command uses it: write where `where` says, and
+# `path` must find it. Nothing else proves the two agree about a file that does not exist
+# yet, which is the only moment the question is asked.
+for scope in user project; do
+  repo=$WORK/rt-$scope
+  mkrepo "$repo" "https://github.com/someone/rt-$scope.git"
+  target=$("$CLI" -C "$repo" where "$scope")
+  mkdir -p "${target%/*}"
+  printf '%s\n' '{"mode": "discreet", "base_branch": "round-trip"}' >"$target"
+  eq "$target" "$("$CLI" -C "$repo" path)" "round trip: a profile written at \`where $scope\` is the one resolved"
+  eq round-trip "$("$CLI" -C "$repo" get base_branch)" "round trip: and its values are the ones read"
+done
+
+# Every fixture this suite has built, as a second net: whatever `path` answers, `where` must
+# have named. The witness counts the fixtures that *resolved*, not the ones that agreed —
+# counting agreements means the number printed on failure is the number of passes, which is
+# the one moment it has to be the number of fixtures.
+resolved_count=0
+agreed=0
+for repo in "$WORK/integrated" "$WORK/discreet" "$WORK/fork" "$WORK/integrated-wt" \
+            "$WORK/discreet-wt" "$BOTH"; do
+  resolved=$("$CLI" -C "$repo" path 2>/dev/null) || continue
+  resolved_count=$((resolved_count + 1))
+  named=$("$CLI" -C "$repo" where 2>/dev/null | sed 's/^[a-z]* //')
+  case $'\n'"$named"$'\n' in
+    *$'\n'"$resolved"$'\n'*) agreed=$((agreed + 1)) ;;
+    *) ko "${repo##*/}: path resolves $resolved, which where never names: $named" ;;
+  esac
+done
+if [ "$resolved_count" -eq 6 ] && [ "$agreed" -eq 6 ]; then
+  ok "where names the path path resolves, on all 6 fixtures"
+else
+  ko "$resolved_count of 6 fixtures resolved a profile and $agreed agreed — the net has holes"
+fi
+
+# Each scope answers on its own, because that is how a caller writing a file uses it: it
+# has chosen a scope and wants one path, not a list to pick a line out of.
+eq "$HOME/.claude/workflow-profiles/github.com/someone/their-repo/profile.json" \
+  "$("$CLI" -C "$WORK/discreet" where user)" "where user: the path, scope stripped"
+eq "$WORK/integrated/.claude/workflow.json" \
+  "$("$CLI" -C "$WORK/integrated" where project)" "where project: the committed path"
+# And it answers where no profile exists, which is the whole reason it exists: `path` is
+# silent there, and something has to be able to create the first one.
+mkrepo "$WORK/virgin" "https://github.com/acme/nothing.git"
+eq "$HOME/.claude/workflow-profiles/github.com/acme/nothing/profile.json" \
+  "$("$CLI" -C "$WORK/virgin" where user)" "where answers before any profile exists"
+rc 1 "witness: and path answers nothing there" -- "$CLI" -C "$WORK/virgin" path
+
+# A repository with no remote has no identity, so no user-scope path can be built — but it
+# has a top level, so the committed one can. The scopes are independent, and the skill that
+# writes the first profile depends on that: a fresh `git init` is the common case.
+mkrepo "$WORK/no-remote" ""
+rc 1 "where user: no remote, no identity, no user path" -- "$CLI" -C "$WORK/no-remote" where user
+eq "$WORK/no-remote/.claude/workflow.json" \
+  "$("$CLI" -C "$WORK/no-remote" where project)" "where project: works without a remote"
+
+# Outside a repository there is no identity and no top level, so there is no candidate at
+# all — and saying so with status 1 is this CLI's contract. Printing nothing, successfully,
+# is the one answer a caller must never get.
+mkdir -p "$WORK/not-a-repo"
+rc 1 "where: no repository, no candidate, and it says so" -- "$CLI" -C "$WORK/not-a-repo" where
+rc 1 "where user: the same, per scope" -- "$CLI" -C "$WORK/not-a-repo" where user
+rc 2 "where: an unknown scope is a usage error" -- "$CLI" -C "$WORK/integrated" where sideways
+
+# The schema the CLI validates against, so that whoever writes a profile can point an
+# editor at it without restating where the plugin keeps it. It is not a value to put *in* a
+# profile: the path holds the plugin version, so it is right on one machine until the next
+# upgrade — which is why the skill writes no `$schema` key.
+eq 0 "$("$CLI" schema >/dev/null 2>&1; echo $?)" "schema: answers"
+if [ -f "$("$CLI" schema)" ] && jq -e '.properties.mode' "$("$CLI" schema)" >/dev/null 2>&1; then
+  ok "schema: names a file that is the profile schema"
+else
+  ko "schema: names $("$CLI" schema), which is not the profile schema"
+fi
+rc 1 "schema: says so rather than naming a file that is not there" -- \
+  env OLA_PROFILE_SCHEMA=/nonexistent/profile.schema.json "$CLI" schema
 
 # --- Bad usage ------------------------------------------------------------------------
 rc 2 "usage: no command" -- "$CLI"

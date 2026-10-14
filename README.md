@@ -41,7 +41,7 @@ cheap — a new project, not one that deploys on merge.
 |---|---|
 | A3 | the real guard, ported from `mcp-camptocamp` and driven by the profile |
 | A4 | the conditional merge gate |
-| A6 | the `workflow-init` and `verify-ui` skills, then 1.0.0 |
+| A6 | the `verify-ui` skill, then 1.0.0 |
 
 ### Where the rules live
 
@@ -86,7 +86,25 @@ read back, which ends up in agent transcripts. Credentials belong in a credentia
 not in a remote URL.
 
 No profile means no effect: the hook exits 0 and the agents offer to run
-`/ola-workflow:workflow-init`.
+`/ola-workflow:workflow-init`, the skill that writes one.
+
+### Writing the first one
+
+```
+/ola-workflow:workflow-init
+```
+
+It establishes the identity, asks the one thing it must not guess — whose project this is,
+which decides both the mode and the scope the file is written in — detects what the
+repository can tell it, shows the file before writing it, and reads the result back as an
+agent will receive it.
+
+It writes a key only on a positive result, and that is the rule it is built around: an
+omitted key reads as *not declared* in the brief, which an agent treats as a question for
+the human, while an invented one reads as this project's rule — a check command nobody runs,
+enforced by a reviewer against a developer. `slots`, `pr`, `merge`, `commands`,
+`db_hosts_allowed` and `verify_ui` are not detectable at all and are left out unless you
+state them.
 
 The file is described by [`schema/profile.schema.json`](schema/profile.schema.json), which
 is also what validates it — point your editor at it:
@@ -116,6 +134,8 @@ installed:
 ```bash
 ola-profile mode                              # integrated | discreet
 ola-profile path                              # the file in use
+ola-profile where user                        # where one would go, before any exists
+ola-profile schema                            # the file this CLI validates against
 ola-profile get check.affected --slot 3       # {slot} replaced; --slot may go anywhere
 ola-profile get base_branch main              # with a default
 ola-profile get merge.required_checks         # an array prints one item per line
@@ -174,8 +194,11 @@ What this means:
 
 - **`agent_type` is always the namespaced name** `<plugin>:<agent>`, both for a subagent and
   for a session agent. A plugin agent has no bare alias. The name is built from the plugin
-  name, the path under `agents/` and the frontmatter `name`, so `agents/sub/x.md` would be
-  `ola-workflow:sub:x`. The guard therefore keeps only the part after the last `:` and must
+  name, the path under `agents/` and the frontmatter `name`, so `agents/<dir>/<name>.md`
+  would be `ola-workflow:<dir>:<name>`. (A template, not a name: `tests/agents.test.sh`
+  checks that every `ola-workflow:…` written in a prompt or here resolves to something
+  shipped, so an illustration has to be visibly an illustration.) The guard keeps only the
+  part after the last `:` and must
   be tested against both forms.
 - **`agent_id`, not `agent_type`, tells a subagent from a session agent**: it is present only
   inside a subagent, and absent on the main thread even under `--agent`.
@@ -216,5 +239,48 @@ make validate  # claude plugin validate --strict .
 make spike     # replays the agent-identity spike
 ```
 
+### One writing convention, enforced by the suite
+
+`tests/agents.test.sh` checks that every `ola-workflow:<name>` written in an agent prompt,
+in `ola-workflow-brief` or in this README resolves to something shipped, and that a command
+this plugin provides is never written as a bare `/name`. Both catch the same defect: a
+prompt that offers a human a command which does not exist, found only at the one moment the
+plugin had to explain itself.
+
+The convention that follows, and the reason it exists: **do not write this plugin's
+namespace followed by something that is not one of its commands, and do not write a role or
+skill name after a bare slash.** Both checks fail on either, and neither can do better — a
+mention and an offer are the same characters. An image tag of this plugin has the same shape
+as one of its commands, and a sentence forbidding a wrong spelling has the same shape as the
+wrong spelling. Describe them instead: "a command written without its namespace", "the
+plugin's name followed by a version".
+
+This paragraph is itself under the rule, which is why it names no example. Writing one would
+fail the check — and that is the clearest demonstration of the limit there is.
+
+What makes a path decidable is **the character before the slash** — together with whether
+more path follows it — and the question is asked the safe way round: an offer is preceded by
+the start of a line, a blank or a tab, a quote (single, double or back), or an opening paren
+or bracket. Eight positions in all; everything else is a path. Five earlier versions listed
+what precedes a *path* instead, and each was one character short of refusing a true sentence;
+the last one refused `$profile_dir/runs/<slug>/developer`, a path the brief itself writes.
+
+Those eight are pinned in `tests/agents.test.sh` by **measurement**: every printable character
+is put in front of a role name and the set that makes an offer is compared with the set this
+sentence names. So adding a ninth fails, and dropping one of the eight fails too.
+
+An earlier version of this paragraph claimed it could not drift, while the fixtures only
+guarded *removal* — and the drift that had just happened was an addition: two characters grew
+in the code while this sentence still named four.
+
+A whitelist errs by missing an offer, which is a false negative; a blacklist errs by accusing
+a sentence, which is not. That asymmetry is the whole reason it is written this way round.
+
+What is deliberately **not** checked at all: the namespace spelled wrong. That rule existed
+for three cycles and failed on ordinary sentences about image tags, log lines and SQL every
+time it was narrowed.
+
 The test suites fake `PreToolUse` payloads and never execute the commands they contain.
-They need `bash`, `jq` and `perl` only, and run identically on macOS (bash 3.2) and on CI.
+They need `bash`, `jq`, `perl` and `git` only — the suites build throwaway repositories —
+and run identically on macOS (bash 3.2) and on CI. `tests/run.sh` refuses up front when one
+is missing, rather than failing a hundred assertions that name the wrong cause.

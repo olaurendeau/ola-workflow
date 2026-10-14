@@ -236,6 +236,30 @@ ola_profile_path() {
   return 1
 }
 
+# ola_profile_candidates [dir] → every path a profile may occupy, in precedence order, one
+# per line as `<scope> <path>`, whether the file is there or not.
+#
+# This exists for whoever has to *write* a profile: `ola_profile_path` answers nothing until
+# one exists, so a caller creating the first one would have to restate the layout — and a
+# second copy of "where a user-scope profile lives" is how an init command writes to a path
+# the resolver does not read. The scope is part of the answer because it is the decision:
+# `user` is yours and wins, `project` is the repository's and is committed with it.
+#
+# Nothing here tests the filesystem. A candidate is where a profile *would* go, which is a
+# question with an answer even when the directory does not exist yet — that is the whole
+# point of asking it. Which candidate actually applies stays `ola_profile_path`'s to say,
+# and `tests/profile.test.sh` holds the two together: a path that resolver returns and this
+# one never names would be a layout known in two places and agreed in one.
+ola_profile_candidates() {
+  local dir=${1:-$PWD} home=${HOME:-} id top
+  if [ -n "$home" ] && id=$(ola_profile_id "$dir"); then
+    printf 'user %s\n' "$home/.claude/workflow-profiles/$id/profile.json"
+  fi
+  if top=$(ola_profile_toplevel "$dir"); then
+    printf 'project %s\n' "$top/.claude/workflow.json"
+  fi
+}
+
 # ola_profile_dir [dir] → the directory holding the profile. In discreet mode this is also
 # where the agents keep their memory (runs/<slug>/).
 ola_profile_dir() {
