@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### The product designer shows what it means, and someone else judges it
+
+- **Visual work is published as a claude.ai artifact**, one per design, kept at the same
+  URL from one request to the next. The product-designer writes the page outside the
+  repository; a developer's task copies it, with its README, into `docs/design/<slug>/`
+  through a reviewed pull request — the designer still changes nothing in the project.
+- **In discreet mode, nothing is published until the human says yes**, asked by the
+  coordinator. Publishing sends the page to claude.ai, and a project that did not ask for
+  the workflow did not ask for its contents to leave the machine. Its designs stay in the
+  profile's `runs/<slug>/design/`.
+- **A new role, `design-reviewer`**, judges the page against the epic: every criterion
+  shown, every state drawn, the words, accessibility, consistency with the screens next to
+  it. Read-only, and without `Artifact`, so it cannot touch what it judges.
+- **The product-designer now writes the words** a user reads — labels, empty states, errors
+  — and the developer takes them verbatim. Nothing said who wrote them before, so whoever
+  wrote the code last did.
+- `context.design` in the profile names the design directory; the brief has a *Design*
+  section and announces `docs/design` as its default.
+
 ## 0.3.1
 
 **0.3.0 shipped with a merge escape. Update.**

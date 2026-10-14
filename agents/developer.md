@@ -21,6 +21,9 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
    plus its tests. Done when you can say which tests will prove the task is finished — not
    that the code exists, that the behaviour holds.
 
+   The words a user reads and the design's page and README come from the product-designer:
+   take them verbatim. One that does not fit is a question for the coordinator, not an edit.
+
 2. **Branch** from an up-to-date base branch, named `<type>/<short-name>` with the type from
    the task's title. If the coordinator hands you a pull request instead of a task, check it
    out and continue from where it is: it already exists, and at step 5 you only push.

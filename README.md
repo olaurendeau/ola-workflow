@@ -1,7 +1,8 @@
 # ola-workflow
 
-A team of Claude Code agents — a coordinator, a product designer, an architect, developers
-working in isolated worktrees, and an independent PR reviewer — plus a `PreToolUse` guard
+A team of Claude Code agents — a coordinator, a product designer and an independent design
+reviewer, an architect, developers working in isolated worktrees, and an independent PR
+reviewer — plus a `PreToolUse` guard
 that keeps every sensitive command with the role that owns it.
 
 The workflow is **generic**: everything project-specific lives in a profile file, so the
@@ -34,8 +35,10 @@ the prompts carry and nothing applies, which is a different thing from a rule. S
 In place: the manifests, the CI,
 the test harness, the answer to how a plugin agent is identified (see
 [Agent identity](#agent-identity)), the project profile with its schema and its
-`ola-profile` CLI, the **five agents** — a coordinator that frames and dispatches, a product
-designer that turns a request into criteria a test can prove, an architect that splits an
+`ola-profile` CLI, the **six agents** — a coordinator that frames and dispatches, a product
+designer that turns a request into criteria a test can prove and the words a user reads, and
+for visual work publishes the design as a claude.ai artifact it keeps at one URL, a design
+reviewer that judges that page against the epic, an architect that splits an
 epic into reviewable tasks, developers that build test-first in their own worktrees, and an
 independent reviewer — and the **guard**: a tokenizer that reads what a shell would really
 run, three decisions, fail-closed once a profile exists, and its first two role rules.
@@ -99,7 +102,7 @@ branch, commands, slots, escalation, restricted commands, where the memory goes,
 merge gate requires. Each agent starts by running it, and each prompt holds only what is
 specific to its role.
 
-That is not tidiness. Five prompts restating the same facts drift apart one justified edit
+That is not tidiness. Six prompts restating the same facts drift apart one justified edit
 at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
 name a base branch, a check command, a review status, a slot value or a line budget, since
 those belong to the brief. Run it against an agent that hard-codes one and it says which.
@@ -168,7 +171,7 @@ is also what validates it — point your editor at it:
 | `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
 | `commands` | per-command `allow_args` / `deny_args` rules the guard applies |
 | `db_hosts_allowed` | the databases an agent may connect to |
-| `context` | the documents the agents read: product, architecture, review checklist, glossary |
+| `context` | the documents the agents read: product, architecture, review checklist, glossary; and `design`, where each design is documented (`docs/design` by default, integrated mode only) |
 | `verify_ui` | how a change is seen running |
 | `escalation_extra` | what this project reserves for the human |
 
@@ -277,6 +280,25 @@ loads the plugin with `--plugin-dir`, so nothing is installed and nothing is wri
 the repository.
 <!-- spike:end -->
 
+### Publishing an artifact from a plugin agent
+
+The product-designer publishes visual work as a claude.ai artifact and keeps it at one URL.
+Measured on **Claude Code 2.1.299**, 2026-10-14, with
+[`scripts/spike/agent-artifact.sh`](scripts/spike/agent-artifact.sh):
+
+| scenario | `Artifact` available | publish, then publish with `url` |
+|---|---|---|
+| `claude -p`, main session | no | — |
+| `claude -p`, plugin agent declaring `Artifact` | no | — |
+| interactive, `general-purpose` subagent | yes, loaded directly | not measured |
+| interactive, plugin agent declaring `Write, Artifact` | yes | same URL, version 1 then 2 |
+
+So a plugin agent gets the tool by naming it in `tools:`, and a second publish with `url`
+updates the page in place. **Headless runs have no `Artifact` at all**, the main session
+included, which is why this spike is replayed by hand: `make spike-artifact` prints the
+session to start and the prompt to paste. It publishes one private page in the account of
+whoever runs it.
+
 ## Development
 
 ```bash
@@ -285,6 +307,7 @@ make lint      # shellcheck, in its own container (nothing to install)
 make test      # the bash suites: tests/run.sh
 make validate  # claude plugin validate --strict .
 make spike     # replays the agent-identity spike
+make spike-artifact  # prints how to replay the artifact spike, by hand
 ```
 
 ### One writing convention, enforced by the suite

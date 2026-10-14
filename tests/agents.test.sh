@@ -29,7 +29,7 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 # globbed, so that `probe` — which exists to dump a hook payload, not to work — is not held
 # to rules about modes and slots. Both directions are checked below, so a new file cannot
 # quietly escape either set.
-WORKFLOW_ROLES="coordinator product-designer architect developer pr-reviewer"
+WORKFLOW_ROLES="coordinator product-designer design-reviewer architect developer pr-reviewer"
 DIAGNOSTICS="probe"
 # Declared the same way as the roles, and for the same reason: the witness below compares
 # what is on disk against what is declared, and deriving the skills *from disk* made that
@@ -499,7 +499,7 @@ for f in "${AGENTS[@]}"; do
   fi
 done
 # The coordinator reads a Status from each of the others, and dispatches each of them.
-for role in product-designer architect developer pr-reviewer; do
+for role in product-designer design-reviewer architect developer pr-reviewer; do
   if grep -q 'Status:' "$ROOT/agents/$role.md"; then
     ok "$role: reports a Status, which the coordinator reads first"
   else
@@ -527,6 +527,63 @@ worktrees=$(grep -l '^isolation: worktree' "${AGENTS[@]}" | sed 's#.*/##' | tr '
 if [ "$worktrees" = "developer.md " ]; then ok "only the developer is isolated in a worktree"; else ko "worktree isolation is on: ${worktrees:-nobody}"; fi
 models=$(grep -l '^model: ' "${AGENTS[@]}" | sed 's#.*/##' | tr '\n' ' ')
 if [ "$models" = "pr-reviewer.md " ]; then ok "only the reviewer pins a model"; else ko "a model is pinned on: ${models:-nobody}"; fi
+
+# Who may publish, and who may write. The product-designer publishes its design to claude.ai
+# and writes the page it publishes, outside the repository — so `Write`, never `Edit`: there
+# is no file of the project it has any business changing. The design-reviewer judges that
+# page and must not be able to touch it, which is the whole of its independence.
+# tools_of <role> → its declared tools, one per line.
+tools_of() { frontmatter "$ROOT/agents/$1.md" | sed -n 's/^tools: *//p' | tr ',' '\n' | tr -d ' '; }
+for want in Artifact Write; do
+  if tools_of product-designer | grep -qx "$want"; then
+    ok "product-designer: declares $want, to publish its design"
+  else
+    ko "product-designer: does not declare $want, so visual work cannot be published"
+  fi
+done
+for role in $WORKFLOW_ROLES; do
+  [ "$role" = product-designer ] && continue
+  if tools_of "$role" | grep -qx Artifact; then
+    ko "$role: declares Artifact, which only the product-designer publishes with"
+  else
+    ok "$role: cannot publish an artifact"
+  fi
+done
+for unwanted in Edit Write; do
+  case $unwanted in Write) roles="design-reviewer" ;; *) roles="product-designer design-reviewer" ;; esac
+  for role in $roles; do
+    if tools_of "$role" | grep -qx "$unwanted"; then
+      ko "$role: declares $unwanted, so it can change what it was asked to judge"
+    else
+      ok "$role: does not declare $unwanted"
+    fi
+  done
+done
+# The witness for the absences above: they pass on a role whose tools line went missing.
+for role in product-designer design-reviewer; do
+  if [ -n "$(tools_of "$role")" ]; then ok "$role: has a tools line to read"; else ko "$role: has no tools line, so the absences above say nothing"; fi
+done
+
+# The words of an interface are decided by the product-designer, and the developer takes
+# them as they are. Unowned, they are written by whoever writes the code last.
+if grep -qE '^[0-9]+\. \*\*Write the words' "$ROOT/agents/product-designer.md"; then
+  ok "product-designer: has a step that decides the words of the interface"
+else
+  ko "product-designer: nothing says who writes the words a user reads"
+fi
+if grep -qi 'verbatim' "$ROOT/agents/developer.md"; then
+  ok "developer: takes the designer's words and design files verbatim"
+else
+  ko "developer: nothing stops it rewording what the designer decided"
+fi
+# The coordinator carries the artifact's URL into the epic: the next request on the same
+# screen starts from it rather than publishing a second page. (That it dispatches the
+# design-reviewer is checked with every other role, from WORKFLOW_ROLES.)
+if grep -q 'artifact URL' "$ROOT/agents/coordinator.md"; then
+  ok "coordinator: records the artifact URL in the epic"
+else
+  ko "coordinator: never records the artifact URL in the epic"
+fi
 
 # --- One source, cited by all ---------------------------------------------------------
 # The pair that matters: the brief is stated once and needed by every agent. Each agent
@@ -581,7 +638,7 @@ forbid_key slots 'SLOT=[0-9]|slot (1|2|3|9)\b' 'a slot value'
 forbid_key pr '[0-9]{3,4} (changed )?lines|(package-lock|yarn\.lock|Gemfile\.lock|Cargo\.lock)' \
   'a line budget or a lockfile'
 forbid_key language '(write (to the human )?in (French|English|français)|langue)' 'a language'
-forbid_key context '(docs/agents/|CONTEXT\.md|CLAUDE\.md)' 'a context document path'
+forbid_key context '(docs/agents/|docs/design|CONTEXT\.md|CLAUDE\.md)' 'a context document path'
 forbid_key commands '(eas (build|submit|update)|npm publish|scalingo|clever|vercel|neonctl)' \
   'a project command'
 forbid_key db_hosts_allowed '(psql|mysql|mongosh|localhost:[0-9]|127\.0\.0\.1)' \
@@ -899,6 +956,69 @@ case $discreet in
   *) ko "the discreet brief does not say where the memory goes" ;;
 esac
 
+# Design: where it is documented, where it is staged, and whether it may leave the machine.
+# Publishing an artifact sends the page to claude.ai, so in discreet mode it waits for the
+# human's yes — the brief says so, and says nothing about committing it to the repository.
+case $integrated in
+  *'## Design'*) ok "integrated: the brief has a Design section" ;;
+  *) ko "integrated: the brief says nothing about design" ;;
+esac
+case $integrated in
+  *'docs/design/<slug>/'*) ok "integrated: designs are documented under the default docs/design" ;;
+  *) ko "integrated: the brief does not say where designs are documented" ;;
+esac
+case $discreet in
+  *'## Design'*) ok "discreet: the brief has a Design section" ;;
+  *) ko "discreet: the brief says nothing about design" ;;
+esac
+case $discreet in
+  *docs/design*) ko "discreet: the brief sends designs into the repository" ;;
+  *) ok "discreet: no design is documented in the repository" ;;
+esac
+case $discreet in
+  *'runs/<slug>/design/'*) ok "discreet: designs are kept in the local memory" ;;
+  *) ko "discreet: the brief does not say where designs are kept" ;;
+esac
+case $discreet in
+  *'only after the human'*) ok "discreet: publishing an artifact waits for the human" ;;
+  *) ko "discreet: nothing holds an artifact back until the human agrees" ;;
+esac
+case $integrated in
+  *'only after the human'*) ko "integrated: the brief holds back a publish the mode allows" ;;
+  *) ok "integrated: publishing visual work needs no extra confirmation" ;;
+esac
+# The default is said where it is used, not in the notice: a project with no interface
+# would otherwise open every brief on a default it has no reason to set.
+case $integrated in
+  *'docs/design/<slug>/ (not in the profile — my default)'*) ok "integrated: the design directory is marked as my default" ;;
+  *) ko "integrated: the default design directory is presented as the project's" ;;
+esac
+# The page and its README carry the designer's decisions and the review verdicts until a
+# developer copies them: they are written somewhere a reboot does not wipe.
+stage=$(printf '%s' "$integrated" | sed -n 's/^Written first in: *//p')
+case $stage in
+  "$HOME"/.claude/*) ok "integrated: the design is staged under the user's own directory" ;;
+  *) ko "integrated: the design is staged at '${stage:-nowhere}', which may not survive" ;;
+esac
+
+# The profile's own directory wins over the default.
+designed=$WORK/designed
+mkdir -p "$designed/.claude"
+git -C "$designed" -c init.defaultBranch=main init -q 2>/dev/null
+git -C "$designed" remote add origin https://github.com/someone/designed.git 2>/dev/null
+printf '{"mode":"integrated","context":{"design":"ui/specs"}}\n' >"$designed/.claude/workflow.json"
+designed_brief=$("$BRIEF" "$designed")
+case $designed_brief in
+  *'ui/specs/<slug>/'*) ok "integrated: context.design names the design directory" ;;
+  *) ko "integrated: context.design is ignored" ;;
+esac
+# A value the profile states is the project's, and must not be marked as mine: a note on
+# every brief would teach an agent to discount it on the one brief where it is true.
+case $designed_brief in
+  *'(not in the profile — my default)'*) ko "integrated: a design directory the profile states is marked as my default" ;;
+  *) ok "integrated: a design directory the profile states carries no default note" ;;
+esac
+
 # Integrated mode does carry the merge form, with the SHA pinned.
 case $integrated in
   *'--match-head-commit'*) ok "the integrated brief pins the merge to a SHA" ;;
@@ -917,6 +1037,11 @@ git -C "$minimal" -c init.defaultBranch=master init -q 2>/dev/null
 git -C "$minimal" remote add origin https://github.com/someone/minimal.git 2>/dev/null
 printf '{"mode":"integrated"}\n' >"$minimal/.claude/workflow.json"
 bare=$("$BRIEF" "$minimal")
+# context.design is said where it is used, in the Design section, not in this notice.
+case $bare in
+  *'context.design →'*) ko "the defaults notice opens on a design directory nobody needs to set" ;;
+  *) ok "the defaults notice leaves context.design to the Design section" ;;
+esac
 case $bare in
   *'these are my defaults'*) ok "a minimal profile says which values are the plugin's" ;;
   *) ko "a minimal profile presents the plugin's defaults as the project's rules" ;;
