@@ -41,5 +41,8 @@ ola_scratch() { # ola_scratch <name> → sets OLA_SCRATCH to a fresh directory, 
       exit 2
       ;;
   esac
+  # shellcheck disable=SC2034
+  #   Unused *here*, and that is the point: this file is sourced, and the variable is the
+  #   caller's answer. A function that printed it instead could not refuse — see the top.
   OLA_SCRATCH=$dir
 }

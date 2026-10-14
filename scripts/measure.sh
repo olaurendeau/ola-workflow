@@ -88,6 +88,10 @@ echo
 SHIM=$WORK/shim
 mkdir -p "$SHIM"
 REAL_PATH=$PATH
+# shellcheck disable=SC2012
+#   `ls` rather than `find`, because what is wanted is the basenames and nothing else; the
+#   one thing SC2012 warns about — a name the shell would split or glob — is filtered on the
+#   very next line, before the name is used for anything.
 for name in $(ls /usr/bin /bin 2>/dev/null | sort -u); do
   case $name in *[!a-zA-Z0-9_.-]*) continue ;; esac
   real=$(PATH=$REAL_PATH command -v "$name" 2>/dev/null) || continue

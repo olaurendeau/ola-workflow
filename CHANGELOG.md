@@ -2,8 +2,8 @@
 
 ## 0.3.2
 
-**0.3.1 shipped with twenty merge escapes and a script that can delete your repository.**
-Update.
+**0.3.1 shipped with six ways to merge past the guard and a script that can delete your
+repository.** Update.
 
 ```
 claude plugin update ola-workflow@ola-workflow
@@ -33,23 +33,42 @@ this entry left it out of the count.
 It is the same shape as every other defect this project keeps finding — a command that fails
 and is read as a result — in its most expensive form.
 
-### Two more ways a merge got past
+### Six ways a merge got past the guard in 0.3.1
 
-Both are the immediate twins of spellings 0.3.1 closed, which is the third time that has
-happened here; the test rows now name both halves of each.
+All six have one shape: something that is not the command gets read as the command word, so
+the rule that asks whether the command is `gh` is never consulted. **Forty-two spellings**,
+each one measured against the tokenizer 0.3.1 shipped and each one now a row of
+`tests/guard.test.sh` — the count below reconstitutes as 16 + 4 + 4 + 12 + 5 + 1.
 
-- **`2> /dev/null gh pr merge 7 --admin`** was allowed, one space from the glued form, which
-  is refused. Skipping one word left `/dev/null` as the command word, so the merge rule —
-  which asks whether the command is `gh` — was never consulted. Thirteen spellings did it,
-  including the API form. What decides is whether the operator **ends** the word: `2>` takes
-  the next word, `2>&1` does not and still must not.
-- **Five more came from the operator list itself**, which was seven long where bash's grammar
-  has twelve: `>|`, `<>`, `&>>` and `<<-` were absent. `>|` needed the splitter as well — it
-  is one operator, and cutting at the `|` left a bare `>` and a second segment whose command
-  was `out`. The list is the grammar's now, not a memory of it.
-- **`coproc CO ( gh pr merge 7 --admin )`** was allowed, named `CO`, and so were the `if`,
-  `while`, `until` and `case` forms. The brace form was closed in 0.3.1 and the paren form
-  here — each before anyone looked up the set, which is bash's list of compound commands.
+- **Sixteen with a blank between the operator and its target.** `2> /dev/null gh pr merge 7
+  --admin` was allowed, one space from the glued form, which is refused: the skip consumed
+  the operator and not the target, so `/dev/null` became the command word. What decides is
+  whether the operator **ends** the word — `2>` takes the next word, `2>&1` does not and
+  still must not.
+- **Four written with `&>` or `&>>`.** The branch asked for an optional file descriptor then
+  `<` or `>`, which neither begins with, so the operator became the command word itself.
+- **Four written with `>|`.** It is one operator and the splitter cut at the `|`, leaving a
+  bare `>` as one segment and `out gh pr merge 7 --admin` as the next, commanding `out`.
+- **Twelve with the operator glued *behind* the command word.** `gh>out pr merge 7 --admin`
+  arrived as a command named `gh>out`, which matches no rule, and merged. A word ends at an
+  unquoted operator now, as it does in the shell. This is the one that says what the other
+  five were: the prefix placement was read and the glued one was not, which is an enumeration
+  of *placements* sitting behind a list of operators that had just stopped being one.
+- **Five written `coproc NAME` then a compound command** — `( … )`, `if`, `while`, `until`,
+  `case` — where the name read as the command word. The brace form was closed in 0.3.1, each
+  before anyone looked up the set. `for` and `select` complete the set the code now covers
+  and were never escapes: the `;` before `do` puts the merge in a segment of its own.
+- **One with an escaped `>` before an `&`.** `echo \>& gh pr merge 7 --admin` became a single
+  segment named `echo`, because the lookbehind that decides whether an `&` belongs to a
+  redirection read the text as written, where a `\>` ends in `>`. The same lookbehind for
+  `|` was introduced while closing `>|` above and had the same defect; it was caught in
+  review and never shipped. Both now read the text with escapes neutralised.
+
+The operators are one definition in `hooks/lib/tokenize.pl`, read by the three places that
+need them, and it is bash's twelve rather than a list someone remembered. The first attempt
+at this fix wrote a list of seven inline, which left five of the twelve out for the length of
+one commit — the same defect as the one being fixed, one layer up, and review is what caught
+it.
 
 ### The product designer shows what it means, and someone else judges it
 
