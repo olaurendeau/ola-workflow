@@ -3,6 +3,10 @@
 # Nothing here touches the network or the real HOME.
 set -uo pipefail
 
+SCRATCH_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$SCRATCH_ROOT/scripts/scratch.sh"
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CLI=$ROOT/bin/ola-profile
 # shellcheck source=hooks/lib/profile.sh
@@ -41,8 +45,9 @@ rc() { # rc <expected status> <label> -- <command...>
 }
 
 # pwd -P: on macOS mktemp hands back a symlink, while git reports physical paths.
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-profile.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+ola_scratch profile
+WORK=$OLA_SCRATCH
+trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 

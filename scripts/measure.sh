@@ -17,6 +17,8 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$ROOT/scripts/scratch.sh"
 GUARD=$ROOT/hooks/guard.sh
 SAMPLE=${1:-$ROOT/scripts/ordinary-commands.txt}
 
@@ -25,8 +27,9 @@ for tool in jq perl git; do
 done
 [ -r "$SAMPLE" ] || { echo "measure: no sample at $SAMPLE" >&2; exit 2; }
 
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-measure.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+ola_scratch measure
+WORK=$OLA_SCRATCH
+trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 

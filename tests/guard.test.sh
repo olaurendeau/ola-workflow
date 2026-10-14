@@ -9,6 +9,10 @@
 # headings kept at the bottom of this file.
 set -uo pipefail
 
+SCRATCH_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$SCRATCH_ROOT/scripts/scratch.sh"
+
 REAL_GUARD="$(cd "$(dirname "$0")/.." && pwd)/hooks/guard.sh"
 failures=0
 total=0
@@ -208,8 +212,9 @@ rm -f "$probe_log"
 # rate of `ask` on real sessions is not measured yet, and a guard switched on before that
 # is a guard a human switches off. These cases describe what enforcement does when it is
 # turned on; tests/agents.test.sh is what checks that no prompt claims it is on.
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-guard.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+ola_scratch guard
+WORK=$OLA_SCRATCH
+trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 
@@ -709,6 +714,33 @@ enforced deny ola-workflow:developer \
   'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=relu-par-agent' "$STATUS"
 enforced allow ola-workflow:developer \
   'gh api -X POST repos/o/r/statuses/abc -f state=success -f context=other-ci' "$STATUS"
+
+# --- A scratch directory, or nothing at all -------------------------------------------
+# The idiom this suite used to open with can delete the repository:
+#
+#   WORK=$(cd "$(mktemp -d "$TMPDIR/ola-x.XXXXXX")" && pwd -P)
+#   trap 'rm -rf "$WORK"' EXIT
+#
+# With a $TMPDIR that does not exist, the inner substitution is empty, `cd ""` stays put,
+# `pwd -P` answers the *current* directory, and the trap erases it — exit status 0. Measured:
+# an isolated copy of this repository was wiped by `make measure`, which reported success,
+# and a review worktree went the same way mid-review.
+#
+# So the five scripts that make one share `ola_scratch`, and it is asserted here rather than
+# left to five correct copies.
+total=$((total + 1))
+scratch_probe=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-probe.XXXXXX")" && pwd -P)
+cp -R "$(dirname "$0")/../scripts" "$(dirname "$0")" "$scratch_probe/" 2>/dev/null
+: >"$scratch_probe/CANARY"
+( cd "$scratch_probe" && TMPDIR=/nonexistent-ola-scratch-probe \
+    bash scripts/measure.sh >/dev/null 2>&1 )
+if [ -f "$scratch_probe/CANARY" ]; then
+  echo "ok    a broken TMPDIR refuses rather than deleting the tree it runs in"
+else
+  echo "FAIL  a broken TMPDIR let the tree be deleted — ola_scratch is not holding"
+  failures=$((failures + 1))
+fi
+rm -rf "$scratch_probe"
 
 # --- A missing tool blocks, it does not pass -----------------------------------------
 # The guard failed **open**, which is the one thing its whole design forbids: with `jq` off

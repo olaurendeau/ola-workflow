@@ -1,6 +1,47 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
+
+**0.3.1 shipped with two merge escapes and a script that can delete your repository.**
+Update.
+
+```
+claude plugin update ola-workflow@ola-workflow
+```
+
+### `make measure` could erase the tree it ran in, and report success
+
+```
+WORK=$(cd "$(mktemp -d "$TMPDIR/ola-x.XXXXXX")" && pwd -P)
+trap 'rm -rf "$WORK"' EXIT
+```
+
+With a `$TMPDIR` that does not exist or is not writable, the inner substitution is empty,
+`cd ""` succeeds and stays put, `pwd -P` answers the **current** directory, and the trap
+erases it. Exit status 0. It happened: an independent review had its worktree wiped
+mid-review by `make measure`, and the script said nothing.
+
+The same idiom opened all four test suites. They now share `scripts/scratch.sh`, which sets a
+variable rather than printing one — inside `WORK=$(…)` an `exit 2` would end only the
+substitution's subshell and the caller would carry on with an empty path, which is the defect
+again one layer down. Three independent conditions must hold before the trap is installed,
+and `${WORK:?}` in the trap is a fourth.
+
+It is the same shape as every other defect this project keeps finding — a command that fails
+and is read as a result — in its most expensive form.
+
+### Two more ways a merge got past
+
+Both are the immediate twins of spellings 0.3.1 closed, which is the third time that has
+happened here; the test rows now name both halves of each.
+
+- **`2> /dev/null gh pr merge 7 --admin`** was allowed, one space from the glued form, which
+  is refused. Skipping one word left `/dev/null` as the command word, so the merge rule —
+  which asks whether the command is `gh` — was never consulted. Thirteen spellings did it,
+  including the API form. What decides is whether the operator **ends** the word: `2>` takes
+  the next word, `2>&1` does not and still must not.
+- **`coproc CO ( gh pr merge 7 --admin )`** was allowed, named `CO`. The brace form was
+  closed in 0.3.1; bash accepts any compound command after the name.
 
 ### The product designer shows what it means, and someone else judges it
 

@@ -458,9 +458,12 @@ sub command_word {
       # the command word: `coproc CO { gh pr merge 7 --admin; }` was allowed, named `CO`.
       # `coproc` without a name was already right, which is why only one of the two forms
       # was ever tested. The name is punctuation here, like a function header is.
+      # `{` or `(`: bash accepts any compound command after the name, and the paren form
+      # really runs. Requiring a brace closed one spelling and left its twin — which is the
+      # third time this file has shipped exactly that, so the test rows below name both.
       if ($w eq 'coproc' && @w > 1
           && $w[1] =~ /^[A-Za-z_][A-Za-z0-9_]*$/
-          && @w > 2 && $w[2] =~ /^\{/) {
+          && @w > 2 && $w[2] =~ /^[({]/) {
         push @walked, shift @w;      # coproc
         push @walked, shift @w;      # the name
         next;
@@ -495,12 +498,24 @@ sub command_word {
     if ($after_function) { push @walked, $w; shift @w; $after_function = 0; next }
     # An assignment in front of a command: FOO=1 gh …
     if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*=/) { push @walked, $w; shift @w; next }
-    # A redirection in front of a command: 2>/dev/null gh …
-    # `{fd}>log` too, which bash allows and which read as the command word: the segment was
-    # named `{fd}>log`, readable, and `{fd}>log gh pr merge 7 --admin` was allowed. Both
-    # spellings of the same grammar, and the first one shipped without the second.
-    if ($w =~ /^[0-9]*[<>]/ || $w =~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
-      push @walked, $w; shift @w; next;
+    # A redirection in front of a command: `2>/dev/null gh …`.
+    #
+    # And its target, when a blank separates the two. `2> /dev/null gh pr merge 7 --admin`
+    # was **allowed** — one space from the glued form, which is refused — because skipping
+    # one word left `/dev/null` as the command word, so the merge rule, which asks whether
+    # the command is `gh`, was never consulted. Thirteen spellings did it: `> out`, `1> out`,
+    # `2> /dev/null`, `>> out`, `&> out`, `>& out`, `< /dev/null`, `0< /dev/null`,
+    # `{fd}> out`, `{fd}>> out`, `2>&1 > out`, `FOO=1 > out`, `<<< x`. All measured, all
+    # really run the inner command.
+    #
+    # What decides is whether the operator **ends** the word: `2>` takes the next word,
+    # `2>&1` does not and must keep being skipped alone — it was already right, and a fix
+    # that broke it would trade one escape for another.
+    if ($w =~ /^(?:[0-9]*|\{[A-Za-z_][A-Za-z0-9_]*\})(?:<<<|<<|>>|>&|&>|>|<)(.*)$/) {
+      my $rest = $1;
+      push @walked, $w; shift @w;
+      push @walked, shift @w if $rest eq '' && @w;   # the target, when it is its own word
+      next;
     }
 
     # A subshell's opening paren sticks to the word: `(gh pr merge)` would otherwise name

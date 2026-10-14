@@ -18,6 +18,8 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$ROOT/scripts/scratch.sh"
 TOKENIZE="$ROOT/hooks/lib/tokenize.pl"
 failures=0
 total=0
@@ -28,8 +30,9 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 command -v perl >/dev/null || { echo "needs perl" >&2; exit 2; }
 command -v jq >/dev/null || { echo "needs jq" >&2; exit 2; }
 
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-tokenize.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+ola_scratch tokenize
+WORK=$OLA_SCRATCH
+trap 'rm -rf "${WORK:?}"' EXIT
 
 # A stub that records which command actually ran, so a claim about the shell is measured.
 mkdir -p "$WORK/stubs"
@@ -298,9 +301,28 @@ echo "--- two grammar forms whose second spelling shipped unread"
 # the command word. `coproc CO { gh pr merge 7 --admin; }` and
 # `{fd}>log gh pr merge 7 --admin` were both allowed in 0.3.0.
 names 'coproc with a name'      'coproc CO { gh --version; }' gh
+names 'coproc, paren form'      'coproc CO ( gh --version )' gh
 names 'coproc without a name'   'coproc gh --version' gh
 names 'a varname file descriptor' '{fd}>log gh --version' gh
 sees  'a numbered redirection'  '2>/dev/null gh --version' gh
+
+# And the target, when a blank separates it from the operator. `2> /dev/null gh pr merge 7
+# --admin` was allowed — one space from the glued form, which is refused — because skipping
+# one word left `/dev/null` as the command word. Thirteen spellings did it.
+#
+# What decides is whether the operator **ends** the word. `2>&1` does not and must keep being
+# skipped alone: a fix that took its next word would have traded one escape for another, so
+# that row is here too.
+sees 'a separated target'       '2> /dev/null gh --version' gh
+sees 'a bare redirection'       '> out gh --version' gh
+sees 'an appending one'         '>> out gh --version' gh
+sees 'both merged forms'        '&> out gh --version' gh
+sees 'the other merged form'    '>& out gh --version' gh
+sees 'an input redirection'     '< /dev/null gh --version' gh
+names 'a varname, separated'    '{fd}> out gh --version' gh
+sees 'a duplication, no target' '2>&1 gh --version' gh
+sees 'a duplication then one'   '2>&1 > out gh --version' gh
+sees 'an assignment first'      'FOO=1 > out gh --version' gh
 
 echo "--- a conditional expression runs no command"
 # `[[` opens one, and what follows is not a command word: walking past it left `-f` there,
