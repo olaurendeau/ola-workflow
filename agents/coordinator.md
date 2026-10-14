@@ -56,9 +56,11 @@ without a specialist. And do not pretend a specialist did it.
      local page.
 
    **3b. Review the design.** For visual work only. Dispatch the design-reviewer with the
-   epic, the URL and the paths the designer reported.
-   - **Blocking findings** → send them verbatim to the designer, which publishes at the same
-     URL; then dispatch the reviewer again on the new revision.
+   epic, the paths the designer reported and the URL if there is one — a design the human
+   kept from being published is reviewed from its local page all the same.
+   - **Blocking findings** → send them verbatim to the designer, which revises the page and
+     publishes it at the same URL, or only revises it when it was never published; then
+     dispatch the reviewer again on the new revision.
    - **The designer disputes a finding with a reason, or one survives two cycles** → ask the
      human, record the answer in the epic; the reviewer treats it as settled.
    - Record each verdict in the epic. Done when the current revision is approved.

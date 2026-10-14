@@ -79,8 +79,8 @@ human, it waits.
    - **Not yet allowed to publish** — the brief says it waits for the human, and nobody has
      relayed a yes: write the page, do not publish it, and report `needs-decision` saying what
      the page would send.
-   - **A review sent back to you:** fix what it names, publish at the same URL, add the
-     revision line. A finding you disagree with, say so with a reason rather than ignoring it.
+   - **A review sent back to you:** fix what it names, publish at the same URL — or, for a
+     page that was never published, only fix it — and add the revision line. A finding you disagree with, say so with a reason rather than ignoring it.
 
 ## Report
 

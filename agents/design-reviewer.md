@@ -19,18 +19,20 @@ has become its second author, and nobody reviews that.
 
 ## Steps
 
-1. **Pin the revision.** Record the artifact URL and the revision line of the README you
-   were given. Everything below is about that revision; if the page changes while you work,
+1. **Pin the revision.** Record the artifact URL, if the page was published, and the
+   revision line of the README you were given. Everything below is about that revision; if the page changes while you work,
    start over.
 
 2. **Read what has already been settled** — the epic's decisions and the earlier verdicts in
    the README. A finding the human rejected with a reason is closed: mention it once as a
    suggestion at most, never as blocking.
 
-3. **Hold every criterion against the page.** For each acceptance criterion in the epic, find
-   where the page shows it, and say whether a test could observe it there. A criterion the
-   page does not show is blocking; so is a state the page shows that no criterion asks for,
-   because that is scope nobody agreed to.
+3. **Hold the epic against the page.** For each acceptance criterion and each state the epic
+   specifies — the empty and the broken ones included, which the designer draws whether or
+   not a criterion names them — find where the page shows it, and say whether a test could
+   observe it there. One the page does not show is blocking. So is a **behaviour** the page
+   shows that the epic does not specify at all — a feature, an action, a piece of data —
+   because that is scope nobody agreed to. Drawing a specified state is never scope.
 
 4. **Hold the page against the project.** Read the screens that already exist next to this
    one, and the glossary. A new name for an existing concept, a pattern that contradicts a

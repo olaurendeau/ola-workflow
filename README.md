@@ -102,7 +102,7 @@ branch, commands, slots, escalation, restricted commands, where the memory goes,
 merge gate requires. Each agent starts by running it, and each prompt holds only what is
 specific to its role.
 
-That is not tidiness. Five prompts restating the same facts drift apart one justified edit
+That is not tidiness. Six prompts restating the same facts drift apart one justified edit
 at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
 name a base branch, a check command, a review status, a slot value or a line budget, since
 those belong to the brief. Run it against an agent that hard-codes one and it says which.

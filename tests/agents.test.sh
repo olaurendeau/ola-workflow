@@ -987,6 +987,20 @@ case $integrated in
   *'only after the human'*) ko "integrated: the brief holds back a publish the mode allows" ;;
   *) ok "integrated: publishing visual work needs no extra confirmation" ;;
 esac
+# The default is said where it is used, not in the notice: a project with no interface
+# would otherwise open every brief on a default it has no reason to set.
+case $integrated in
+  *'docs/design/<slug>/ (not in the profile — my default)'*) ok "integrated: the design directory is marked as my default" ;;
+  *) ko "integrated: the default design directory is presented as the project's" ;;
+esac
+# The page and its README carry the designer's decisions and the review verdicts until a
+# developer copies them: they are written somewhere a reboot does not wipe.
+stage=$(printf '%s' "$integrated" | sed -n 's/^Written first in: *//p')
+case $stage in
+  "$HOME"/.claude/*) ok "integrated: the design is staged under the user's own directory" ;;
+  *) ko "integrated: the design is staged at '${stage:-nowhere}', which may not survive" ;;
+esac
+
 # The profile's own directory wins over the default.
 designed=$WORK/designed
 mkdir -p "$designed/.claude"
@@ -1016,6 +1030,11 @@ git -C "$minimal" -c init.defaultBranch=master init -q 2>/dev/null
 git -C "$minimal" remote add origin https://github.com/someone/minimal.git 2>/dev/null
 printf '{"mode":"integrated"}\n' >"$minimal/.claude/workflow.json"
 bare=$("$BRIEF" "$minimal")
+# context.design is said where it is used, in the Design section, not in this notice.
+case $bare in
+  *'context.design →'*) ko "the defaults notice opens on a design directory nobody needs to set" ;;
+  *) ok "the defaults notice leaves context.design to the Design section" ;;
+esac
 case $bare in
   *'these are my defaults'*) ok "a minimal profile says which values are the plugin's" ;;
   *) ko "a minimal profile presents the plugin's defaults as the project's rules" ;;
@@ -1033,7 +1052,6 @@ pr.title conventional
 merge.review_status agent-review
 language.human en
 slots.var SLOT
-context.design docs/design
 PAIRS
 # The notice comes before the rules: a rule read first and qualified later has been believed.
 notice_line=$(printf '%s' "$bare" | grep -n 'these are my defaults' | cut -d: -f1)

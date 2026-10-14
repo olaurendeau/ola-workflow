@@ -101,10 +101,6 @@ for pair in language.human=en language.artifacts=en language.agents=en \
   ola_profile_has "${pair%%=*}" "$dir" || MISSING="$MISSING $pair"
 done
 [ -n "$base_note" ] && MISSING="$MISSING base_branch=$base"
-# Only where it is used: in discreet mode no design is documented in the repository.
-if [ "$mode" = integrated ] && ! ola_profile_has context.design "$dir"; then
-  MISSING="$MISSING context.design=docs/design"
-fi
 
 echo "# ola-workflow — the rules for this project"
 echo
@@ -264,16 +260,22 @@ echo
 # may be published at all are the mode's to say, not the product-designer's.
 echo "## Design — visual work"
 if [ "$mode" = integrated ]; then
-  design_dir=$(with_default context.design docs/design)
+  # The default is announced here rather than in the notice above: a project with no
+  # interface has no reason to set it, and would otherwise open every brief on it.
+  if design_dir=$(ola_profile_get context.design "$dir" 2>/dev/null); then
+    design_note=""
+  else
+    design_dir=docs/design
+    design_note=" (not in the profile — my default)"
+  fi
   design_dir=${design_dir%/}
+  # Not under TMPDIR: until a developer copies them, the page and its README are the only
+  # record of the designer's decisions and of the review verdicts, and a reboot wipes TMPDIR.
   stage_id=$(ola_profile_id "$dir" 2>/dev/null) || stage_id=$(basename "$(ola_profile_toplevel "$dir" 2>/dev/null || printf '%s' "$dir")")
-  # macOS ends TMPDIR with a slash.
-  stage_root=${TMPDIR:-/tmp}
-  stage_root=${stage_root%/}
   cat <<DESIGN
-Documented in:   $design_dir/<slug>/ — index.html, the page; README.md, its artifact URL,
+Documented in:   $design_dir/<slug>/$design_note — index.html, the page; README.md, its artifact URL,
                  what it shows, its words, its decisions and its revisions.
-Written first in: $stage_root/ola-workflow-design/$stage_id/<slug>/ — outside the
+Written first in: ${HOME}/.claude/ola-workflow-design/$stage_id/<slug>/ — outside the
                  repository. A developer's task copies it into $design_dir/<slug>/.
 Publishing:      allowed for visual work. One artifact per design: a design that already
                  has a URL is republished at that URL, never published again.
