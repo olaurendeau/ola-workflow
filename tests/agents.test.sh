@@ -171,9 +171,20 @@ fi
 # this version closed. The other three are rare enough in these files to be worth less than
 # the risk of widening the list again.
 scan_text() { # scan_text < text → `<kind> <token>` lines, sorted
+  # The whitelist is written **once** and shared. It was written twice, and only the copy the
+  # extent block pins was guarded: adding a character to the other copy alone left 83 of 89
+  # additions green, two of them realistic — `-` makes `image: my-ola-workflow:latest` guilty
+  # and `,` makes `tags: a,ola-workflow:1.2` guilty. A class written twice is a class agreed
+  # once, which is this project's oldest lesson and it reached a regex.
+  #
+  # `[ \t]` and not `\s`: perl's `\s` also matches `\r`, `\f` and `\v`, so the set was
+  # eleven characters while this file and the README both said eight — and a sweep of
+  # printable ASCII structurally cannot see the other three. A claim of exactness has to be
+  # exact.
   perl -ne '
-    while (m{(?:^|(?<=[\s`(["\x27]))/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g)          { print "named $1\n" }
-    while (m{(?:^|(?<=[\s`(["\x27]))/([A-Za-z0-9_.+-]+)(?![:/?\#])}g)             { print "slash $1\n" }
+    my $before = qr{(?:^|(?<=[ \t`(["\x27]))};
+    while (m{$before/?(ola-workflow:[A-Za-z0-9_.:+-]+)}g)                  { print "named $1\n" }
+    while (m{$before/([A-Za-z0-9_.+-]+)(?![:/?\#A-Za-z0-9_.+-])}g)         { print "slash $1\n" }
   ' | LC_ALL=C sort -u
 }
 SCAN=$(cat "${PROMPTS[@]}" 2>/dev/null | scan_text)   # the per-file witness above is what notices a file this cannot read
@@ -234,11 +245,18 @@ verdicts_for() { # verdicts_for < text → one `ok|ko:<rule>:<token>` line per v
 # `/developer/settings`, `/coordinator?x=1`, `/developer#section`): a path has path after it,
 # and that *is* decidable, unlike the token standing alone.
 #
-# Four characters, and only four. It held `A-Za-z0-9_.+-` as well, every one of them dead:
-# they are also in the capture class, which is greedy, so the character after the match can
-# never be one of them. A dead character in a pattern is something a reader has to reason
-# about and cannot check, and `.` was measurably unguarded for exactly that reason — removing
-# it changed nothing because it did nothing.
+# It also holds `A-Za-z0-9_.+-`, and those are **not** dead, though they look it: the capture
+# class is greedy, so the character after a maximal match can never be one of them. That
+# reasoning ignores **backtracking**. The lookahead is re-tested every time `+` recedes, and
+# those characters are what makes receding fail — that is, what aborts the whole match.
+# Without them the pattern stops refusing and starts *truncating*: `/developers/me` yields
+# `developer`, `/architects/list` yields `architect`, `-v /developers:/mnt` yields
+# `developer`. All three measured, all three ordinary path text.
+#
+# I deleted them on the strength of that reasoning, after measuring that removing `.` changed
+# nothing — and read that zero as proof of deadness when it was the absence of a fixture for
+# this shape. The same zero that correctly meant "`:` has no reader" meant "nothing tests
+# this" here. The fixture below exists so the reasoning is never needed again.
   #
   # The gap, stated rather than guessed around: a bare offer of something that does not exist
   # *yet* — `/verify-ui` before that skill ships — is not detected, because nothing can tell
@@ -323,6 +341,7 @@ the file runs/probe/last.json, the path /developer/settings, the url /coordinato
 a mount -v /tmp:/developer and a label app:/probe
 an anchor /developer#section and a file /probe.json and /coordinator.md
 and a mount -v /developer:/mnt, whose host path is a role name
+and /developers/me, /architects/list, -v /developers:/mnt — a role name plus a letter
 the memory goes to $profile_dir/runs/<slug>/developer and runs/<slug>/probe
 and to ${OLA_RUNS}/architect, or */developer under a glob
 image: ola_workflow:latest and the tag ola_workflow:1.2
@@ -357,7 +376,7 @@ GUILTY
 
 accused=$(printf '%s\n' "$innocent" | verdicts_for | sed -n 's/^ko://p')
 if [ -z "$accused" ]; then
-  ok "the scan accuses none of the 21 lines of correct text it has failed on or nearly did"
+  ok "the scan accuses none of the 22 lines of correct text it has failed on or nearly did"
 else
   ko "the scan accuses correct text: $(printf '%s' "$accused" | tr '\n' ' ')"
 fi
