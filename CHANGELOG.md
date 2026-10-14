@@ -2,7 +2,7 @@
 
 ## 0.3.2
 
-**0.3.1 shipped with six ways to merge past the guard and a script that can delete your
+**0.3.1 shipped with seven ways to merge past the guard and a script that can delete your
 repository.** Update.
 
 ```
@@ -33,12 +33,12 @@ this entry left it out of the count.
 It is the same shape as every other defect this project keeps finding — a command that fails
 and is read as a result — in its most expensive form.
 
-### Six ways a merge got past the guard in 0.3.1
+### Seven ways a merge got past the guard in 0.3.1
 
-All six have one shape: something that is not the command gets read as the command word, so
-the rule that asks whether the command is `gh` is never consulted. **Forty-two spellings**,
+All seven have one shape: something that is not the command gets read as the command word, so
+the rule that asks whether the command is `gh` is never consulted. **Fifty-seven spellings**,
 each one measured against the tokenizer 0.3.1 shipped and each one now a row of
-`tests/guard.test.sh` — the count below reconstitutes as 16 + 4 + 4 + 12 + 5 + 1.
+`tests/guard.test.sh` — the count below reconstitutes as 16 + 4 + 4 + 12 + 5 + 1 + 15.
 
 - **Sixteen with a blank between the operator and its target.** `2> /dev/null gh pr merge 7
   --admin` was allowed, one space from the glued form, which is refused: the skip consumed
@@ -51,9 +51,9 @@ each one measured against the tokenizer 0.3.1 shipped and each one now a row of
   bare `>` as one segment and `out gh pr merge 7 --admin` as the next, commanding `out`.
 - **Twelve with the operator glued *behind* the command word.** `gh>out pr merge 7 --admin`
   arrived as a command named `gh>out`, which matches no rule, and merged. A word ends at an
-  unquoted operator now, as it does in the shell. This is the one that says what the other
-  five were: the prefix placement was read and the glued one was not, which is an enumeration
-  of *placements* sitting behind a list of operators that had just stopped being one.
+  unquoted operator now, as it does in the shell. This is the one that says what the others
+  were: the prefix placement was read and the glued one was not, which is an enumeration of
+  *placements* sitting behind a list of operators that had just stopped being one.
 - **Five written `coproc NAME` then a compound command** — `( … )`, `if`, `while`, `until`,
   `case` — where the name read as the command word. The brace form was closed in 0.3.1, each
   before anyone looked up the set. `for` and `select` complete the set the code now covers
@@ -63,12 +63,30 @@ each one measured against the tokenizer 0.3.1 shipped and each one now a row of
   redirection read the text as written, where a `\>` ends in `>`. The same lookbehind for
   `|` was introduced while closing `>|` above and had the same defect; it was caught in
   review and never shipped. Both now read the text with escapes neutralised.
+- **Fifteen with a paren glued to the construct** in front of the command:
+  `coproc CO(gh pr merge 7 --admin)`, `!(…)`, `time(…)`, `if(…)`, `while(…)`, `until(…)`,
+  `elif(…)`, `then(…)`, `else(…)`, `do(…)`, `{(…)` and four `case x in x)gh …` forms. A paren
+  is a metacharacter and the word splitter did not end a word there, so the construct and its
+  command arrived glued — read as a command named `CO(gh`, or, for the `case` forms, as
+  nothing at all. Every branch that handles these constructs was already written; what was
+  missing is that the two never arrived separately. `(gh pr merge 7 --admin)` and
+  `f(){ gh pr merge 7 --admin; }` were *not* escapes, and are rows so that they stay refused.
 
 The operators are one definition in `hooks/lib/tokenize.pl`, read by the three places that
 need them, and it is bash's twelve rather than a list someone remembered. The first attempt
 at this fix wrote a list of seven inline, which left five of the twelve out for the length of
 one commit — the same defect as the one being fixed, one layer up, and review is what caught
 it.
+
+**This is not a complete account, and no account of a guard that matches text can be.** One
+escape of the same family is open and measured: an expansion in `gh`'s subcommand path shifts
+the positions a rule reads, so `gh ${x} pr merge 7 --admin` is allowed while the shell really
+merges — [#41](https://github.com/olaurendeau/ola-workflow/issues/41), with the measurement
+and why the cheap fix costs more than it buys. Three rounds of independent review on this one
+change found three, three and two defects — two of the eight were regressions introduced by
+the round before, and both were caught before they shipped. What the guard is for is making the ordinary path visible, not proving a negative;
+`make measure` prints what it asks about and what it costs, and `ask` is what it does with
+everything it cannot read.
 
 ### The product designer shows what it means, and someone else judges it
 

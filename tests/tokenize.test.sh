@@ -371,6 +371,35 @@ names 'glued behind, append both' 'gh&>>out --version' gh
 sees  'a fd belongs to its operator' '2>out gh --version' gh
 names 'and so does a varname one'    '{fd}>out gh --version' gh
 
+echo "--- a paren ends a word too, and process substitution is a word"
+# Sixteen command lines were allowed in silence because the word splitter did not end a word
+# at a paren: the construct and its command arrived glued together, as a command word like
+# `CO(gh` or `x)gh` that no rule names. Each really runs the merge, which is what `sees`
+# measures here.
+names 'coproc, glued'           'coproc CO(gh --version)' gh
+sees 'a negation, glued'        '!(gh --version)' gh
+sees 'time, glued'              'time(gh --version)' gh
+sees 'if, glued'                'if(gh --version); then :; fi' gh
+sees 'while, glued'             'while(gh --version); do break; done' gh
+sees 'until, glued'             'until(gh --version); do :; done' gh
+sees 'a brace, glued'           '{(gh --version); }' gh
+sees 'a case arm, glued'        'case x in x)gh --version;; esac' gh
+sees 'a case arm with its paren' 'case x in (x)gh --version;; esac' gh
+# And the constructs where the paren belongs to the word stay whole: a substitution the
+# splitter has hollowed out, a function header, an array assignment.
+sees 'a subshell'               '(gh --version)' gh
+sees 'a function header'        'f(){ gh --version; }; f' gh
+names 'a substitution in a path' 'gh api repos/o/r/statuses/$(git rev-parse HEAD)' gh
+# `<(…)` is process substitution: bash expands it to a /dev/fd path and passes it as a
+# **word**. Read as a redirection it was dropped from the operands, and the option carrying
+# it lost its value — `--input <(echo x)` came out as a bare `--input`.
+subst=$(printf '%s' 'gh api -X POST repos/o/r/statuses/abc --input <(echo x)' |
+  perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised')
+case $subst in
+  *'--input <()') ok "process substitution stays an operand, with its option" ;;
+  *) ko "process substitution was taken for a redirection: $subst" ;;
+esac
+
 echo "--- an escaped operator is an argument, not an operator"
 # Two lookbehinds in the splitter decide whether a `|` or an `&` belongs to a redirection
 # written just before it. They read the text with escapes neutralised, because a `\>` is an
@@ -477,7 +506,12 @@ for redir_form in \
     'gh pr merge 7 > out --admin' \
     'gh pr merge 7 < x --admin' \
     'gh pr merge 7 --admin 2>&1' \
-    'gh pr merge 7 --admin <<<x'; do
+    'gh pr merge 7 --admin <<<x' \
+    'coproc CO(gh pr merge 7 --admin)' \
+    '!(gh pr merge 7 --admin)' \
+    'time(gh pr merge 7 --admin)' \
+    'case x in x)gh pr merge 7 --admin' \
+    'case x in (x)gh pr merge 7 --admin'; do
   got=$(printf '%s' "$redir_form" | perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised' | head -1)
   if [ "$got" = "$reference" ]; then
     ok "the operands survive, and the redirection is gone: $redir_form"

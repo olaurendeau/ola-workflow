@@ -582,13 +582,19 @@ while IFS= read -r segment; do
     fi
     while IFS= read -r field; do
       [ -n "$field" ] || continue
+      # Two questions, so two `case` statements. They were arms of one, and a `case` stops
+      # at its first match: `-f state=@file` matched `state=*`, so the field was counted as a
+      # write and never as a value that is not in this text. One `case` can only answer one
+      # question, and these two are independent of each other.
       case $field in
         state=*) writes_status=yes ;;
-        # `-F key=@file` reads the value from a file, and `@-` from stdin: the value is not
-        # in this text at all. So is the whole body under `--input`. The rule was detecting
-        # the write and then guessing the rest, against this file's own doctrine that an
-        # unknown is asked and never guessed — measured, `--input body.json` really sends
-        # the status and was allowed to every role.
+      esac
+      # `-F key=@file` reads the value from a file, and `@-` from stdin: the value is not in
+      # this text at all. So is the whole body under `--input`. The rule was detecting the
+      # write and then guessing the rest, against this file's own doctrine that an unknown is
+      # asked and never guessed — measured, `--input body.json` really sends the status and
+      # was allowed to every role.
+      case $field in
         *=@*) from_elsewhere=yes ;;
       esac
       [ "$field" = "context=$review_status" ] && names_it=yes

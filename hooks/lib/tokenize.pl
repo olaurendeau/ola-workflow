@@ -372,12 +372,26 @@ my $redir_op = qr/&>>|<<<|<<-|<<|>>|>\||<>|<&|>&|&>|>|</;
 # a `{name}` to be assigned one. Anything else before an operator is a word of its own —
 # that is the whole content of the rule below.
 my $redir_fd = qr/[0-9]*|\{[A-Za-z_][A-Za-z0-9_]*\}/;
+# And what is **not** one, though it starts the same way: `<(…)` and `>(…)` are process
+# substitution. Bash expands them to a `/dev/fd/63` path and hands that over as a *word* —
+# measured — so a reader that takes them for a redirection drops an argument the command
+# really receives. The splitter has already hollowed the body out, so what arrives below is
+# `<()`; dropping it took the value away from the option carrying it, and
+# `gh api -X POST …/statuses/abc --input <(echo x)` lost its `--input` value. The rule that
+# asks about a payload this text does not contain then never fired, and a developer could
+# write the commit status the merge gate reads.
+my $proc_subst = qr/^(?:$redir_fd)[<>]\(/;
 
 sub words {
   my ($s) = @_;
   my @w;
   my $cur = '';
+  # How many `(` the current word has left open, so that a `)` closing one of them belongs
+  # to the word — `$()` and `f()` are each a single word — while a `)` closing nothing ends
+  # it, which is what bash does with an unquoted metacharacter.
+  my $par = 0;
   my $i = 0;
+  my $flush = sub { push @w, $cur if length $cur; $cur = ''; $par = 0 };
   while ($i < length $s) {
     my $c = substr($s, $i, 1);
     if ($c eq '\\') { $cur .= substr($s, $i, 2); $i += 2; next }
@@ -388,7 +402,7 @@ sub words {
       $cur .= substr($s, $i, $j - $i + 1);
       $i = $j + 1; next;
     }
-    if ($c =~ /\s/) { push @w, $cur if length $cur; $cur = ''; $i++; next }
+    if ($c =~ /\s/) { $flush->(); $i++; next }
     # A blank is not the only thing that ends a word: bash ends one at an unquoted
     # redirection operator too. `gh>out pr merge 7 --admin` is the command `gh` with its
     # output redirected, and it really merges — but the whole text `gh>out` arrived here as
@@ -404,12 +418,46 @@ sub words {
     # of its own in the operand list, where it took the position `pr` should have had.
     if ($c =~ /[<>&]/ && substr($s, $i) =~ /^($redir_op)/) {
       my $op = $1;
-      if (length $cur && $cur !~ /^(?:$redir_fd)\z/) { push @w, $cur; $cur = '' }
+      $flush->() if length $cur && $cur !~ /^(?:$redir_fd)\z/;
       $cur .= $op; $i += length $op; next;
+    }
+    # A paren is a metacharacter too, and the word splitter did not know it. Sixteen command
+    # lines were allowed in silence because of that: `coproc CO(gh pr merge 7 --admin)`,
+    # `!(…)`, `time(…)`, `if(…)`, `while(…)`, `until(…)`, `do(…)`, `{(…)` and four
+    # `case x in x)gh …` forms. Each really runs the merge — measured — and each arrived as a
+    # command word like `CO(gh` or `x)gh`, which no rule names. The branches above were
+    # already written for the constructs they belong to; what was missing is that the shell
+    # ends a word there, so the construct and its command never arrived separately.
+    #
+    # Three exceptions, each a real construct where the paren is part of the word:
+    # `$(` is a substitution the splitter has already hollowed out, `=(` is an array
+    # assignment, and `()` is a function header — and `<()` is caught by the same `()`.
+    if ($c eq '(') {
+      $flush->() if length $cur && $cur !~ /[\$=]\z/ && substr($s, $i + 1, 1) ne ')';
+      $cur .= $c; $par++; $i++; next;
+    }
+    # The `)` stays with the word it closes and the word ends **after** it, rather than the
+    # `)` becoming a word of its own. Every branch downstream recognises a label or a
+    # subshell by a word *ending* in `)`, and handing them a lone `)` would have broken all
+    # of them at once — `a) gh pr merge 7 --admin`, the second arm of a case, named `a`.
+    if ($c eq ')') {
+      $cur .= $c; $i++;
+      if ($par > 0) {
+        $par--;
+        # A `)` that closes a paren opened at the **start** of this word closes a case
+        # pattern written with its optional leading paren — `case x in (x)gh pr merge 7
+        # --admin`, which bash accepts and which ran the merge while being read as nothing at
+        # all. The same `)` inside `$()`, `f()` or `<()` closes a paren that is not at the
+        # start of its word, and those stay whole.
+        $flush->() if $cur =~ /^\(/;
+      } else {
+        $flush->();
+      }
+      next;
     }
     $cur .= $c; $i++;
   }
-  push @w, $cur if length $cur;
+  $flush->();
   return @w;
 }
 
@@ -433,7 +481,7 @@ sub operands {
   my @out;
   while (@w) {
     my $w = shift @w;
-    if ($w =~ /^(?:$redir_fd)(?:$redir_op)(.*)$/) {
+    if ($w !~ $proc_subst && $w =~ /^(?:$redir_fd)(?:$redir_op)(.*)$/) {
       shift @w if $1 eq '' && @w;    # the target, when it is its own word
       next;
     }
@@ -484,11 +532,15 @@ sub segment_words {
   # count of parens the walk happened to open — that count belongs to the whole command line
   # and `(cd x && gh pr merge --admin)` puts the opening paren in a different segment from
   # the closing one.
-  if (@w && $w[-1] !~ /["'\\]/) {
+  # A loop over the words and not over one word: `((gh pr merge 7 --admin))` now ends in two
+  # of them, `--admin)` and `)`, because the word splitter ends a word after a `)` that
+  # closes nothing. Stripping only the last left the `--admin)` behind, with its paren, for
+  # every rule anchored on a word boundary to walk past.
+  while (@w && $w[-1] !~ /["'\\]/) {
     my $last = $w[-1];
-    while ($last =~ /\)$/ && ($last =~ tr/)//) > ($last =~ tr/(//)) { chop $last }
-    $w[-1] = $last;
-    pop @w unless length $last;
+    last unless $last =~ /\)$/ && ($last =~ tr/)//) > ($last =~ tr/(//);
+    chop $last;
+    if (length $last) { $w[-1] = $last } else { pop @w }
   }
 
   my @out = (length $cmd ? ($cmd) : ());
@@ -611,7 +663,7 @@ sub command_word {
     # of bash's twelve came to be absent for the length of one commit; review caught that
     # before it shipped. A list written inline is the shape this file keeps paying for, so
     # there is one definition and its three readers share it.
-    if ($w =~ /^(?:$redir_fd)(?:$redir_op)(.*)$/) {
+    if ($w !~ $proc_subst && $w =~ /^(?:$redir_fd)(?:$redir_op)(.*)$/) {
       my $rest = $1;
       push @walked, $w; shift @w;
       push @walked, shift @w if $rest eq '' && @w;   # the target, when it is its own word
