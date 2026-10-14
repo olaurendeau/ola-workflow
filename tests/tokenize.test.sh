@@ -274,6 +274,34 @@ done
 sees 'version through a wrapper'  'echo x | xargs -0 gh --version' gh
 sees 'version after a priority'   'nice -5 gh --version' gh
 
+# Nor as a help request when it is an option's **value**. A scan of its own over the leading
+# run of dashes does not know which of them take a value, so this read as help and the
+# segment reported no command at all — `env -u -h gh pr merge 7 --admin` was **allowed**, one
+# word from `env -u FOO gh pr merge 7 --admin`, which is refused. It shipped that way in
+# 0.3.0, and the inner command really runs: measured on macOS and on GNU for all four below.
+#
+# The rows are here because their absence is what let it ship. The fix was to delete the
+# second reader, not to teach it the tables the first one already had.
+names 'help as the value of env -u'     'env -u -h gh --version' gh
+names 'version as the value of env -u'  'env -u -V gh --version' gh
+names 'help as the value of exec -a'    'exec -a -h gh --version' gh
+names 'help as the value of xargs -E'   'xargs -E -h gh --version' gh
+names 'help as the value of sudo -p'    'sudo -p -h gh --version' gh
+# The witness those five need: the same wrappers, with an ordinary value, are measured.
+sees 'env -u with an ordinary value'    'env -u FOO gh --version' gh
+
+echo "--- two grammar forms whose second spelling shipped unread"
+# Both are escapes the dash net cannot reach, because neither leaves an option where the
+# command word goes — they leave a *name*. And in both cases one spelling was handled and
+# its twin was not, which is the shape this file keeps finding: `coproc` alone was right and
+# `coproc NAME { … }` named the coprocess; `2>/dev/null` was right and `{fd}>log` read as
+# the command word. `coproc CO { gh pr merge 7 --admin; }` and
+# `{fd}>log gh pr merge 7 --admin` were both allowed in 0.3.0.
+names 'coproc with a name'      'coproc CO { gh --version; }' gh
+names 'coproc without a name'   'coproc gh --version' gh
+names 'a varname file descriptor' '{fd}>log gh --version' gh
+sees  'a numbered redirection'  '2>/dev/null gh --version' gh
+
 echo "--- a conditional expression runs no command"
 # `[[` opens one, and what follows is not a command word: walking past it left `-f` there,
 # which the dash net then asked about — a question about the shell own grammar, the same

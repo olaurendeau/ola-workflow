@@ -196,10 +196,19 @@ WATCHING
     ;;
   *)
     cat <<'ENFORCED'
-The guard refuses a command that belongs to another role, and asks about one it cannot read
-without running it. It reads what a shell would really run, not the text, so quoting, a
-wrapper or the API form of the same operation are one command to it — spelling it
+The guard refuses **two** operations that belong to another role, and asks about a command it
+cannot read without running it. It reads what a shell would really run, not the text, so
+quoting, a wrapper or the API form of the same operation are one command to it — spelling it
 differently changes nothing.
+
+What it refuses:
+- merging a pull request, to anyone but the coordinator;
+- writing the review status the merge gate reads, to anyone but the pr-reviewer.
+
+**Everything else above is a rule nothing applies.** Pushing to the base branch, tagging,
+releasing, publishing, changing repository settings: the guard does not know them yet, so
+they hold only as far as you hold them. Do not read the absence of a refusal as permission —
+on those, you are the enforcement.
 - A refusal names the role that owns the command. Report it, do not work around it.
 - A question means the command word is not in the line — `eval`, `source`, `$EDITOR`. Answer
   it only if you know what the line runs.
