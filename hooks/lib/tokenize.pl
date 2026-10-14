@@ -416,6 +416,13 @@ sub words {
     # The whole operator at once, never one character at a time: tested per character,
     # `gh&>out` cut twice — before the `&` and again before the `>` — and left a word `&`
     # of its own in the operand list, where it took the position `pr` should have had.
+    # Process substitution is not a redirection, and this reader has to know that as much as
+    # the two below do: `$proc_subst` was added to them and not here, so a `<` still ended a
+    # word — `--input=<(echo x)` came out as `--input=` plus `<()`, the option's value read
+    # empty, and the rule that asks about a payload this text does not contain went quiet
+    # again. One spelling over from the finding it was fixing, because the fix was applied to
+    # the readers that had shown the symptom instead of to every reader of the construct.
+    if ($c =~ /[<>]/ && substr($s, $i + 1, 1) eq '(') { $cur .= $c; $i++; next }
     if ($c =~ /[<>&]/ && substr($s, $i) =~ /^($redir_op)/) {
       my $op = $1;
       $flush->() if length $cur && $cur !~ /^(?:$redir_fd)\z/;
@@ -429,11 +436,15 @@ sub words {
     # already written for the constructs they belong to; what was missing is that the shell
     # ends a word there, so the construct and its command never arrived separately.
     #
-    # Three exceptions, each a real construct where the paren is part of the word:
-    # `$(` is a substitution the splitter has already hollowed out, `=(` is an array
-    # assignment, and `()` is a function header — and `<()` is caught by the same `()`.
+    # Two exceptions, each a real construct where the paren belongs to the word: `=(` is an
+    # array assignment, and a `(` immediately followed by `)` is a function header — which
+    # also covers `$()`, `<()` and `>()`, because the splitter has already hollowed their
+    # bodies out before this reader sees them. A third exception for `$(` was written here
+    # and is dead: removing it moves no word and no decision, measured, because `()` already
+    # answers it. A condition that names three exceptions where two are reachable reads as
+    # if all three were load-bearing.
     if ($c eq '(') {
-      $flush->() if length $cur && $cur !~ /[\$=]\z/ && substr($s, $i + 1, 1) ne ')';
+      $flush->() if length $cur && $cur !~ /=\z/ && substr($s, $i + 1, 1) ne ')';
       $cur .= $c; $par++; $i++; next;
     }
     # The `)` stays with the word it closes and the word ends **after** it, rather than the
@@ -761,6 +772,15 @@ sub command_word {
       }
       next;
     }
+
+    # A word made only of closing parens runs nothing — it is punctuation the split left
+    # behind. `for ((i=0;i<1;i++)); do gh pr merge 7 --admin; done` cuts on the `;` inside the
+    # arithmetic head, and the third piece, `i++))`, is two words now that a word ends after a
+    # `)` that closes nothing: `i++)` is skipped as a label and the bare `)` was then reported
+    # unreadable, which asks — and `decide` stops at the first ask, so the merge rule below
+    # was never reached on a line that really merges. It also asked about
+    # `for ((i=0;i<3;i++)); do echo $i; done`, which is ordinary work.
+    if ($bare =~ /^\)+$/) { push @walked, $w; shift @w; next }
 
     # A `pattern)` label at the head of a segment is the second and later arms of a case:
     # `;;` ends an arm, the split cuts there, and the next segment opens with the label.

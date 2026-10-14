@@ -78,13 +78,22 @@ at this fix wrote a list of seven inline, which left five of the twelve out for 
 one commit — the same defect as the one being fixed, one layer up, and review is what caught
 it.
 
-**This is not a complete account, and no account of a guard that matches text can be.** One
-escape of the same family is open and measured: an expansion in `gh`'s subcommand path shifts
-the positions a rule reads, so `gh ${x} pr merge 7 --admin` is allowed while the shell really
-merges — [#41](https://github.com/olaurendeau/ola-workflow/issues/41), with the measurement
-and why the cheap fix costs more than it buys. Three rounds of independent review on this one
-change found three, three and two defects — two of the eight were regressions introduced by
-the round before, and both were caught before they shipped. What the guard is for is making the ordinary path visible, not proving a negative;
+**This is not a complete account, and no account of a guard that matches text can be.** Two
+escapes of the same family are open and measured, each with its own issue: an expansion in
+`gh`'s subcommand path shifts the positions a rule reads, so `gh ${x} pr merge 7 --admin` is
+allowed while the shell really merges ([#41](https://github.com/olaurendeau/ola-workflow/issues/41),
+with why the cheap fix costs more than it buys); and a blank *between* the parens of a
+function header makes three words where the pattern joins two, so `f ( ){ gh pr merge 7
+--admin; }` is allowed while `f(){ … }` and `f (){ … }` are refused
+([#42](https://github.com/olaurendeau/ola-workflow/issues/42)).
+
+Four rounds of independent review on this one change found three, three, two and four
+things: **six defects this change itself introduced**, two false claims in this very entry,
+and four escapes that were already there. Every one of the six was caught before it shipped —
+which is what the rounds bought, and also what says when to stop. On a class that cannot be
+exhausted, a defect the change introduces blocks it; an escape that was already there becomes
+an issue. Otherwise the loop has no end: by the fourth round, most of what was found was in
+the fix written by the third. What the guard is for is making the ordinary path visible, not proving a negative;
 `make measure` prints what it asks about and what it costs, and `ask` is what it does with
 everything it cannot read.
 

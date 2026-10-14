@@ -839,6 +839,30 @@ enforced ask ola-workflow:developer 'gh api -X POST repos/o/r/statuses/abc --inp
 enforced ask ola-workflow:developer 'gh api -X POST repos/o/r/statuses/abc -f state=@body' "$STATUS"
 enforced allow ola-workflow:pr-reviewer 'gh api -X POST repos/o/r/statuses/abc --input <(echo x)' "$STATUS"
 enforced allow ola-workflow:developer 'diff <(git show main:README.md) <(cat README.md)'
+# And the glued spelling of the option, which is where the first fix stopped: `$proc_subst`
+# was taught to the two readers that had shown the symptom and not to the word splitter, so a
+# `<` still ended a word and `--input=<(echo x)` came out as `--input=` plus `<()`. One
+# spelling over from the finding being fixed.
+enforced ask ola-workflow:developer 'gh api -X POST repos/o/r/statuses/abc --input=<(echo x)' "$STATUS"
+enforced deny ola-workflow:developer 'gh --repo=<(echo x) pr merge 7 --admin'
+# A field that names the status *and* takes its value from a file is a refusal, not a
+# question: `decide` stops at the first answer, and asked first it turned a refusal into a
+# question whose reason was false about a line that spells the status out.
+enforced deny ola-workflow:developer 'gh api -X POST repos/o/r/statuses/abc -f state=@body -f context=relu-par-agent' "$STATUS"
+
+# An arithmetic `for` head is cut by the `;` inside it, and its last piece is two words now
+# that a word ends after a `)` that closes nothing. The bare `)` was reported unreadable,
+# which asks — and the first answer wins, so the merge rule below was never reached on a line
+# that really merges. A word made only of closing parens runs nothing.
+enforced deny ola-workflow:developer 'for ((i=0;i<1;i++)); do gh pr merge 7 --admin; done'
+enforced allow ola-workflow:developer 'for ((i=0;i<3;i++)); do echo $i; done'
+enforced allow ola-workflow:coordinator 'for ((i=0;i<1;i++)); do gh pr merge 7 --squash; done'
+
+# The `=(` exception of the word splitter, which was load-bearing and untested: an array
+# assignment is one word, and splitting it made `a=(gh pr merge 7 --admin)` — which runs
+# nothing at all — a refusal. A false refusal on something that performs nothing is how
+# refusals stop being read.
+enforced allow ola-workflow:developer 'a=(gh pr merge 7 --admin)'
 
 # And a redirection in front of ordinary work is ordinary work.
 enforced allow ola-workflow:developer '2> /dev/null make check'

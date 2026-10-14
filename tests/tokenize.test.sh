@@ -393,12 +393,34 @@ names 'a substitution in a path' 'gh api repos/o/r/statuses/$(git rev-parse HEAD
 # `<(…)` is process substitution: bash expands it to a /dev/fd path and passes it as a
 # **word**. Read as a redirection it was dropped from the operands, and the option carrying
 # it lost its value — `--input <(echo x)` came out as a bare `--input`.
-subst=$(printf '%s' 'gh api -X POST repos/o/r/statuses/abc --input <(echo x)' |
-  perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised')
-case $subst in
-  *'--input <()') ok "process substitution stays an operand, with its option" ;;
-  *) ko "process substitution was taken for a redirection: $subst" ;;
-esac
+# Both spellings of the option, because the first fix was applied to the two readers that had
+# shown the symptom and not to the word splitter: a `<` still ended a word, so the glued
+# `--input=<(echo x)` came out as `--input=` plus `<()` and the value read empty again — one
+# spelling over from the finding being fixed.
+for form in '--input <(echo x)=--input <()' '--input=<(echo x)=--input=<()'; do
+  written=${form%%=--input*}
+  want=--input${form##*=--input}
+  subst=$(printf 'gh api -X POST repos/o/r/statuses/abc %s' "$written" |
+    perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised')
+  case $subst in
+    *"$want") ok "process substitution stays an operand, with its option: $written" ;;
+    *) ko "'$written' normalised to '$subst', which does not end in '$want'" ;;
+  esac
+done
+
+# A word made only of closing parens runs nothing. An arithmetic `for` head is cut by the `;`
+# inside it, and its last piece is two words now that a word ends after a `)` that closes
+# nothing: the bare `)` was reported unreadable, which asks — and the first answer wins, so
+# the merge rule was never reached on a line that really merges.
+sees 'an arithmetic for head'    'for ((i=0;i<1;i++)); do gh --version; done' gh
+for lone in ')' '))' ')))'; do
+  verdict=$(printf '%s' "$lone" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"')
+  if [ "$verdict" = "/true" ]; then
+    ok "'$lone' runs no command, and is not reported as unreadable"
+  else
+    ko "'$lone' reported $verdict, which spends an ask on punctuation"
+  fi
+done
 
 echo "--- an escaped operator is an argument, not an operator"
 # Two lookbehinds in the splitter decide whether a `|` or an `&` belongs to a redirection
