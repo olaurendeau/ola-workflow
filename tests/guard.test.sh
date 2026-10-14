@@ -845,6 +845,13 @@ enforced allow ola-workflow:developer 'diff <(git show main:README.md) <(cat REA
 # spelling over from the finding being fixed.
 enforced ask ola-workflow:developer 'gh api -X POST repos/o/r/statuses/abc --input=<(echo x)' "$STATUS"
 enforced deny ola-workflow:developer 'gh --repo=<(echo x) pr merge 7 --admin'
+# `>(…)` as much as `<(…)`: the rule reads `[<>]` and only `<(` had a row, so narrowing it to
+# `[<]` left all 796 assertions green while `gh --repo=>(echo x) pr merge 7 --admin` went from
+# deny to allow. A load-bearing half of a guard with no row is the same shape as the basename
+# `case` of `ola_scratch`, found the same way, one cycle later.
+enforced deny ola-workflow:developer 'gh --repo=>(echo x) pr merge 7 --admin'
+enforced ask ola-workflow:developer 'gh api -X POST repos/o/r/statuses/abc --input=>(cat) ' "$STATUS"
+enforced allow ola-workflow:developer 'tee >(wc -l) < README.md'
 # A field that names the status *and* takes its value from a file is a refusal, not a
 # question: `decide` stops at the first answer, and asked first it turned a refusal into a
 # question whose reason was false about a line that spells the status out.

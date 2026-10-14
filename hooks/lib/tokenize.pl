@@ -439,10 +439,17 @@ sub words {
     # Two exceptions, each a real construct where the paren belongs to the word: `=(` is an
     # array assignment, and a `(` immediately followed by `)` is a function header — which
     # also covers `$()`, `<()` and `>()`, because the splitter has already hollowed their
-    # bodies out before this reader sees them. A third exception for `$(` was written here
-    # and is dead: removing it moves no word and no decision, measured, because `()` already
-    # answers it. A condition that names three exceptions where two are reachable reads as
-    # if all three were load-bearing.
+    # bodies out before this reader sees them.
+    #
+    # A third exception, for `$(`, was written here and removed. It is reachable by exactly
+    # one spelling: an **escaped** `\$(` outside quotes, which is the only way a `(` arrives
+    # here with a `$` before it and no `)` after it — every `$( … )` the splitter parsed is
+    # already `$()`, and a quoted one never reaches this branch at all. And bash refuses that
+    # line outright, with a syntax error, so no decision about it is worth anything.
+    # The first version of this comment said removing it "moves no word and no decision,
+    # measured". The decisions hold; the words do not, and the measurement behind that
+    # sentence was one example generalised to a claim — which is the defect this file keeps
+    # finding in its own prose, two screens after fixing it in its code.
     if ($c eq '(') {
       $flush->() if length $cur && $cur !~ /=\z/ && substr($s, $i + 1, 1) ne ')';
       $cur .= $c; $par++; $i++; next;
