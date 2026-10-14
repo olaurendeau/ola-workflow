@@ -754,6 +754,22 @@ fi
 # a flatly false one left every assertion green — while I cited those assertions as the
 # guarantee that the claims were true.
 #
+# **And it still is, in part.** This is a pattern over prose, and prose paraphrases without
+# limit: a review wrote thirteen denials this misses, including "the guard lets everything
+# through" — the very phrase the passing message below uses. So it is a **net**, not a proof.
+# What it catches is the literal phrasings this project has actually written, which is worth
+# having because those are what get copied forward; what it cannot catch is a sentence nobody
+# has written yet.
+#
+# The claims that have to be *true* rather than merely unrepeated are the numbers, and none
+# of them is asserted here. They are produced by `make measure`, which is the only honest
+# answer to "how do you know" — three of them were published wrong, twice because the method
+# was wrong rather than the number.
+#
+# One thing this does buy, and it is why the `no` arm below is not vacuous: the README is
+# phrased so the shipped text matches the claim pattern. Measured — make the guard inert and
+# that arm fires on the README, not on nothing.
+#
 # Only this one narrow pattern, though, and not the prohibition table above: the README
 # *documents* this plugin, so it shows `make check` and a base branch as examples on purpose,
 # and a table meant to stop a prompt hard-coding a project's values would fire on every line

@@ -24,7 +24,7 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 ## Status
 
-**The team is complete and the guard applies its rules.** In place: the manifests, the CI,
+**The team is complete, and the guard refuses what a role does not own.** In place: the manifests, the CI,
 the test harness, the answer to how a plugin agent is identified (see
 [Agent identity](#agent-identity)), the project profile with its schema and its
 `ola-profile` CLI, the **five agents** — a coordinator that frames and dispatches, a product
@@ -37,28 +37,40 @@ A project with no profile is unaffected, which is the whole point of the design:
 exits 0 before any rule, at a cost of four subprocesses. A project that wrote a profile has
 opted in, and `"guard": "log"` is how it watches the decisions before letting them act.
 
-### What it costs, measured
+### What it costs, and how to find out
 
-Both numbers below were measured on 2026-10-14, and both are the kind that drift — re-measure
-rather than trust them.
+Every number this repository published about the guard has been wrong at least once, and
+always the same way: measured once, written down, quoted after the thing changed. Two were
+wrong because the *method* was wrong — a subprocess count that only counted the tools the
+author had thought to instrument. So the measurement ships:
+
+```bash
+make measure
+```
+
+It reads `scripts/ordinary-commands.txt`, feeds each line to the guard as the text of a
+payload (nothing is executed), and prints what was asked about and what it cost. On
+2026-10-14, on that 90-command sample:
 
 | | |
 |---|---|
-| commands answered "I cannot read this, please confirm" | **3.7%** of 134 ordinary commands, and 0 refused wrongly |
-| the same, on four independent samples | between **3%** and **7%** |
-| the same five commands, on a 32-command sample holding all of them | **15.6%** — see below |
-| subprocesses per Bash call, no profile | **4** (6 once you keep a profile for some other repository) |
-| the same, with a profile, warm | **8** |
+| asked about | **5**, and **0 refused** — a refusal there would be a false positive |
+| rate on that sample | **5.6%** |
+| external commands per Bash call, no profile | **7** — `cat`, `dirname` ×2, `git`, `jq` ×3 |
+| the same, with a profile, cached | **14** |
 
-The rate is a property of the sample, not of the guard, and the cleanest way to see that is
-to change the denominator: the **same five commands** are asked about either way, so a
-32-command sample that happens to hold all five reads 15.6% while a 134-command one reads
-3.7%. The number to watch is not the percentage, it is which commands.
+**The rate is a property of the sample, not of the guard.** It counts how many of your
+commands run something that is not in their own text, so a sample that holds all five of
+those reads 15.6% at 32 commands and 3.7% at 134 — the same five commands, two denominators.
+The number worth watching is which commands, not the percentage.
 
-Those five are `source x`, `. x`, `eval "$(…)"`, `trap … EXIT`, `$EDITOR file` — each runs
-something that is not in its own text, as a command word built by expansion or a body read
-from a file. Refusing them would refuse `$EDITOR file`; allowing them is the hole the guard
-exists to close; so it asks, and that is the price.
+Those five are `source x`, `. x`, `eval "$(…)"`, `trap … EXIT`, `$EDITOR file`. Each builds
+its command word by expansion or reads a body from a file. Refusing them would refuse
+`$EDITOR file`; allowing them is the hole the guard exists to close; so it asks, and that is
+the price.
+
+A project with no profile pays the first line of that table and nothing else: the guard
+exits 0 before any rule.
 
 ### What is not here yet
 

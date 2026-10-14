@@ -10,9 +10,13 @@ wrote one is guarded unless it says `"guard": "log"`.
 - **A tokenizer** reads what a shell would really run, rather than matching its text. The
   implementation this is ported from matches text, so `g\h pr merge` and `$(echo gh) pr merge`
   walk past rules that `gh pr merge` trips — measured, both do. Quote removal, escapes,
-  `$'\x67h'`, wrappers (`sudo --user x`, `env FOO=1`, `nice -n 10`, `xargs -I{}`, both
-  spellings of every option), grammar prefixes (assignments, redirections, reserved words,
-  function headers, case labels, subshells) and heredocs are all undone once, here.
+  `$'\x67h'`, wrappers (`sudo --user x`, `env FOO=1`, `nice -n 10`, `xargs -I{}`, `time -p`,
+  short and long spellings of the options each one is known to take), grammar prefixes
+  (assignments, redirections, reserved words, function headers, case labels, subshells,
+  conditional expressions) and heredocs are all undone once, here. An option where the
+  command word should be is refused rather than named, because the shell would look for a
+  file of that name — which is how `time -p gh pr merge --admin` came to be allowed in
+  silence, `time` having been both a reserved word and a wrapper.
 - **Three decisions.** `allow` says nothing at all; `deny` and `ask` carry a reason. `ask`
   exists because a shell command cannot always be read, and refusing those would refuse
   `$EDITOR file` while allowing them is the hole the guard exists to close.
@@ -56,14 +60,20 @@ against.
 - `merge.sensitive_paths` named `hooks/guard.sh` alone, so the library the guard sources was
   outside the zone reserved for a human.
 
-### Measured, on 2026-10-14
+### Measured, and the measurement ships
 
-**3.7%** of 134 ordinary commands are asked about, and **none refused wrongly**; four
-independent samples put the range at 3–7%. The rate is a property of the sample and not of
-the guard: the same five commands are asked about either way, so a 32-command sample holding
-all five reads 15.6%. What is worth watching is which commands, not the percentage — all five
-run something that is not in their own text. The cost per Bash call is 4 subprocesses with no
-profile, 8 warm with one.
+`make measure` reads `scripts/ordinary-commands.txt`, feeds each line to the guard as the
+text of a payload — nothing is executed — and prints what was asked about and what it cost.
+On its 90-command sample: **5 asked about, 0 refused**, and **7 external commands** per Bash
+call with no profile, 14 with one and cached.
+
+It exists because every number this repository published about the guard was wrong at least
+once, and three of them because the *method* was wrong: a subprocess count that only counted
+the tools the author had thought to instrument published 4 where 7 was true. A number nobody
+can reproduce is a number nobody should believe.
+
+The rate is a property of the sample, not of the guard — the same five commands read 15.6%
+on a sample of 32 and 3.7% on one of 134. What is worth watching is which commands.
 
 ### Not in this release
 
