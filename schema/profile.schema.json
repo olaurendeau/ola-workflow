@@ -132,7 +132,8 @@
         "product": { "description": "Users, personas, what counts as proven.", "type": "string" },
         "architecture": { "description": "Layering, compatibility rules, how work is split.", "type": "string" },
         "review_checklist": { "description": "Project-specific review rules, added to the base checklist.", "type": "string" },
-        "glossary": { "description": "Domain vocabulary.", "type": "string" }
+        "glossary": { "description": "Domain vocabulary.", "type": "string" },
+        "design": { "description": "Directory where each design is documented, one <slug>/ per design with its page and its README. Integrated mode only, default docs/design; in discreet mode designs stay in the profile's runs/<slug>/design/.", "type": "string" }
       }
     },
     "verify_ui": {

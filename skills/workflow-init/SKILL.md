@@ -81,6 +81,7 @@ write comes from something you ran or something the human told you, and nothing 
    | `check.full` | the one command that runs everything CI runs: a `check` target in a Makefile, a `check`/`test` script in `package.json`, a CI workflow's own command | ask the human; it is the contract between a developer and a reviewer, and nothing else can supply it |
    | `check.affected` | a narrower target or script, if one exists | omit it — the brief then says the full command is the only one |
    | `context.product`, `.architecture`, `.review_checklist`, `.glossary` | each one only if that file exists | omit the ones that do not |
+   | `context.design` | a directory that already holds the project's designs or mockups, in `integrated` mode only | omit it — the brief then uses `docs/design` and says it is a default |
 
    Everything else is **not** detectable, and goes in only if the human states it:
 
@@ -128,7 +129,7 @@ write comes from something you ran or something the human told you, and nothing 
    ```
    ola-profile validate <the path you wrote>   # every problem in that file, or silence
    ola-profile path                            # the profile that applies
-   ola-workflow-brief                          # the rules as the five agents receive them
+   ola-workflow-brief                          # the rules as the six agents receive them
    ```
 
    Pass the path. `ola-profile validate` with no argument validates whichever profile

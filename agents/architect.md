@@ -31,7 +31,10 @@ You are read-only: `Bash` is for reading the repository and the forge.
      by the developer after writing it;
    - each names its files, the tests it must add, and what proves it done;
    - each names what it depends on, by task and not by prose;
-   - a task that cannot be reviewed without another one is not a task, it is half of one.
+   - a task that cannot be reviewed without another one is not a task, it is half of one;
+   - an epic that carries a design's page and README: the first task copies them, unchanged,
+     into the design directory the brief names, and every task that draws a screen points at
+     them rather than re-describing them.
 
 4. **Put the risk first.** If one part can invalidate the rest — a migration, a format
    change, an assumption about what the data looks like — it goes first, alone, so that

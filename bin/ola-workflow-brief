@@ -2,9 +2,9 @@
 # Prints the rules of the workflow for the project the session is working on, resolved
 # against its profile.
 #
-# This exists so that the rules are written once. Five agent prompts need the same facts —
+# This exists so that the rules are written once. Six agent prompts need the same facts —
 # which mode, which branch, which commands, which slots, what this mode forbids, what is
-# reserved for the human — and five copies of those facts would drift apart one justified
+# reserved for the human — and six copies of those facts would drift apart one justified
 # edit at a time. So each agent starts by running this, and the prompts hold only what is
 # specific to their role.
 #
@@ -101,6 +101,10 @@ for pair in language.human=en language.artifacts=en language.agents=en \
   ola_profile_has "${pair%%=*}" "$dir" || MISSING="$MISSING $pair"
 done
 [ -n "$base_note" ] && MISSING="$MISSING base_branch=$base"
+# Only where it is used: in discreet mode no design is documented in the repository.
+if [ "$mode" = integrated ] && ! ola_profile_has context.design "$dir"; then
+  MISSING="$MISSING context.design=docs/design"
+fi
 
 echo "# ola-workflow — the rules for this project"
 echo
@@ -253,6 +257,35 @@ for key in product architecture review_checklist glossary; do
   fi
 done
 [ "$found" = 0 ] && echo "(none declared — the repository itself is the only source)"
+echo
+
+# Visual work is published as a claude.ai artifact, which is the one thing that leaves the
+# machine on purpose — so where it is documented, where its page is written, and whether it
+# may be published at all are the mode's to say, not the product-designer's.
+echo "## Design — visual work"
+if [ "$mode" = integrated ]; then
+  design_dir=$(with_default context.design docs/design)
+  design_dir=${design_dir%/}
+  stage_id=$(ola_profile_id "$dir" 2>/dev/null) || stage_id=$(basename "$(ola_profile_toplevel "$dir" 2>/dev/null || printf '%s' "$dir")")
+  # macOS ends TMPDIR with a slash.
+  stage_root=${TMPDIR:-/tmp}
+  stage_root=${stage_root%/}
+  cat <<DESIGN
+Documented in:   $design_dir/<slug>/ — index.html, the page; README.md, its artifact URL,
+                 what it shows, its words, its decisions and its revisions.
+Written first in: $stage_root/ola-workflow-design/$stage_id/<slug>/ — outside the
+                 repository. A developer's task copies it into $design_dir/<slug>/.
+Publishing:      allowed for visual work. One artifact per design: a design that already
+                 has a URL is republished at that URL, never published again.
+DESIGN
+else
+  cat <<DESIGN
+Documented in:   $(ola_profile_dir "$dir")/runs/<slug>/design/ — nothing goes into the repository.
+Publishing:      only after the human has said yes to this design, relayed by the
+                 coordinator. An artifact sends the page to claude.ai, and this project did
+                 not ask for its contents to leave the machine.
+DESIGN
+fi
 echo
 
 if [ "$mode" = integrated ]; then
