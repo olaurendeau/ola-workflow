@@ -24,24 +24,64 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 ## Status
 
-**The team is complete, and nothing enforces it yet.** In place: the manifests, the CI, the
-test harness, the answer to how a plugin agent is identified (see
+**The team is complete, and the guard refuses what a role does not own.** In place: the manifests, the CI,
+the test harness, the answer to how a plugin agent is identified (see
 [Agent identity](#agent-identity)), the project profile with its schema and its
-`ola-profile` CLI, and the **five agents** — a coordinator that frames and dispatches, a
-product designer that turns a request into criteria a test can prove, an architect that
-splits an epic into reviewable tasks, developers that build test-first in their own
-worktrees, and an independent reviewer.
+`ola-profile` CLI, the **five agents** — a coordinator that frames and dispatches, a product
+designer that turns a request into criteria a test can prove, an architect that splits an
+epic into reviewable tasks, developers that build test-first in their own worktrees, and an
+independent reviewer — and the **guard**: a tokenizer that reads what a shell would really
+run, three decisions, fail-closed once a profile exists, and its first two role rules.
 
-The guard is still **inert**. It allows everything, so the rules these agents follow are
-rules nothing applies: an agent that follows a rule and an agent that is prevented from
-breaking it are not the same thing. Until the guard is real, use this where a mistake is
-cheap — a new project, not one that deploys on merge.
+A project with no profile is unaffected, which is the whole point of the design: the hook
+exits 0 before any rule, at a cost of four subprocesses. A project that wrote a profile has
+opted in, and `"guard": "log"` is how it watches the decisions before letting them act.
+
+### What it costs, and how to find out
+
+Every number this repository published about the guard has been wrong at least once, and
+always the same way: measured once, written down, quoted after the thing changed. Two were
+wrong because the *method* was wrong — a subprocess count that only counted the tools the
+author had thought to instrument. So the measurement ships:
+
+```bash
+make measure
+```
+
+It reads `scripts/ordinary-commands.txt`, feeds each line to the guard as the text of a
+payload (nothing is executed), and prints what was asked about and what it cost. On
+2026-10-14, on that 90-command sample:
+
+| | |
+|---|---|
+| asked about | **5**, and **0 refused** — a refusal there would be a false positive |
+| rate on that sample | **5.6%** |
+| external commands per Bash call, no profile | **7** — `cat`, `dirname` ×2, `git`, `jq` ×3 |
+| the same, with a profile, cached | **14** |
+
+**The rate is a property of the sample, not of the guard.** It counts how many of your
+commands run something that is not in their own text, so a sample that holds all five of
+those reads 15.6% at 32 commands and 3.7% at 134 — the same five commands, two denominators.
+The number worth watching is which commands, not the percentage.
+
+Those five are `source x`, `. x`, `eval "$(…)"`, `trap … EXIT`, `$EDITOR file`. Each builds
+its command word by expansion or reads a body from a file. Refusing them would refuse
+`$EDITOR file`; allowing them is the hole the guard exists to close; so it asks, and that is
+the price.
+
+A project with no profile pays the first line of that table and nothing else: the guard
+exits 0 before any rule.
+
+### What is not here yet
 
 | step | content |
 |---|---|
-| A3 | the real guard, ported from `mcp-camptocamp` and driven by the profile |
-| A4 | the conditional merge gate |
+| A3 | the remaining role rules: pushing to the base branch, tags, releases, repository settings |
+| A4 | declarative `commands[]` rules, discreet mode's prohibitions, the conditional merge gate |
 | A6 | the `verify-ui` skill, then 1.0.0 |
+
+Until the merge gate exists, the coordinator checks it by hand against the forge. And the
+guard knows nothing about a release: that rule is the prompts' alone.
 
 ### Where the rules live
 

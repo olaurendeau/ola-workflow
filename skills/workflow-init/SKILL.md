@@ -111,7 +111,7 @@ write comes from something you ran or something the human told you, and nothing 
    you cannot name is a value to drop. Then write it, after the human agrees.
 
    **Do not write a `"$schema"` key.** The schema travels with the installed plugin, under a
-   path that holds the version (`…/plugins/cache/ola-workflow/ola-workflow/0.2.0/…`), so
+   path that holds the version (`…/plugins/cache/ola-workflow/ola-workflow/<version>/…`), so
    every value available to you is right on one machine until the next plugin upgrade — and
    in project scope the human then commits it for everyone else. `$schema` is also a key
    nothing in this plugin reads back, so a wrong one stays wrong silently; `ola-profile

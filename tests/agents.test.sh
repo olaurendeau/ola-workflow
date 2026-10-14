@@ -749,11 +749,39 @@ if [ "$guard_decides" = no ]; then
 fi
 
 
+# The README is read here, and only here. It was in none of these lists, and that was the
+# hole a review measured: the README makes claims about what the guard refuses, and appending
+# a flatly false one left every assertion green — while I cited those assertions as the
+# guarantee that the claims were true.
+#
+# **And it still is, in part.** This is a pattern over prose, and prose paraphrases without
+# limit: a review wrote thirteen denials this misses, including "the guard lets everything
+# through" — the very phrase the passing message below uses. So it is a **net**, not a proof.
+# What it catches is the literal phrasings this project has actually written, which is worth
+# having because those are what get copied forward; what it cannot catch is a sentence nobody
+# has written yet.
+#
+# The claims that have to be *true* rather than merely unrepeated are the numbers, and none
+# of them is asserted here. They are produced by `make measure`, which is the only honest
+# answer to "how do you know" — three of them were published wrong, twice because the method
+# was wrong rather than the number.
+#
+# One thing this does buy, and it is why the `no` arm below is not vacuous: the README is
+# phrased so the shipped text matches the claim pattern. Measured — make the guard inert and
+# that arm fires on the README, not on nothing.
+#
+# Only this one narrow pattern, though, and not the prohibition table above: the README
+# *documents* this plugin, so it shows `make check` and a base branch as examples on purpose,
+# and a table meant to stop a prompt hard-coding a project's values would fire on every line
+# of it. What the README must not do is promise a refusal that does not happen — or deny one
+# that does.
+CLAIMANTS=("${ALL[@]}" "$BRIEF" "$ROOT/README.md")
+
 if [ "$guard_decides" = no ]; then
   claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents)' \
-    "${ALL[@]}" "$BRIEF" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+    "${CLAIMANTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
   if [ -z "$claims" ]; then
-    ok "the guard decides nothing its suite expects, and no prompt claims otherwise"
+    ok "the guard decides nothing its suite expects, and nothing shipped claims otherwise"
   else
     ko "the guard decides nothing yet, and these promise otherwise: $claims"
   fi
@@ -773,6 +801,21 @@ else
     ok "the guard decides, and the brief — the one reader of the profile — says so"
   else
     ko "the guard decides now, and the brief tells an agent nothing will stop it"
+  fi
+  # And the inverse, which is the dangerous direction: nothing shipped may say the guard lets
+  # everything through while it refuses. An agent that reads that and then sees a refusal
+  # learns to treat the refusal as a bug to work around.
+  # Tolerant of what sits between the subject and the claim, because the first version was
+  # not and missed the sentence that was on the README at the time: "The guard is still
+  # **inert**" — "still" and two asterisks away from `guard is inert`. Enumerating spellings
+  # is the method that always misses one, and here the one it missed was the live sentence it
+  # existed to catch.
+  denials=$(grep -liE 'guard[^.]{0,60}(inert|allows everything|never refuses|never blocks|blocks nothing|does not block)' \
+    "${CLAIMANTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+  if [ -z "$denials" ]; then
+    ok "the guard decides, and nothing shipped says it lets everything through"
+  else
+    ko "the guard decides, and these say it does not: $denials"
   fi
   # And it must say so for *both* values of the key, or the half that matters is missing: an
   # agent told nothing will stop it, while the guard refuses, learns to treat a refusal as a

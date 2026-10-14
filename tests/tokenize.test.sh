@@ -231,6 +231,64 @@ sees "nice, short, measured" 'nice -n 5 gh --version' gh
 # And an option neither table knows is still an admission, whichever spelling it wears.
 asks "a long option neither table knows" 'sudo --made-up x git status' 'whether it takes a value is unknown'
 
+echo "--- an option where the command word goes is not a command word"
+# `time` was in the reserved-word table *and* the wrapper table, and the reserved branch runs
+# first: `time` was eaten as punctuation, `-p` became the command word, readable, and
+# `time -p gh pr merge 7 --admin` was **allowed**. Not asked — allowed, because `-p` is a
+# perfectly readable word that no rule names.
+#
+# Two fixes, and the second is the one that matters: `time` is a wrapper whatever the grammar
+# calls it, and a command word can never begin with a dash — the shell would look for a file
+# named `-p`. The net covers the next grammar word to be mishandled, which has not been
+# written yet.
+sees "time, bash form"   'time gh --version' gh
+names "time -p"          'time -p gh --version' gh
+names "time -f"          'time -f %e gh --version' gh
+names "time -v"          'time -v gh --version' gh
+# A reserved word followed by an option is what the `time` defect looked like from the
+# inside, and it is what the net catches whatever reserved word is in front: the shell would
+# look for a file named `-p`.
+asks "an option after a reserved word"  'then -p gh pr merge 7' 'an option sits where the command word should be'
+asks "an option after coproc"           'coproc -p gh pr merge' 'an option sits where the command word should be'
+asks "an option after a negation"       '! -v gh pr merge' 'an option sits where the command word should be'
+
+echo "--- a help request performs nothing, for a wrapper as for anything else"
+# Thirteen of the fourteen wrappers asked the human to confirm `<wrapper> --help`, with the
+# reason "whether it takes a value is unknown here" — which is not what is happening. And the
+# design justifies asking by "the command is not in this text", which `env --help` fails: it
+# runs exactly what it says. A table gap wearing the costume of a design cost.
+for line in 'env --help' 'sudo --help' 'nice --help' 'timeout --help' 'xargs --help' \
+            'stdbuf --help' 'ionice --help' 'nohup --help' 'setsid --help' 'doas -h' \
+            'timeout -h' 'xargs -h' 'command -V'; do
+  total=$((total + 1))
+  verdict=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"')
+  if [ "$verdict" = "/true" ]; then
+    echo "ok    '$line' runs no command, and is not asked about"
+  else
+    echo "FAIL  '$line' reported $verdict"
+    failures=$((failures + 1))
+  fi
+done
+# And an option that belongs to the *inner* command must not be read as the wrapper's: this
+# is what scanning every remaining word broke.
+sees 'version through a wrapper'  'echo x | xargs -0 gh --version' gh
+sees 'version after a priority'   'nice -5 gh --version' gh
+
+echo "--- a conditional expression runs no command"
+# `[[` opens one, and what follows is not a command word: walking past it left `-f` there,
+# which the dash net then asked about — a question about the shell own grammar, the same
+# defect `[` had and the same answer.
+for line in '[[ -f x ]]' '[[ -z "$x" ]]' '[[ $a == b ]]'; do
+  total=$((total + 1))
+  verdict=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"' | head -1)
+  if [ "$verdict" = "/true" ]; then
+    echo "ok    '$line' runs no command, and is not asked about"
+  else
+    echo "FAIL  '$line' reported $verdict"
+    failures=$((failures + 1))
+  fi
+done
+
 echo "--- nothing to judge is not the same as unreadable"
 for line in 'c=gh' '}' 'done' '2>/dev/null'; do
   verdict=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"')

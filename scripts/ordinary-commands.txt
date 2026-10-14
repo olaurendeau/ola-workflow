@@ -1,0 +1,95 @@
+# Ordinary work, for scripts/measure.sh. Nothing here is ever executed: each line is
+# fed to the guard as the text of a PreToolUse payload.
+#
+# The five commands at the end are the design cost — each runs something that is not in
+# its own text — and they are kept last so that the mix is visible rather than buried.
+make check
+make test SLOT=3
+make lint
+git status
+git status --porcelain
+git diff --stat
+git diff --cached
+git log --oneline -20
+git add -A
+git commit -m "fix: a thing"
+git commit --amend --no-edit
+git push -u origin HEAD
+git push --force-with-lease
+git fetch origin
+git rebase origin/main
+git worktree add ../wt -b feat/x
+git stash pop
+git checkout -b feat/y
+git branch -D feat/old
+git show HEAD --stat
+npm ci
+npm install --save-dev vitest
+npm run build
+npm test -- --run
+npx vitest run
+pnpm install
+jq -r '.name' package.json
+ls -la
+cd src && ls
+grep -rn TODO src/
+rg -l 'bar'
+sed -n '1,20p' f.txt
+awk '{print $1}' f.txt
+cat README.md | head -20
+sort -u list.txt
+cut -d, -f1 data.csv
+diff -u a.txt b.txt
+find . -name '*.md'
+docker compose up -d
+docker compose logs -f api
+docker build -t app:dev .
+gh pr create --fill
+gh pr view 7 --json number
+gh pr checks 7
+gh pr diff 7
+gh issue list --label task
+gh issue create -t "a thing" -b "body"
+gh api repos/o/r/commits/abc/status
+gh run view 123 --log-failed
+curl -sS https://example.com
+./scripts/build.sh
+bash tests/run.sh
+perl -c lib/x.pl
+python3 -m pytest
+go test ./...
+cargo test
+env FOO=1 make check
+env --unset BAR make check
+env --help
+nice -n 10 make check
+sudo -u postgres psql -c 'select 1'
+sudo --user postgres psql -c 'select 1'
+sudo --help
+timeout 60 make test
+timeout --signal TERM 60 make test
+xargs -r rm < list.txt
+xargs --replace {} echo {} < list.txt
+time -p make check
+test -f README.md
+[ -f README.md ]
+[[ -f x ]]
+if [ -f x ]; then echo y; fi
+for f in *.md; do echo "$f"; done
+case $x in a) echo a;; esac
+f() { echo hi; }
+echo "$HOME"
+export FOO=bar
+git config --local user.name
+stat -f %m README.md
+mktemp -d
+mkdir -p build
+cp a.txt b.txt
+chmod +x script.sh
+tar czf x.tgz src
+touch newfile
+source ./venv/bin/activate
+. ./venv/bin/activate
+eval "$(ssh-agent)"
+trap 'rm -f /tmp/x' EXIT
+$EDITOR notes.md

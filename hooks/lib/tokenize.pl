@@ -223,9 +223,14 @@ sub split_line {
 # Every reserved word bash defines, plus the braces and the `!` negation. Without `if`
 # and `while` here the first segment of `if true; then …` reports `if` as its command,
 # when the command is `true`.
+# `time` is deliberately **not** here, though bash calls it a reserved word: it was, and it
+# was also a wrapper, and the reserved branch runs first — so `time` was eaten as punctuation
+# and `-p` became the command word, readable, allowed. `time -p gh pr merge 7 --admin` ran.
+# A word that takes a command after it is a wrapper whatever the grammar calls it, and the
+# wrapper branch has the two tables that read its options.
 my %reserved = map { $_ => 1 }
   qw(if then elif else fi for while until do done case esac in select function
-     time coproc ! { } [[ ]]);
+     coproc ! { } [[ ]]);
 
 # Wrappers whose own arguments are a command. The shell runs the wrapper AND the command,
 # so a rule has to see the inner one.
@@ -277,6 +282,7 @@ my %bool_opts = (
   stdbuf  => qr/^$/,
   xargs   => qr/^(?:-(?:0|p|r|t|x)|--(?:null|interactive|no-run-if-empty|verbose|exit))$/,
   exec    => qr/^-(?:c|l)$/,
+  time    => qr/^(?:-(?:p|v|a|q)|--(?:verbose|append|quiet|portability))$/,
   command => qr/^-(?:p|v|V)$/,
   nohup   => qr/^$/,
   setsid  => qr/^(?:-(?:c|f|w)|--(?:ctty|fork|wait))$/,
@@ -441,6 +447,13 @@ sub command_word {
 
     # Reserved words and the heads of compound statements.
     if ($reserved{$w}) {
+      # `[[` opens a conditional expression, and what follows is not a command word at all:
+      # `[[ -f x ]]` runs nothing. Walking past it left `-f` as the command word, which the
+      # dash net then asked about — a question about the shell's own grammar, which is the
+      # same defect `[` had and the same answer: nothing to judge.
+      if ($w eq '[[') {
+        return ('', join(' ', @walked, @w), undef, [], 0);
+      }
       $in_case = 1 if $w eq 'case';
       $after_function = 1 if $w eq 'function';
       push @walked, $w; shift @w; next;
@@ -494,6 +507,27 @@ sub command_word {
               [@w[1 .. $#w]]);
     }
     if ($wrapper{$name}) {
+      # A help or version request performs nothing, whatever it asks about, so the segment
+      # runs no command rather than being unreadable. Without this, `env --help`,
+      # `sudo --help` and eleven more asked the human to confirm a command that prints a page
+      # and exits — and the reason given was "whether it takes a value is unknown here",
+      # which is not what is happening. `env --help` runs exactly what its text says, so the
+      # design's own justification for asking did not cover it: it was a table gap wearing
+      # the costume of a design cost.
+      # Only the wrapper's **own** options are examined: the run of words that start with a
+      # dash, stopping at the first that does not. Scanning everything left made
+      # `xargs -0 gh --version` and `nice -5 gh --version` report no command at all, because
+      # the `--version` belonged to `gh`. An option is owned by the command it follows, and
+      # that is the whole reason this walk exists.
+      my $k = 1;
+      my $asks_help = 0;
+      while ($k <= $#w && $w[$k] =~ /^-/) {
+        $asks_help = 1 if $w[$k] =~ /^(?:--help|--usage|--version|-h|-V)$/;
+        $k++;
+      }
+      if ($asks_help) {
+        return ('', join(' ', @walked, @w), undef, [], 0);
+      }
       push @walked, $w;
       shift @w;
       # Skip what belongs to the wrapper rather than to the command: its options, the
@@ -562,6 +596,16 @@ sub command_word {
     if ($bare =~ /\s/) {
       return ($name, join(' ', @walked, $w),
               'this holds a whole command line where a command word goes, so what runs is a program this text quotes rather than a command',
+              [@w[1 .. $#w]]);
+    }
+    # And it cannot begin with a dash. The shell would look for a file named `-p`, so a word
+    # like that is always an option some prefix should have consumed and did not — the net
+    # under the whole family, of which `time -p` was one member and the next grammar word to
+    # be mishandled will be another. A silent allow is what this replaces: `-p` was a
+    # perfectly readable command word that no rule names.
+    if ($bare =~ /^-/) {
+      return ($name, join(' ', @walked, $w),
+              'an option sits where the command word should be, so some prefix was not read correctly and what runs cannot be named',
               [@w[1 .. $#w]]);
     }
 

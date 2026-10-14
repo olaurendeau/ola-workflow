@@ -22,6 +22,9 @@ validate: ## Validates the plugin and marketplace manifests (job `manifests`)
 
 check: lint test validate ## Everything the CI runs
 
+measure:
+	@scripts/measure.sh
+
 spike: ## Replays the agent-identity spike and prints the measured values
 	scripts/spike/agent-identity.sh
 
