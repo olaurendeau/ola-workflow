@@ -63,15 +63,47 @@ without a specialist. And do not pretend a specialist did it.
    - **The reviewer reports `blocked`** (it could not run the checks) → fix nothing in the
      change: resolve the environment, or ask the human, then dispatch it again.
    - **Blocking findings** → send them verbatim to that developer, wait for its new report,
-     dispatch the reviewer again on the new head SHA. If the developer disputes a finding
-     with a reason, or the same finding survives two cycles, judge it: valid, send it back;
-     a false positive, ask the human. Record the human's answer where the work lives, and
-     dispatch the reviewer again — it treats a finding settled that way as settled.
+     then decide whether a new review is owed — see *When a fix owes a new review* below.
+     If the developer disputes a finding with a reason, or the same finding survives two
+     cycles, judge it: valid, send it back; a false positive, ask the human. Record the
+     human's answer where the work lives, and dispatch the reviewer again — it treats a
+     finding settled that way as settled.
    - **Suggestions** → triage each: fix now, keep as a follow-up task, or reject with a
      reason. Publish the triage; a suggestion silently dropped is a suggestion that comes
      back.
    Done when the review on the current head SHA has no blocking finding and every
    suggestion is triaged.
+
+   ### When a fix owes a new review
+
+   **A fix that changes what the code does owes one. A fix that changes only what a file
+   says about it does not.** Report the diff to the reviewer, say which of the two it was,
+   and merge under the gate.
+
+   This is a stop criterion, and it exists because the loop above has no natural end. On one
+   small change it ran thirteen times: the first seven cycles found defects that let
+   a role do what it must not — a developer merging, a developer writing the status the merge
+   gate reads — and the last six found one thing each, every time in the sentence or comment
+   that the previous fix had just written to justify itself. Those last six were real, and
+   none of them could have let anything through.
+
+   So the line is not severity and not a cycle budget, both of which would have skipped the
+   authorisation defects. It is **what the fix touched**:
+
+   | the fix changed | then |
+   |---|---|
+   | behaviour — code, a pattern, a rule, a default | a new review, on the new head SHA |
+   | only prose — a comment, a README, a commit message | no new cycle; report it and merge |
+
+   Two things keep this honest. A prose fix still goes to the reviewer, so a false claim in
+   it is caught on the next change rather than never. And a claim that must be *true* rather
+   than merely unrepeated — a measured number, a rate, a cost — belongs in something that
+   recomputes it, not in a sentence a review has to re-check: this repository ships
+   `make measure` for exactly that reason, after publishing three numbers that were wrong
+   because the method was.
+
+   When the reviewer and you disagree about which column a fix is in, it is behaviour. The
+   cost of one extra cycle is an hour; the cost of being wrong about it is a role merging.
 
 7. **Merge**, under the gate in the brief, checked on the forge for the current head SHA.
    Then return to step 5 for the tasks that merge unblocked. A change that merging left
