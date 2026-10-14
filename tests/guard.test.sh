@@ -696,6 +696,36 @@ enforced allow ola-workflow:coordinator 'gh -R owner/repo pr merge 7'
 enforced allow ola-workflow:developer 'gh pr list --search merge'
 enforced allow ola-workflow:developer 'gh pr edit 7 --add-label "ready to merge"'
 
+# --- A redirection in front of a merge is still a merge ------------------------------
+# Thirteen spellings put the redirection's target where the command word goes, so the merge
+# rule — which asks whether the command is `gh` — was never consulted. Five more came from an
+# operator list that was seven long where bash's is twelve, and `>|` needed the splitter too:
+# it is one operator, and cutting at the `|` left a bare `>` and a segment commanding `out`.
+#
+# The rows live here and not only in the tokenizer suite because what shipped was a *decision*
+# — an allowed merge — and that is what this file measures.
+for form in '2> /dev/null' '> out' '1> out' '>> out' '&> out' '>& out' '< /dev/null' \
+            '{fd}> out' '2>&1 > out' '>| out' '>|out' '2>| out' '<> f' '<& 3'; do
+  enforced deny ola-workflow:developer "$form gh pr merge 7 --admin"
+  enforced allow ola-workflow:coordinator "$form gh pr merge 7 --squash"
+done
+# `2>&1` takes no target and must keep being skipped alone: a fix that took its next word
+# would have traded one escape for another.
+enforced deny ola-workflow:developer '2>&1 gh pr merge 7 --admin'
+# And a redirection in front of ordinary work is ordinary work.
+enforced allow ola-workflow:developer '2> /dev/null make check'
+enforced allow ola-workflow:developer '>| out make check'
+enforced allow ola-workflow:developer 'make check | grep x'
+
+# Any compound command after a coproc name, which is what bash allows — the brace form was
+# closed in 0.3.1 and the paren form in 0.3.2, each before the set was looked up.
+for form in '{ gh pr merge 7 --admin; }' '( gh pr merge 7 --admin )' \
+            'if gh pr merge 7 --admin; then :; fi' \
+            'while gh pr merge 7 --admin; do :; done' \
+            'case x in a) gh pr merge 7 --admin;; esac'; do
+  enforced deny ola-workflow:developer "coproc CO $form"
+done
+
 # --- A payload that is not in the text is asked about, not guessed -------------------
 # `-F key=@file` reads the value from a file and `@-` from stdin; `--input` sends a whole
 # body from one. Measured: `gh api -X POST …/statuses/abc --input body.json` really sets the
@@ -728,9 +758,20 @@ enforced allow ola-workflow:developer \
 #
 # So the five scripts that make one share `ola_scratch`, and it is asserted here rather than
 # left to five correct copies.
+# And this probe uses `ola_scratch` for its own copy, because the first version of it did
+# not: it was written with the very idiom it asserts against, and ended in
+# `rm -rf "$scratch_probe"`. Make that one `mktemp` fail and the suite printed
+# `ok  a broken TMPDIR refuses...`, counted a pass, exited 0 — and deleted the tree. The
+# instrument carried the defect it measures, which is the one failure this file is supposed
+# to be able to name.
+#
+# It lives under $WORK, which `ola_scratch` already validated and the suite's own trap
+# already removes, so there is no second `rm -rf` here at all. That is the stronger answer:
+# not a guarded delete, no delete.
 total=$((total + 1))
-scratch_probe=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-probe.XXXXXX")" && pwd -P)
-cp -R "$(dirname "$0")/../scripts" "$(dirname "$0")" "$scratch_probe/" 2>/dev/null
+scratch_probe=$WORK/scratch-probe
+mkdir -p "$scratch_probe"
+cp -R "$SCRATCH_ROOT/scripts" "$SCRATCH_ROOT/tests" "$scratch_probe/" 2>/dev/null
 : >"$scratch_probe/CANARY"
 ( cd "$scratch_probe" && TMPDIR=/nonexistent-ola-scratch-probe \
     bash scripts/measure.sh >/dev/null 2>&1 )
@@ -740,7 +781,6 @@ else
   echo "FAIL  a broken TMPDIR let the tree be deleted — ola_scratch is not holding"
   failures=$((failures + 1))
 fi
-rm -rf "$scratch_probe"
 
 # --- A missing tool blocks, it does not pass -----------------------------------------
 # The guard failed **open**, which is the one thing its whole design forbids: with `jq` off

@@ -210,6 +210,11 @@ sub split_line {
       if ($c eq '|') { $cur .= $c; $i++; next }          # an alternative, not a pipeline
       $case_pattern = 0 if $c eq ')';
     }
+    # `>|` is one operator, not a redirection followed by a pipe. Cutting there left the
+    # first segment as a bare `>` and the second as `out gh pr merge 7 --admin`, whose
+    # command word is `out` — so the merge rule, which asks whether the command is `gh`, was
+    # never consulted. `>| out …` and the glued `>|out …` both ran it.
+    if ($c eq '|' && $cur =~ />\z/ && $cur !~ />>\z/) { $cur .= $c; $i++; next }
     if ($c =~ /[;&|\n]/) { $flush->(); $i++; next }
 
     $cur .= $c; $i++;
@@ -458,12 +463,16 @@ sub command_word {
       # the command word: `coproc CO { gh pr merge 7 --admin; }` was allowed, named `CO`.
       # `coproc` without a name was already right, which is why only one of the two forms
       # was ever tested. The name is punctuation here, like a function header is.
-      # `{` or `(`: bash accepts any compound command after the name, and the paren form
-      # really runs. Requiring a brace closed one spelling and left its twin — which is the
-      # third time this file has shipped exactly that, so the test rows below name both.
+      # Any **compound command**, which is what bash actually allows after the name — not
+      # just a brace, and not just a brace or a paren. Its grammar lists `( )`, `{ }`,
+      # `(( ))`, `[[ ]]`, `if`, `case`, `while`, `until`, `for` and `select`, and
+      # `coproc CO if …`, `while`, `until`, `case` all ran the inner command while being read
+      # as `CO`. Two spellings were closed in two releases before the set was looked up.
       if ($w eq 'coproc' && @w > 1
           && $w[1] =~ /^[A-Za-z_][A-Za-z0-9_]*$/
-          && @w > 2 && $w[2] =~ /^[({]/) {
+          && @w > 2
+          && ($w[2] =~ /^[({]/ || $w[2] =~ /^\[\[$/
+              || $w[2] =~ /^(?:if|case|while|until|for|select)$/)) {
         push @walked, shift @w;      # coproc
         push @walked, shift @w;      # the name
         next;
@@ -511,7 +520,13 @@ sub command_word {
     # What decides is whether the operator **ends** the word: `2>` takes the next word,
     # `2>&1` does not and must keep being skipped alone — it was already right, and a fix
     # that broke it would trade one escape for another.
-    if ($w =~ /^(?:[0-9]*|\{[A-Za-z_][A-Za-z0-9_]*\})(?:<<<|<<|>>|>&|&>|>|<)(.*)$/) {
+    # Every operator bash's grammar lists, longest first so the alternation cannot match a
+    # prefix of a longer one. Seven were written here and twelve exist: `>|`, `<>`, `&>>` and
+    # `<<-` were missing, and each of them let a merge through — `>| out gh pr merge 7
+    # --admin` and `>|out gh pr merge 7 --admin` both ran it. The comment claimed the general
+    # rule while the code held a list, which is the shape this file keeps paying for; the
+    # list is now the grammar's, not a memory of it.
+    if ($w =~ /^(?:[0-9]*|\{[A-Za-z_][A-Za-z0-9_]*\})(?:&>>|<<<|<<-|<<|>>|>\||<>|<&|>&|&>|>|<)(.*)$/) {
       my $rest = $1;
       push @walked, $w; shift @w;
       push @walked, shift @w if $rest eq '' && @w;   # the target, when it is its own word

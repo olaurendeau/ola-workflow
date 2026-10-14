@@ -302,6 +302,12 @@ echo "--- two grammar forms whose second spelling shipped unread"
 # `{fd}>log gh pr merge 7 --admin` were both allowed in 0.3.0.
 names 'coproc with a name'      'coproc CO { gh --version; }' gh
 names 'coproc, paren form'      'coproc CO ( gh --version )' gh
+# Any compound command, which is what bash allows after the name — two spellings were closed
+# in two releases before the set was looked up. These are its grammar's, not a memory of it.
+names 'coproc then if'          'coproc CO if gh --version; then :; fi' gh
+names 'coproc then while'       'coproc CO while gh --version; do :; done' gh
+names 'coproc then until'       'coproc CO until gh --version; do :; done' gh
+names 'coproc then case'        'coproc CO case x in a) gh --version;; esac' gh
 names 'coproc without a name'   'coproc gh --version' gh
 names 'a varname file descriptor' '{fd}>log gh --version' gh
 sees  'a numbered redirection'  '2>/dev/null gh --version' gh
@@ -323,6 +329,25 @@ names 'a varname, separated'    '{fd}> out gh --version' gh
 sees 'a duplication, no target' '2>&1 gh --version' gh
 sees 'a duplication then one'   '2>&1 > out gh --version' gh
 sees 'an assignment first'      'FOO=1 > out gh --version' gh
+
+# The operator list was seven long and bash's is twelve. `>|`, `<>`, `&>>` and `<<-` were
+# missing, and each let a merge through. The comment above claimed the general rule while the
+# code held a list — the shape this file keeps paying for — so the list is the grammar's now.
+#
+# `>|` also needed the *splitter*: it is one operator, and cutting at the `|` left a bare `>`
+# and a second segment whose command word was `out`.
+sees 'the clobber operator'     '>| out gh --version' gh
+sees 'clobber, glued'           '>|out gh --version' gh
+sees 'clobber with a fd'        '2>| out gh --version' gh
+sees 'read-write'               '<> f gh --version' gh
+sees 'read-write with a fd'     '2<> f gh --version' gh
+names 'duplicating input'       '<& 3 gh --version' gh
+# `&>>` is bash 4, and the host this runs on is bash 3.2 — so the shell half cannot be
+# measured here, which is exactly what `names` is for. Its witness is `&>` two rows up, which
+# 3.2 does have and which `sees` runs.
+names 'append both streams'     '&>> out gh --version' gh
+# And a pipe is still a pipe.
+sees 'an ordinary pipeline'     'echo x | gh --version' gh
 
 echo "--- a conditional expression runs no command"
 # `[[` opens one, and what follows is not a command word: walking past it left `-f` there,

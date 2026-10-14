@@ -2,7 +2,7 @@
 
 ## 0.3.2
 
-**0.3.1 shipped with two merge escapes and a script that can delete your repository.**
+**0.3.1 shipped with twenty merge escapes and a script that can delete your repository.**
 Update.
 
 ```
@@ -24,8 +24,11 @@ mid-review by `make measure`, and the script said nothing.
 The same idiom opened all four test suites. They now share `scripts/scratch.sh`, which sets a
 variable rather than printing one — inside `WORK=$(…)` an `exit 2` would end only the
 substitution's subshell and the caller would carry on with an empty path, which is the defect
-again one layer down. Three independent conditions must hold before the trap is installed,
-and `${WORK:?}` in the trap is a fourth.
+again one layer down. **Four** independent conditions must hold before the trap is
+installed — `mktemp` succeeded, the result is a directory, it can be entered, and its name is
+the one we just asked for — and `${WORK:?}` in the trap is a fifth. The fourth is the one
+that catches an `mktemp` which succeeds and answers something else, and an earlier draft of
+this entry left it out of the count.
 
 It is the same shape as every other defect this project keeps finding — a command that fails
 and is read as a result — in its most expensive form.
@@ -40,8 +43,13 @@ happened here; the test rows now name both halves of each.
   which asks whether the command is `gh` — was never consulted. Thirteen spellings did it,
   including the API form. What decides is whether the operator **ends** the word: `2>` takes
   the next word, `2>&1` does not and still must not.
-- **`coproc CO ( gh pr merge 7 --admin )`** was allowed, named `CO`. The brace form was
-  closed in 0.3.1; bash accepts any compound command after the name.
+- **Five more came from the operator list itself**, which was seven long where bash's grammar
+  has twelve: `>|`, `<>`, `&>>` and `<<-` were absent. `>|` needed the splitter as well — it
+  is one operator, and cutting at the `|` left a bare `>` and a second segment whose command
+  was `out`. The list is the grammar's now, not a memory of it.
+- **`coproc CO ( gh pr merge 7 --admin )`** was allowed, named `CO`, and so were the `if`,
+  `while`, `until` and `case` forms. The brace form was closed in 0.3.1 and the paren form
+  here — each before anyone looked up the set, which is bash's list of compound commands.
 
 ### The product designer shows what it means, and someone else judges it
 
