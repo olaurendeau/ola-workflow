@@ -342,6 +342,9 @@ fi
 # included — moves the set and fails here. Each of those six was droppable with the suite
 # staying green, and `/developer.md#modes` was a measured false positive; the granularity is
 # where the defect hid, since `A-Za-z0-9_.+-` reads as one member while it is six.
+# Seventy, and they add up: the four the lookahead names on its own (35 #, 47 /, 58 :, 63 ?)
+# plus the capture class it repeats — 26 upper, 26 lower, 10 digits, and 4 more (_ . + -).
+# 4 + 26 + 26 + 10 + 4 = 70, so a reader can check the literal without running it.
 want_blocks='35,43,45,46,47,48,49,50,51,52,53,54,55,56,57,58,63,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,95,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122'
 if [ "$blocks" = "$want_blocks" ]; then
   ok "exactly 70 bytes keep a role name from being a verdict, over all 256"
