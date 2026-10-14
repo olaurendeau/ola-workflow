@@ -10,7 +10,10 @@
 #
 #   make measure
 #
-# It writes nothing outside its own temporary directory and runs no command from the sample.
+# It runs no command from the sample. It does leave the shim scripts and a log in its own
+# temporary directory, which it removes — but `mktemp -d` itself and the tools it calls leave
+# their own files under $TMPDIR, so "writes nothing outside" was a claim too strong and has
+# been withdrawn.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -93,9 +96,21 @@ for name in $(ls /usr/bin /bin 2>/dev/null | sort -u); do
 done
 
 count() { # count <cwd> <session> → externals execed, and their names
+  # The guard's own exit status is read, and a failure is reported rather than counted. The
+  # first version swallowed it, and the PATH it builds holds only the shims plus /usr/bin and
+  # /bin — so on a host whose `jq` lives in /opt or /usr/local the guard exited 2 and this
+  # printed `4`, which is precisely the wrong number this script exists to retire. A measure
+  # that cannot tell a failure from a result is not a measure.
+  local rc
   : >"$WORK/exec.log"
   payload 'make check' "$1" "$2" |
-    PATH="$SHIM:/usr/bin:/bin" bash "$GUARD" >/dev/null 2>&1 || true
+    PATH="$SHIM:$(dirname "$(command -v jq)"):$(dirname "$(command -v perl)"):/usr/bin:/bin" \
+      bash "$GUARD" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'FAILED(exit %s)' "$rc"
+    return
+  fi
   grep -cv '^bash$' "$WORK/exec.log"
 }
 names() { sort "$WORK/exec.log" | uniq -c | awk '{ printf "%s×%s ", $2, $1 }'; }

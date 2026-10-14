@@ -29,9 +29,10 @@
 #                        decision to OLA_WORKFLOW_GUARD_LOG if that is set.
 #
 # It shipped log-only at first, waiting on a number: at 1% of commands asking the question is
-# free, at 20% a human switches the guard off and has no guard at all. Measured since, by
-# three independent samples, between 3% and 7% depending on how many indirection commands the
-# sample holds — and no command refused wrongly. So the default is enforcement.
+# free, at 20% a human switches the guard off and has no guard at all. `make measure` answers
+# it now, on a sample that ships with the repository — and no number is written here, because
+# three of the ones that were turned out to be wrong, twice because the method was. So the
+# default is enforcement, and what it costs is a command away.
 #
 # OLA_WORKFLOW_GUARD=enforce|log still overrides the profile, for one session: it is how the
 # tests pin a mode, and how a human watches before letting it act.

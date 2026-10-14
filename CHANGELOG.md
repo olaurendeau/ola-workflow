@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.3.1
+
+**0.3.0 shipped with a merge escape. Update.**
+
+```
+claude plugin update ola-workflow@ola-workflow
+```
+
+### Three ways a merge got past the guard in 0.3.0
+
+Each is one word from a form that was correctly refused, and each really runs the inner
+command — measured on macOS and on GNU.
+
+- **`env -u -h gh pr merge 7 --admin`** was allowed, where `env -u FOO gh pr merge 7 --admin`
+  is refused. The help check scanned the leading run of dashes without knowing which of them
+  take a value, so a `-h` that was an *option's value* read as a help request and the segment
+  reported no command at all. Same for `env -u -V`, `exec -a -h`, `xargs -E -h`, `sudo -p -h`.
+  The fix was to delete the second reader: the walk below it already knew which options take
+  values, and asking the same question in two places is how the two came to disagree.
+- **`coproc CO { gh pr merge 7 --admin; }`** was allowed, named `CO`. `coproc` without a name
+  was handled; the named form put the coprocess's name where the command word goes.
+- **`{fd}>log gh pr merge 7 --admin`** was allowed, named `{fd}>log`. `2>/dev/null` was
+  handled; bash's varname file-descriptor spelling was not.
+
+All three have test rows now, which is what their absence allowed.
+
+### And four claims that were not true
+
+- the README said the guard **refuses what a role does not own**. It refuses **two
+  operations**: merging, and writing the review status. Pushing to the base branch, tagging,
+  releasing, publishing and repository settings are refused by nothing — they are rules the
+  prompts carry and nothing applies. The brief says so now, in the section an agent reads
+  before it works;
+- the README said four subprocesses with no profile where its own table said seven. Seven;
+- `hooks/guard.sh` still carried "three independent samples, between 3% and 7%", a range a
+  review could not reproduce. No number is written there now: `make measure` answers it;
+- `scripts/measure.sh` could not tell a failure from a result — it read no exit status, so on
+  a host whose `jq` is not in `/usr/bin` it printed `4`, the exact wrong number it exists to
+  retire. And it claimed to write nothing outside its temporary directory, which was too
+  strong.
+
 ## 0.3.0
 
 **The guard applies its rules.** A project with no profile is still untouched; a project that

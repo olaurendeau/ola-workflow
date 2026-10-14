@@ -24,7 +24,14 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 ## Status
 
-**The team is complete, and the guard refuses what a role does not own.** In place: the manifests, the CI,
+**The team is complete, and the guard refuses two things a role does not own.** Two, not
+all: merging belongs to the coordinator and the review status to the pr-reviewer, and those
+are the only operations any rule names. Pushing to the base branch, tagging, releasing,
+publishing and changing repository settings are **not refused by anything** — they are rules
+the prompts carry and nothing applies, which is a different thing from a rule. See
+[What is not here yet](#what-is-not-here-yet).
+
+In place: the manifests, the CI,
 the test harness, the answer to how a plugin agent is identified (see
 [Agent identity](#agent-identity)), the project profile with its schema and its
 `ola-profile` CLI, the **five agents** — a coordinator that frames and dispatches, a product
@@ -34,7 +41,8 @@ independent reviewer — and the **guard**: a tokenizer that reads what a shell 
 run, three decisions, fail-closed once a profile exists, and its first two role rules.
 
 A project with no profile is unaffected, which is the whole point of the design: the hook
-exits 0 before any rule, at a cost of four subprocesses. A project that wrote a profile has
+exits 0 before any rule, at a cost of seven subprocesses — `make measure` prints which. A
+project that wrote a profile has
 opted in, and `"guard": "log"` is how it watches the decisions before letting them act.
 
 ### What it costs, and how to find out

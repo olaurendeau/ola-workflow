@@ -454,6 +454,17 @@ sub command_word {
       if ($w eq '[[') {
         return ('', join(' ', @walked, @w), undef, [], 0);
       }
+      # `coproc NAME { … }` names the coprocess before the command, and that name read as
+      # the command word: `coproc CO { gh pr merge 7 --admin; }` was allowed, named `CO`.
+      # `coproc` without a name was already right, which is why only one of the two forms
+      # was ever tested. The name is punctuation here, like a function header is.
+      if ($w eq 'coproc' && @w > 1
+          && $w[1] =~ /^[A-Za-z_][A-Za-z0-9_]*$/
+          && @w > 2 && $w[2] =~ /^\{/) {
+        push @walked, shift @w;      # coproc
+        push @walked, shift @w;      # the name
+        next;
+      }
       $in_case = 1 if $w eq 'case';
       $after_function = 1 if $w eq 'function';
       push @walked, $w; shift @w; next;
@@ -485,7 +496,12 @@ sub command_word {
     # An assignment in front of a command: FOO=1 gh …
     if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*=/) { push @walked, $w; shift @w; next }
     # A redirection in front of a command: 2>/dev/null gh …
-    if ($w =~ /^[0-9]*[<>]/) { push @walked, $w; shift @w; next }
+    # `{fd}>log` too, which bash allows and which read as the command word: the segment was
+    # named `{fd}>log`, readable, and `{fd}>log gh pr merge 7 --admin` was allowed. Both
+    # spellings of the same grammar, and the first one shipped without the second.
+    if ($w =~ /^[0-9]*[<>]/ || $w =~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
+      push @walked, $w; shift @w; next;
+    }
 
     # A subshell's opening paren sticks to the word: `(gh pr merge)` would otherwise name
     # the command `(gh`, which matches no rule.
@@ -514,20 +530,17 @@ sub command_word {
       # which is not what is happening. `env --help` runs exactly what its text says, so the
       # design's own justification for asking did not cover it: it was a table gap wearing
       # the costume of a design cost.
-      # Only the wrapper's **own** options are examined: the run of words that start with a
-      # dash, stopping at the first that does not. Scanning everything left made
-      # `xargs -0 gh --version` and `nice -5 gh --version` report no command at all, because
-      # the `--version` belonged to `gh`. An option is owned by the command it follows, and
-      # that is the whole reason this walk exists.
-      my $k = 1;
-      my $asks_help = 0;
-      while ($k <= $#w && $w[$k] =~ /^-/) {
-        $asks_help = 1 if $w[$k] =~ /^(?:--help|--usage|--version|-h|-V)$/;
-        $k++;
-      }
-      if ($asks_help) {
-        return ('', join(' ', @walked, @w), undef, [], 0);
-      }
+      # Noticed **inside** the walk below, never by a scan of its own. A separate scan over
+      # the leading run of dashes does not know which of them take a value, so a `-h` that is
+      # an option's *value* read as a help request and the segment reported no command at
+      # all: `env -u -h gh pr merge 7 --admin` was allowed, one word from
+      # `env -u FOO gh pr merge 7 --admin`, which is refused. Measured, and the inner command
+      # really runs — `env -u -h`, `exec -a -h`, `xargs -E -h`, `sudo -p -h` all do.
+      #
+      # It shipped that way in 0.3.0. The defect is the second reader: the walk below already
+      # knows which options take values, and asking the same question twice in two places is
+      # how the two came to disagree. So the flag is set where the walk classifies the word,
+      # and only there.
       push @walked, $w;
       shift @w;
       # Skip what belongs to the wrapper rather than to the command: its options, the
@@ -558,6 +571,19 @@ sub command_word {
         # `nice -5` and `ionice -5` are a priority, not an unknown option.
         if (($name eq 'nice' || $name eq 'ionice') && $w[0] =~ /^-[0-9]+$/) {
           push @walked, shift @w; next;
+        }
+        # A help or version request performs nothing, whatever it asks about, so the segment
+        # runs no command rather than being unreadable. Without this, `env --help`,
+        # `sudo --help` and eleven more asked the human to confirm a command that prints a
+        # page and exits — and the reason given was "whether it takes a value is unknown
+        # here", which is not what is happening. `env --help` runs exactly what its text
+        # says, so the design's own justification for asking did not cover it: a table gap
+        # wearing the costume of a design cost.
+        #
+        # Here, after the value-taking options have been consumed, so a `-h` that is a value
+        # has already been skipped as one and never reaches this test.
+        if ($w[0] =~ /^(?:--help|--usage|--version|-h|-V)$/) {
+          return ('', join(' ', @walked, @w), undef, [], 0);
         }
         # A known boolean takes nothing.
         my $boolean = $bool_opts{$name};
