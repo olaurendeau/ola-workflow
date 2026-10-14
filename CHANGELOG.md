@@ -92,14 +92,21 @@ command with the option one position earlier — is refused
 ([#43](https://github.com/olaurendeau/ola-workflow/issues/43), the one to fix first: it is a
 developer merging).
 
-Four rounds of independent review on this one change found three, three, two and four
-things, and a fifth round found three more: **six defects this change itself introduced**,
-three false claims — two in this entry and one in a comment the fix had just written to
-justify itself — and six escapes that were already there. Every one of the six was caught before it shipped —
-which is what the rounds bought, and also what says when to stop. On a class that cannot be
-exhausted, a defect the change introduces blocks it; an escape that was already there becomes
-an issue. Otherwise the loop has no end: by the fourth round, most of what was found was in
-the fix written by the third. What the guard is for is making the ordinary path visible, not proving a negative;
+Five rounds of independent review on this one change found fifteen things — three, three,
+two, four and three — and they sort into four kinds: **six defects this change itself
+introduced**, three false claims (two in this entry, one in a comment the fix had just written
+to justify itself), five escapes that were already there, and one load-bearing guard that had
+no test row. Six plus three plus five plus one.
+
+An earlier draft of this paragraph said six escapes, counting that last one among them. It was
+not an escape: the line was already refused, and what was missing was an assertion about it.
+The review that caught the slip said what it was — one example generalised into a claim, which
+is the defect the paragraph above this one had just finished removing from a comment.
+
+Every one of the six defects was caught before it shipped, which is what the rounds bought —
+and also what says when to stop. On a class that cannot be exhausted, a defect the change
+introduces blocks it; an escape that was already there becomes an issue. Otherwise the loop has
+no end: by the fourth round, most of what was found was in the fix written by the third. What the guard is for is making the ordinary path visible, not proving a negative;
 `make measure` prints what it asks about and what it costs, and `ask` is what it does with
 everything it cannot read.
 
