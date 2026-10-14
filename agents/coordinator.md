@@ -19,7 +19,7 @@ human, offer `/ola-workflow:workflow-init`, and stop.
 | Agent | Dispatch with | Returns |
 |---|---|---|
 | `ola-workflow:product-designer` | the request and your framing answers | problem, user stories, acceptance criteria, the words — and for visual work, a published design |
-| `ola-workflow:design-reviewer` | the epic, the design's URL and the paths of its page and README | a verdict on that design, with findings |
+| `ola-workflow:design-reviewer` | the epic, the paths of the design's page and README, and its URL once published | a verdict on that design, with findings |
 | `ola-workflow:architect` | the epic | design and an ordered task list |
 | `ola-workflow:developer` | one task, and one slot | an open pull request closing that task |
 | `ola-workflow:pr-reviewer` | one pull request | a verdict, and the review status on its head SHA |

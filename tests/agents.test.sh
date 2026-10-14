@@ -1007,9 +1007,16 @@ mkdir -p "$designed/.claude"
 git -C "$designed" -c init.defaultBranch=main init -q 2>/dev/null
 git -C "$designed" remote add origin https://github.com/someone/designed.git 2>/dev/null
 printf '{"mode":"integrated","context":{"design":"ui/specs"}}\n' >"$designed/.claude/workflow.json"
-case $("$BRIEF" "$designed") in
+designed_brief=$("$BRIEF" "$designed")
+case $designed_brief in
   *'ui/specs/<slug>/'*) ok "integrated: context.design names the design directory" ;;
   *) ko "integrated: context.design is ignored" ;;
+esac
+# A value the profile states is the project's, and must not be marked as mine: a note on
+# every brief would teach an agent to discount it on the one brief where it is true.
+case $designed_brief in
+  *'(not in the profile — my default)'*) ko "integrated: a design directory the profile states is marked as my default" ;;
+  *) ok "integrated: a design directory the profile states carries no default note" ;;
 esac
 
 # Integrated mode does carry the merge form, with the SHA pinned.

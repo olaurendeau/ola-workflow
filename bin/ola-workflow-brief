@@ -273,19 +273,22 @@ if [ "$mode" = integrated ]; then
   # record of the designer's decisions and of the review verdicts, and a reboot wipes TMPDIR.
   stage_id=$(ola_profile_id "$dir" 2>/dev/null) || stage_id=$(basename "$(ola_profile_toplevel "$dir" 2>/dev/null || printf '%s' "$dir")")
   cat <<DESIGN
-Documented in:   $design_dir/<slug>/$design_note — index.html, the page; README.md, its artifact URL,
-                 what it shows, its words, its decisions and its revisions.
-Written first in: ${HOME}/.claude/ola-workflow-design/$stage_id/<slug>/ — outside the
-                 repository. A developer's task copies it into $design_dir/<slug>/.
-Publishing:      allowed for visual work. One artifact per design: a design that already
-                 has a URL is republished at that URL, never published again.
+Documented in:    $design_dir/<slug>/$design_note
+                  index.html, the page; README.md, its artifact URL, what it shows, its
+                  words, its decisions and its revisions.
+Written first in: ${HOME}/.claude/ola-workflow-design/$stage_id/<slug>/
+                  outside the repository. A developer's task copies it into
+                  $design_dir/<slug>/.
+Publishing:       allowed for visual work. One artifact per design: a design that already
+                  has a URL is republished at that URL, never published again.
 DESIGN
 else
   cat <<DESIGN
-Documented in:   $(ola_profile_dir "$dir")/runs/<slug>/design/ — nothing goes into the repository.
-Publishing:      only after the human has said yes to this design, relayed by the
-                 coordinator. An artifact sends the page to claude.ai, and this project did
-                 not ask for its contents to leave the machine.
+Documented in:    $(ola_profile_dir "$dir")/runs/<slug>/design/
+                  nothing goes into the repository.
+Publishing:       only after the human has said yes to this design, relayed by the
+                  coordinator. An artifact sends the page to claude.ai, and this project
+                  did not ask for its contents to leave the machine.
 DESIGN
 fi
 echo

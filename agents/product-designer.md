@@ -61,11 +61,11 @@ human, it waits.
 7. **Write the words.** For every state above and every action, give the exact text a user
    reads: labels, buttons, the empty state, the confirmation, and each error — what happened
    and what to do next. Take the vocabulary from the glossary, and the language and tone
-   from the interface that already exists (its strings, its translation files), not from the
-   brief's languages, which are the workflow's. A word that matters becomes a criterion — "the
-   error reads …" is something a test proves. The developer takes these words verbatim, so a
-   word you leave out is one the code invents. This holds without any screen too: a CLI
-   message or an API error is read by someone.
+   from the interface that already exists (its strings, its translation files), not from
+   the brief's languages, which are the workflow's. A word that matters becomes a
+   criterion — "the error reads …" is something a test proves. The developer takes these
+   words verbatim, so a word you leave out is one the code invents. This holds without any
+   screen too: a CLI message or an API error is read by someone.
 
 8. **Show it, when it is visual.** A request that changes what a user sees gets a page, under
    the brief's *Design* section. Done when the artifact shows every state from step 6 with
@@ -73,14 +73,15 @@ human, it waits.
    - **A design that already exists** — its README in the design directory names a URL:
      read the artifact, start from that page, and publish again **with that URL**. One design,
      one artifact; a second page for the same screen splits every later review in two.
-   - **A new one:** write `index.html`, one self-contained page, and `README.md` — the artifact
-     URL, what the page shows, the states it covers, the words, the decisions, a link to the
-     epic, and one line per revision, review verdicts included.
+   - **A new one:** write `index.html`, one self-contained page, and `README.md` — the
+     artifact URL, what the page shows, the states it covers, the words, the decisions, a
+     link to the epic, and one line per revision, review verdicts included.
    - **Not yet allowed to publish** — the brief says it waits for the human, and nobody has
      relayed a yes: write the page, do not publish it, and report `needs-decision` saying what
      the page would send.
    - **A review sent back to you:** fix what it names, publish at the same URL — or, for a
-     page that was never published, only fix it — and add the revision line. A finding you disagree with, say so with a reason rather than ignoring it.
+     page that was never published, only fix it — and add the revision line. A finding you
+     disagree with, say so with a reason rather than ignoring it.
 
 ## Report
 
