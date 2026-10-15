@@ -18,6 +18,8 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$ROOT/scripts/scratch.sh"
 BRIEF=$ROOT/bin/ola-workflow-brief
 failures=0
 total=0
@@ -749,8 +751,9 @@ else
   ko "the guard suite states no decision in the form read here, so the derivation is blind"
 fi
 
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-agents.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+ola_scratch agents
+WORK=$OLA_SCRATCH
+trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 

@@ -17,6 +17,8 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$ROOT/scripts/scratch.sh"
 GUARD=$ROOT/hooks/guard.sh
 SAMPLE=${1:-$ROOT/scripts/ordinary-commands.txt}
 
@@ -25,8 +27,9 @@ for tool in jq perl git; do
 done
 [ -r "$SAMPLE" ] || { echo "measure: no sample at $SAMPLE" >&2; exit 2; }
 
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-measure.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+ola_scratch measure
+WORK=$OLA_SCRATCH
+trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 
@@ -85,6 +88,10 @@ echo
 SHIM=$WORK/shim
 mkdir -p "$SHIM"
 REAL_PATH=$PATH
+# shellcheck disable=SC2012
+#   `ls` rather than `find`, because what is wanted is the basenames and nothing else; the
+#   one thing SC2012 warns about — a name the shell would split or glob — is filtered on the
+#   very next line, before the name is used for anything.
 for name in $(ls /usr/bin /bin 2>/dev/null | sort -u); do
   case $name in *[!a-zA-Z0-9_.-]*) continue ;; esac
   real=$(PATH=$REAL_PATH command -v "$name" 2>/dev/null) || continue

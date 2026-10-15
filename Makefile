@@ -1,10 +1,12 @@
 # Same steps as the CI jobs, so `make check` is the CI.
 # Nothing has to be installed on the host: shellcheck runs in its own container.
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.11.0
-SHELL_FILES := hooks/guard.sh hooks/lib/profile.sh bin/ola-profile bin/ola-workflow-brief \
-	tests/run.sh tests/guard.test.sh tests/profile.test.sh tests/agents.test.sh \
-	tests/tokenize.test.sh \
-	scripts/spike/agent-identity.sh scripts/spike/agent-artifact.sh
+# Derived, not enumerated. The list was written out by hand under a target whose help text
+# says "every shell script", and it had stopped being that: `scripts/measure.sh` and
+# `scripts/scratch.sh` were missing — the script that could delete the repository and the one
+# written to stop it. An enumeration that drifts from the claim above it is the defect this
+# repository keeps finding, and a Makefile can ask git instead of remembering.
+SHELL_FILES := $(shell git ls-files '*.sh' 'bin/*')
 
 help: ## Shows this help
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t24
@@ -22,7 +24,7 @@ validate: ## Validates the plugin and marketplace manifests (job `manifests`)
 
 check: lint test validate ## Everything the CI runs
 
-measure:
+measure: ## Measures what the guard asks about and what it costs per Bash call
 	@scripts/measure.sh
 
 spike: ## Replays the agent-identity spike and prints the measured values
@@ -31,4 +33,4 @@ spike: ## Replays the agent-identity spike and prints the measured values
 spike-artifact: ## Prints how to replay the artifact spike in an interactive session
 	scripts/spike/agent-artifact.sh --interactive
 
-.PHONY: help lint test validate check spike spike-artifact
+.PHONY: help lint test validate check measure spike spike-artifact

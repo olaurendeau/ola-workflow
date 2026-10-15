@@ -1,6 +1,114 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
+
+**0.3.1 shipped with seven ways to merge past the guard and a script that can delete your
+repository.** Update.
+
+```
+claude plugin update ola-workflow@ola-workflow
+```
+
+### `make measure` could erase the tree it ran in, and report success
+
+```
+WORK=$(cd "$(mktemp -d "$TMPDIR/ola-x.XXXXXX")" && pwd -P)
+trap 'rm -rf "$WORK"' EXIT
+```
+
+With a `$TMPDIR` that does not exist or is not writable, the inner substitution is empty,
+`cd ""` succeeds and stays put, `pwd -P` answers the **current** directory, and the trap
+erases it. Exit status 0. It happened: an independent review had its worktree wiped
+mid-review by `make measure`, and the script said nothing.
+
+The same idiom opened all four test suites. They now share `scripts/scratch.sh`, which sets a
+variable rather than printing one — inside `WORK=$(…)` an `exit 2` would end only the
+substitution's subshell and the caller would carry on with an empty path, which is the defect
+again one layer down. **Four** independent conditions must hold before the trap is
+installed — `mktemp` succeeded, the result is a directory, it can be entered, and its name is
+the one we just asked for — and `${WORK:?}` in the trap is a fifth. The fourth is the one
+that catches an `mktemp` which succeeds and answers something else, and an earlier draft of
+this entry left it out of the count.
+
+It is the same shape as every other defect this project keeps finding — a command that fails
+and is read as a result — in its most expensive form.
+
+### Seven ways a merge got past the guard in 0.3.1
+
+All seven have one shape: something that is not the command gets read as the command word, so
+the rule that asks whether the command is `gh` is never consulted. **Fifty-seven spellings**,
+each one measured against the tokenizer 0.3.1 shipped and each one now a row of
+`tests/guard.test.sh` — the count below reconstitutes as 16 + 4 + 4 + 12 + 5 + 1 + 15.
+
+- **Sixteen with a blank between the operator and its target.** `2> /dev/null gh pr merge 7
+  --admin` was allowed, one space from the glued form, which is refused: the skip consumed
+  the operator and not the target, so `/dev/null` became the command word. What decides is
+  whether the operator **ends** the word — `2>` takes the next word, `2>&1` does not and
+  still must not.
+- **Four written with `&>` or `&>>`.** The branch asked for an optional file descriptor then
+  `<` or `>`, which neither begins with, so the operator became the command word itself.
+- **Four written with `>|`.** It is one operator and the splitter cut at the `|`, leaving a
+  bare `>` as one segment and `out gh pr merge 7 --admin` as the next, commanding `out`.
+- **Twelve with the operator glued *behind* the command word.** `gh>out pr merge 7 --admin`
+  arrived as a command named `gh>out`, which matches no rule, and merged. A word ends at an
+  unquoted operator now, as it does in the shell. This is the one that says what the others
+  were: the prefix placement was read and the glued one was not, which is an enumeration of
+  *placements* sitting behind a list of operators that had just stopped being one.
+- **Five written `coproc NAME` then a compound command** — `( … )`, `if`, `while`, `until`,
+  `case` — where the name read as the command word. The brace form was closed in 0.3.1, each
+  before anyone looked up the set. `for` and `select` complete the set the code now covers
+  and were never escapes: the `;` before `do` puts the merge in a segment of its own.
+- **One with an escaped `>` before an `&`.** `echo \>& gh pr merge 7 --admin` became a single
+  segment named `echo`, because the lookbehind that decides whether an `&` belongs to a
+  redirection read the text as written, where a `\>` ends in `>`. The same lookbehind for
+  `|` was introduced while closing `>|` above and had the same defect; it was caught in
+  review and never shipped. Both now read the text with escapes neutralised.
+- **Fifteen with a paren glued to the construct** in front of the command:
+  `coproc CO(gh pr merge 7 --admin)`, `!(…)`, `time(…)`, `if(…)`, `while(…)`, `until(…)`,
+  `elif(…)`, `then(…)`, `else(…)`, `do(…)`, `{(…)` and four `case x in x)gh …` forms. A paren
+  is a metacharacter and the word splitter did not end a word there, so the construct and its
+  command arrived glued — read as a command named `CO(gh`, or, for the `case` forms, as
+  nothing at all. Every branch that handles these constructs was already written; what was
+  missing is that the two never arrived separately. `(gh pr merge 7 --admin)` and
+  `f(){ gh pr merge 7 --admin; }` were *not* escapes, and are rows so that they stay refused.
+
+The operators are one definition in `hooks/lib/tokenize.pl`, read by the three places that
+need them, and it is bash's twelve rather than a list someone remembered. The first attempt
+at this fix wrote a list of seven inline, which left five of the twelve out for the length of
+one commit — the same defect as the one being fixed, one layer up, and review is what caught
+it.
+
+**This is not a complete account, and no account of a guard that matches text can be.** Three
+escapes of the same family are open and measured, each with its own issue: an expansion in
+`gh`'s subcommand path shifts the positions a rule reads, so `gh ${x} pr merge 7 --admin` is
+allowed while the shell really merges ([#41](https://github.com/olaurendeau/ola-workflow/issues/41),
+with why the cheap fix costs more than it buys); and a blank *between* the parens of a
+function header makes three words where the pattern joins two, so `f ( ){ gh pr merge 7
+--admin; }` is allowed while `f(){ … }` and `f (){ … }` are refused
+([#42](https://github.com/olaurendeau/ola-workflow/issues/42)); and an option that takes a
+value, written *between* `gh` and its subcommand, truncates the path a rule reads, so
+`gh pr --repo o/r merge 7 --admin` is allowed while `gh -R o/r pr merge 7 --admin` — the same
+command with the option one position earlier — is refused
+([#43](https://github.com/olaurendeau/ola-workflow/issues/43), the one to fix first: it is a
+developer merging).
+
+Five rounds of independent review on this one change found fifteen things — three, three,
+two, four and three — and they sort into four kinds: **six defects this change itself
+introduced**, three false claims (two in this entry, one in a comment the fix had just written
+to justify itself), five escapes that were already there, and one load-bearing guard that had
+no test row. Six plus three plus five plus one.
+
+An earlier draft of this paragraph said six escapes, counting that last one among them. It was
+not an escape: the line was already refused, and what was missing was an assertion about it.
+The review that caught the slip said what it was — one example generalised into a claim, which
+is the defect the paragraph above this one had just finished removing from a comment.
+
+Every one of the six defects was caught before it shipped, which is what the rounds bought —
+and also what says when to stop. On a class that cannot be exhausted, a defect the change
+introduces blocks it; an escape that was already there becomes an issue. Otherwise the loop has
+no end: by the fourth round, most of what was found was in the fix written by the third. What the guard is for is making the ordinary path visible, not proving a negative;
+`make measure` prints what it asks about and what it costs, and `ask` is what it does with
+everything it cannot read.
 
 ### The product designer shows what it means, and someone else judges it
 

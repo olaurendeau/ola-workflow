@@ -18,6 +18,8 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$ROOT/scripts/scratch.sh"
 TOKENIZE="$ROOT/hooks/lib/tokenize.pl"
 failures=0
 total=0
@@ -28,8 +30,9 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 command -v perl >/dev/null || { echo "needs perl" >&2; exit 2; }
 command -v jq >/dev/null || { echo "needs jq" >&2; exit 2; }
 
-WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/ola-tokenize.XXXXXX")" && pwd -P)
-trap 'rm -rf "$WORK"' EXIT
+ola_scratch tokenize
+WORK=$OLA_SCRATCH
+trap 'rm -rf "${WORK:?}"' EXIT
 
 # A stub that records which command actually ran, so a claim about the shell is measured.
 mkdir -p "$WORK/stubs"
@@ -298,9 +301,142 @@ echo "--- two grammar forms whose second spelling shipped unread"
 # the command word. `coproc CO { gh pr merge 7 --admin; }` and
 # `{fd}>log gh pr merge 7 --admin` were both allowed in 0.3.0.
 names 'coproc with a name'      'coproc CO { gh --version; }' gh
+names 'coproc, paren form'      'coproc CO ( gh --version )' gh
+# Any compound command, which is what bash allows after the name — two spellings were closed
+# in two releases before the set was looked up. These are its grammar's, not a memory of it.
+names 'coproc then if'          'coproc CO if gh --version; then :; fi' gh
+names 'coproc then while'       'coproc CO while gh --version; do :; done' gh
+names 'coproc then until'       'coproc CO until gh --version; do :; done' gh
+names 'coproc then case'        'coproc CO case x in a) gh --version;; esac' gh
 names 'coproc without a name'   'coproc gh --version' gh
 names 'a varname file descriptor' '{fd}>log gh --version' gh
 sees  'a numbered redirection'  '2>/dev/null gh --version' gh
+
+# And the target, when a blank separates it from the operator. `2> /dev/null gh pr merge 7
+# --admin` was allowed — one space from the glued form, which is refused — because skipping
+# one word left `/dev/null` as the command word. Thirteen spellings did it.
+#
+# What decides is whether the operator **ends** the word. `2>&1` does not and must keep being
+# skipped alone: a fix that took its next word would have traded one escape for another, so
+# that row is here too.
+sees 'a separated target'       '2> /dev/null gh --version' gh
+sees 'a bare redirection'       '> out gh --version' gh
+sees 'an appending one'         '>> out gh --version' gh
+sees 'both merged forms'        '&> out gh --version' gh
+sees 'the other merged form'    '>& out gh --version' gh
+sees 'an input redirection'     '< /dev/null gh --version' gh
+names 'a varname, separated'    '{fd}> out gh --version' gh
+sees 'a duplication, no target' '2>&1 gh --version' gh
+sees 'a duplication then one'   '2>&1 > out gh --version' gh
+sees 'an assignment first'      'FOO=1 > out gh --version' gh
+
+# The two operators that begin with `&`, which the character class 0.3.1 shipped could not
+# match: it asked for an optional file descriptor then `<` or `>`, so `&>` and `&>>` became
+# the command word themselves and `&> out gh pr merge 7 --admin` ran.
+#
+# `>|` needed the *splitter* as well: it is one operator, and cutting at the `|` left a bare
+# `>` as one segment and a second whose command word was `out`.
+sees 'the clobber operator'     '>| out gh --version' gh
+sees 'clobber, glued'           '>|out gh --version' gh
+sees 'clobber with a fd'        '2>| out gh --version' gh
+sees 'read-write'               '<> f gh --version' gh
+sees 'read-write with a fd'     '2<> f gh --version' gh
+names 'duplicating input'       '<& 3 gh --version' gh
+# `&>>` is bash 4, and the host this runs on is bash 3.2 — so the shell half cannot be
+# measured here, which is exactly what `names` is for. Its witness is `&>` two rows up, which
+# 3.2 does have and which `sees` runs.
+names 'append both streams'     '&>> out gh --version' gh
+# And a pipe is still a pipe.
+sees 'an ordinary pipeline'     'echo x | gh --version' gh
+
+# A redirection ends a word wherever it sits, so an operator may be glued **behind** the
+# command word: `gh>out --version` is the command `gh` with its output redirected, and
+# `gh>out pr merge 7 --admin` really merges. The list of operators had just stopped being a
+# list while the list of *placements* still was one — the prefix form was read and the glued
+# one was not, which is the same shape one layer down.
+sees  'glued behind, output'      'gh>out --version' gh
+sees  'glued behind, append'      'gh>>out --version' gh
+sees  'glued behind, clobber'     'gh>|out --version' gh
+sees  'glued behind, input'       'gh</dev/null --version' gh
+sees  'glued behind, read-write'  'gh<>out --version' gh
+sees  'glued behind, both streams' 'gh&>out --version' gh
+sees  'glued behind, duplicated'  'gh>&2 --version' gh
+sees  'glued behind, here-string' 'gh<<<x --version' gh
+# fd 3 is not open and `&>>` is bash 4, so the shell half of these two cannot be measured on
+# the host (3.2). Their witnesses are the rows above, which `sees` runs.
+names 'glued behind, dup input'   'gh<&3 --version' gh
+names 'glued behind, append both' 'gh&>>out --version' gh
+# A file descriptor glued in front still belongs to the operator: splitting `2>out` would
+# leave a word `2`, which the walk would then name as the command.
+sees  'a fd belongs to its operator' '2>out gh --version' gh
+names 'and so does a varname one'    '{fd}>out gh --version' gh
+
+echo "--- a paren ends a word too, and process substitution is a word"
+# Sixteen command lines were allowed in silence because the word splitter did not end a word
+# at a paren: the construct and its command arrived glued together, as a command word like
+# `CO(gh` or `x)gh` that no rule names. Each really runs the merge, which is what `sees`
+# measures here.
+names 'coproc, glued'           'coproc CO(gh --version)' gh
+sees 'a negation, glued'        '!(gh --version)' gh
+sees 'time, glued'              'time(gh --version)' gh
+sees 'if, glued'                'if(gh --version); then :; fi' gh
+sees 'while, glued'             'while(gh --version); do break; done' gh
+sees 'until, glued'             'until(gh --version); do :; done' gh
+sees 'a brace, glued'           '{(gh --version); }' gh
+sees 'a case arm, glued'        'case x in x)gh --version;; esac' gh
+sees 'a case arm with its paren' 'case x in (x)gh --version;; esac' gh
+# And the constructs where the paren belongs to the word stay whole: a substitution the
+# splitter has hollowed out, a function header, an array assignment.
+sees 'a subshell'               '(gh --version)' gh
+sees 'a function header'        'f(){ gh --version; }; f' gh
+names 'a substitution in a path' 'gh api repos/o/r/statuses/$(git rev-parse HEAD)' gh
+# `<(…)` is process substitution: bash expands it to a /dev/fd path and passes it as a
+# **word**. Read as a redirection it was dropped from the operands, and the option carrying
+# it lost its value — `--input <(echo x)` came out as a bare `--input`.
+# Both spellings of the option, because the first fix was applied to the two readers that had
+# shown the symptom and not to the word splitter: a `<` still ended a word, so the glued
+# `--input=<(echo x)` came out as `--input=` plus `<()` and the value read empty again — one
+# spelling over from the finding being fixed.
+for form in '--input <(echo x)=--input <()' '--input=<(echo x)=--input=<()'; do
+  written=${form%%=--input*}
+  want=--input${form##*=--input}
+  subst=$(printf 'gh api -X POST repos/o/r/statuses/abc %s' "$written" |
+    perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised')
+  case $subst in
+    *"$want") ok "process substitution stays an operand, with its option: $written" ;;
+    *) ko "'$written' normalised to '$subst', which does not end in '$want'" ;;
+  esac
+done
+
+# A word made only of closing parens runs nothing. An arithmetic `for` head is cut by the `;`
+# inside it, and its last piece is two words now that a word ends after a `)` that closes
+# nothing: the bare `)` was reported unreadable, which asks — and the first answer wins, so
+# the merge rule was never reached on a line that really merges.
+sees 'an arithmetic for head'    'for ((i=0;i<1;i++)); do gh --version; done' gh
+for lone in ')' '))' ')))'; do
+  verdict=$(printf '%s' "$lone" | perl "$TOKENIZE" | jq -r '"\(.command)/\(.readable)"')
+  if [ "$verdict" = "/true" ]; then
+    ok "'$lone' runs no command, and is not reported as unreadable"
+  else
+    ko "'$lone' reported $verdict, which spends an ask on punctuation"
+  fi
+done
+
+echo "--- an escaped operator is an argument, not an operator"
+# Two lookbehinds in the splitter decide whether a `|` or an `&` belongs to a redirection
+# written just before it. They read the text with escapes neutralised, because a `\>` is an
+# argument: read on the text as written, the answer was yes, so `echo \>|gh pr merge 7
+# --admin` came out as a single segment named `echo` and the merge ran. The `>|` half of that
+# was a regression introduced by the fix that taught the splitter about `>|` at all; the `&`
+# half had been there from the beginning.
+sees 'an escaped > then a pipe'   'echo \>|gh --version' gh
+sees 'an escaped > then an amp'   'echo \>& gh --version' gh
+sees 'two escaped > then a pipe'  'echo \>\>|gh --version' gh
+sees 'a fd then an escaped >'     'echo x 2\>|gh --version' gh
+# The neutralised character is a letter and not a blank, because a blank would make this look
+# like a word boundary followed by a comment — and the comment branch drops the rest of the
+# line, which would have hidden the `gh` here instead of showing it.
+sees 'an escaped blank is no boundary' 'echo a\ #b; gh --version' gh
 
 echo "--- a conditional expression runs no command"
 # `[[` opens one, and what follows is not a command word: walking past it left `-f` there,
@@ -372,6 +508,39 @@ if [ "$reference" = 'gh pr merge 7 --admin' ]; then
 else
   ko "witness: the reference is '$reference' — the rows above prove nothing"
 fi
+
+echo "--- a redirection is not an operand, wherever it sits"
+# Same reference, same property, stated for the placements a prefix branch cannot cover: the
+# shell takes a redirection out of a command's words before running it, so a rule reading
+# positions must see what the shell sees. Splitting the word at its operator was not enough
+# on its own — `gh>out pr merge 7 --admin` then became `gh` with the operands
+# `>out pr merge 7 --admin`, and the subcommand path read `>out pr merge 7`, which matches no
+# rule about `pr merge`. The target goes too when the operator ends the word, which is why
+# `< x` in the middle of a line does not eat `--admin`.
+for redir_form in \
+    'gh>out pr merge 7 --admin' \
+    'gh>|out pr merge 7 --admin' \
+    'gh&>out pr merge 7 --admin' \
+    'gh<in pr merge 7 --admin' \
+    'gh pr merge 7 --admin >out' \
+    'gh pr merge 7 --admin > out' \
+    'gh pr merge 7 >out --admin' \
+    'gh pr merge 7 > out --admin' \
+    'gh pr merge 7 < x --admin' \
+    'gh pr merge 7 --admin 2>&1' \
+    'gh pr merge 7 --admin <<<x' \
+    'coproc CO(gh pr merge 7 --admin)' \
+    '!(gh pr merge 7 --admin)' \
+    'time(gh pr merge 7 --admin)' \
+    'case x in x)gh pr merge 7 --admin' \
+    'case x in (x)gh pr merge 7 --admin'; do
+  got=$(printf '%s' "$redir_form" | perl "$TOKENIZE" | jq -r 'select(.command == "gh") | .normalised' | head -1)
+  if [ "$got" = "$reference" ]; then
+    ok "the operands survive, and the redirection is gone: $redir_form"
+  else
+    ko "'$redir_form' normalised to '$got', not '$reference'"
+  fi
+done
 
 # A `)` that closes a substitution is balanced inside its own word and stays, because what
 # marks punctuation is the imbalance, not the character. The substitution's body is already

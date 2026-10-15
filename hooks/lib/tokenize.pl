@@ -131,6 +131,16 @@ my $runs_code = qr{(?:^|[\s;&|(])(?:
 sub split_line {
   my ($s) = @_;
   my $cur = '';
+  # The same text with every escaped character replaced by a letter, which is what the
+  # lookbehinds below must read. They ask "does the segment so far end in a redirection
+  # operator", and that is a question about syntax: a `\>` is an argument, not an operator.
+  # Asked of `$cur`, which keeps the backslash *and* the `>`, the answer was yes, so
+  # `echo \>|gh pr merge 7 --admin` came out as one segment named `echo` and the merge ran —
+  # a regression introduced by the fix that taught this splitter about `>|` at all. The
+  # sibling `&` lookbehind had the same defect since the beginning (`echo \>& gh …`).
+  # A mask rather than a flag, because a lookbehind reads two characters (`>>`), and
+  # because the next lookbehind written here gets the right answer without being told.
+  my $syn = '';
   my $i = 0;
   # `|` separates commands everywhere except between a `case`'s `in` and the `)` that
   # closes a pattern, where it separates alternatives. The information belongs here, at
@@ -139,19 +149,30 @@ sub split_line {
   # — which cost an ask per multi-pattern arm. One flag, of the same nature as the ones
   # this function already keeps for quotes and parens.
   my $case_pattern = 0;
-  my $flush = sub { push @segments, $cur if $cur =~ /\S/; $cur = '' };
+  my $flush = sub { push @segments, $cur if $cur =~ /\S/; $cur = ''; $syn = '' };
 
   while ($i < length $s) {
     my $c = substr($s, $i, 1);
 
-    if ($c eq '\\') { $cur .= substr($s, $i, 2); $i += 2; next }
+    # The escaped character goes into $cur as written and into $syn as a blank: it is a
+    # literal, and no lookbehind may take it for punctuation.
+    if ($c eq '\\') {
+      my $pair = substr($s, $i, 2);
+      $cur .= $pair;
+      # A letter, not a blank: blanking it would make `echo a\ #b` look like a word boundary
+      # followed by a comment, and the comment branch drops the rest of the line — which
+      # would have hidden `echo a\ #b; gh pr merge 7 --admin` from the splitter entirely.
+      # `x` is in none of the patterns below, so it can spell nothing.
+      $syn .= 'x' x length $pair;
+      $i += 2; next;
+    }
 
     if ($c eq "'") {
       my $j = index($s, "'", $i + 1);
       $j = length($s) if $j < 0;
       my $body = substr($s, $i + 1, $j - $i - 1);
-      if ($cur =~ $runs_code) { split_line($body); $cur .= '""' }
-      else { $cur .= substr($s, $i, $j - $i + 1) }
+      if ($syn =~ $runs_code) { split_line($body); $cur .= '""'; $syn .= '""' }
+      else { $cur .= substr($s, $i, $j - $i + 1); $syn .= substr($s, $i, $j - $i + 1) }
       $i = $j + 1; next;
     }
 
@@ -175,44 +196,50 @@ sub split_line {
         $str .= $d; $i++;
       }
       $i++;
-      if ($cur =~ $runs_code) { split_line($str); $cur .= '""' } else { $cur .= '"' . $str . '"' }
+      if ($syn =~ $runs_code) { split_line($str); $cur .= '""'; $syn .= '""' }
+      else { $cur .= '"' . $str . '"'; $syn .= '"' . $str . '"' }
       next;
     }
 
     if ($c eq '$' && substr($s, $i + 1, 1) eq '(') {
       my $e = closing_paren($s, $i + 2);
       split_line(substr($s, $i + 2, $e - $i - 2));
-      $cur .= '$()'; $i = $e + 1; next;
+      $cur .= '$()'; $syn .= '$()'; $i = $e + 1; next;
     }
     if (($c eq '<' || $c eq '>') && substr($s, $i + 1, 1) eq '(') {
       my $e = closing_paren($s, $i + 2);
       split_line(substr($s, $i + 2, $e - $i - 2));
-      $cur .= $c . '()'; $i = $e + 1; next;
+      $cur .= $c . '()'; $syn .= $c . '()'; $i = $e + 1; next;
     }
     if ($c eq '`') {
       my $e = closing_backtick($s, $i + 1);
       split_line(substr($s, $i + 1, $e - $i - 1));
-      $cur .= '$()'; $i = $e + 1; next;
+      $cur .= '$()'; $syn .= '$()'; $i = $e + 1; next;
     }
 
     # A # starts a comment only at the beginning of a word.
-    if ($c eq '#' && ($cur eq '' || $cur =~ /\s\z/)) {
+    if ($c eq '#' && ($syn eq '' || $syn =~ /\s\z/)) {
       $i++ while $i < length($s) && substr($s, $i, 1) ne "\n";
       next;
     }
 
     # `>&` and `&>` are redirections, not separators.
-    if ($c eq '&' && ($cur =~ /[<>]\z/ || substr($s, $i + 1, 1) eq '>')) { $cur .= $c; $i++; next }
+    if ($c eq '&' && ($syn =~ /[<>]\z/ || substr($s, $i + 1, 1) eq '>')) { $cur .= $c; $syn .= $c; $i++; next }
 
     # Entering a case pattern: after `in`, up to the `)` that closes it.
-    if (!$case_pattern && $cur =~ /(?:^|[\s;])case\s[^)]*\sin\s*\z/) { $case_pattern = 1 }
+    if (!$case_pattern && $syn =~ /(?:^|[\s;])case\s[^)]*\sin\s*\z/) { $case_pattern = 1 }
     if ($case_pattern) {
-      if ($c eq '|') { $cur .= $c; $i++; next }          # an alternative, not a pipeline
+      if ($c eq '|') { $cur .= $c; $syn .= $c; $i++; next }   # an alternative, not a pipeline
       $case_pattern = 0 if $c eq ')';
     }
+    # `>|` is one operator, not a redirection followed by a pipe. Cutting there left the
+    # first segment as a bare `>` and the second as `out gh pr merge 7 --admin`, whose
+    # command word is `out` — so the merge rule, which asks whether the command is `gh`, was
+    # never consulted. `>| out …` and the glued `>|out …` both ran it.
+    if ($c eq '|' && $syn =~ />\z/ && $syn !~ />>\z/) { $cur .= $c; $syn .= $c; $i++; next }
     if ($c =~ /[;&|\n]/) { $flush->(); $i++; next }
 
-    $cur .= $c; $i++;
+    $cur .= $c; $syn .= $c; $i++;
   }
   $flush->();
 }
@@ -332,11 +359,39 @@ sub unquote {
   return $out;
 }
 
+# ------------------------------------------------------- bash's redirection operators
+# One definition, read by the three places that need it: the word splitter below, the
+# prefix branch of the walk, and the operand filter. It was written out in one of them
+# only, and the other two then disagreed with it — which is how an operator glued to the
+# command word stayed invisible while the prefix form was refused.
+# Longest first, so the alternation cannot match a prefix of a longer operator (`>` where
+# `>>` was written, `&>` where `&>>` was). Twelve, which is bash's list and not a memory of
+# it: the first attempt at a list held seven.
+my $redir_op = qr/&>>|<<<|<<-|<<|>>|>\||<>|<&|>&|&>|>|</;
+# What bash lets precede an operator *inside the same word*: a file descriptor number, or
+# a `{name}` to be assigned one. Anything else before an operator is a word of its own —
+# that is the whole content of the rule below.
+my $redir_fd = qr/[0-9]*|\{[A-Za-z_][A-Za-z0-9_]*\}/;
+# And what is **not** one, though it starts the same way: `<(…)` and `>(…)` are process
+# substitution. Bash expands them to a `/dev/fd/63` path and hands that over as a *word* —
+# measured — so a reader that takes them for a redirection drops an argument the command
+# really receives. The splitter has already hollowed the body out, so what arrives below is
+# `<()`; dropping it took the value away from the option carrying it, and
+# `gh api -X POST …/statuses/abc --input <(echo x)` lost its `--input` value. The rule that
+# asks about a payload this text does not contain then never fired, and a developer could
+# write the commit status the merge gate reads.
+my $proc_subst = qr/^(?:$redir_fd)[<>]\(/;
+
 sub words {
   my ($s) = @_;
   my @w;
   my $cur = '';
+  # How many `(` the current word has left open, so that a `)` closing one of them belongs
+  # to the word — `$()` and `f()` are each a single word — while a `)` closing nothing ends
+  # it, which is what bash does with an unquoted metacharacter.
+  my $par = 0;
   my $i = 0;
+  my $flush = sub { push @w, $cur if length $cur; $cur = ''; $par = 0 };
   while ($i < length $s) {
     my $c = substr($s, $i, 1);
     if ($c eq '\\') { $cur .= substr($s, $i, 2); $i += 2; next }
@@ -347,11 +402,110 @@ sub words {
       $cur .= substr($s, $i, $j - $i + 1);
       $i = $j + 1; next;
     }
-    if ($c =~ /\s/) { push @w, $cur if length $cur; $cur = ''; $i++; next }
+    if ($c =~ /\s/) { $flush->(); $i++; next }
+    # A blank is not the only thing that ends a word: bash ends one at an unquoted
+    # redirection operator too. `gh>out pr merge 7 --admin` is the command `gh` with its
+    # output redirected, and it really merges — but the whole text `gh>out` arrived here as
+    # one word, so the rule that asks whether the command is `gh` was never consulted. The
+    # prefix placement (`>out gh pr merge`) was handled and the glued one was not, which is
+    # an enumeration of *placements* behind a list of operators that had just stopped being
+    # one. Every operator, in both placements, from here on.
+    # Not when what precedes the operator is empty, a file descriptor number or a `{name}`:
+    # those belong to the operator (`2>out`, `{fd}>out`) and splitting them would leave a
+    # word `2`, which the walk would then name as the command.
+    # The whole operator at once, never one character at a time: tested per character,
+    # `gh&>out` cut twice — before the `&` and again before the `>` — and left a word `&`
+    # of its own in the operand list, where it took the position `pr` should have had.
+    # Process substitution is not a redirection, and this reader has to know that as much as
+    # the two below do: `$proc_subst` was added to them and not here, so a `<` still ended a
+    # word — `--input=<(echo x)` came out as `--input=` plus `<()`, the option's value read
+    # empty, and the rule that asks about a payload this text does not contain went quiet
+    # again. One spelling over from the finding it was fixing, because the fix was applied to
+    # the readers that had shown the symptom instead of to every reader of the construct.
+    if ($c =~ /[<>]/ && substr($s, $i + 1, 1) eq '(') { $cur .= $c; $i++; next }
+    if ($c =~ /[<>&]/ && substr($s, $i) =~ /^($redir_op)/) {
+      my $op = $1;
+      $flush->() if length $cur && $cur !~ /^(?:$redir_fd)\z/;
+      $cur .= $op; $i += length $op; next;
+    }
+    # A paren is a metacharacter too, and the word splitter did not know it. Sixteen command
+    # lines were allowed in silence because of that: `coproc CO(gh pr merge 7 --admin)`,
+    # `!(…)`, `time(…)`, `if(…)`, `while(…)`, `until(…)`, `do(…)`, `{(…)` and four
+    # `case x in x)gh …` forms. Each really runs the merge — measured — and each arrived as a
+    # command word like `CO(gh` or `x)gh`, which no rule names. The branches above were
+    # already written for the constructs they belong to; what was missing is that the shell
+    # ends a word there, so the construct and its command never arrived separately.
+    #
+    # Two exceptions, each a real construct where the paren belongs to the word: `=(` is an
+    # array assignment, and a `(` immediately followed by `)` is a function header — which
+    # also covers `$()`, `<()` and `>()`, because the splitter has already hollowed their
+    # bodies out before this reader sees them.
+    #
+    # A third exception, for `$(`, was written here and removed. It is reachable by exactly
+    # one spelling: an **escaped** `\$(` outside quotes, which is the only way a `(` arrives
+    # here with a `$` before it and no `)` after it — every `$( … )` the splitter parsed is
+    # already `$()`, and a quoted one never reaches this branch at all. And bash refuses that
+    # line outright, with a syntax error, so no decision about it is worth anything.
+    # The first version of this comment said removing it "moves no word and no decision,
+    # measured". The decisions hold; the words do not, and the measurement behind that
+    # sentence was one example generalised to a claim — which is the defect this file keeps
+    # finding in its own prose, two screens after fixing it in its code.
+    if ($c eq '(') {
+      $flush->() if length $cur && $cur !~ /=\z/ && substr($s, $i + 1, 1) ne ')';
+      $cur .= $c; $par++; $i++; next;
+    }
+    # The `)` stays with the word it closes and the word ends **after** it, rather than the
+    # `)` becoming a word of its own. Every branch downstream recognises a label or a
+    # subshell by a word *ending* in `)`, and handing them a lone `)` would have broken all
+    # of them at once — `a) gh pr merge 7 --admin`, the second arm of a case, named `a`.
+    if ($c eq ')') {
+      $cur .= $c; $i++;
+      if ($par > 0) {
+        $par--;
+        # A `)` that closes a paren opened at the **start** of this word closes a case
+        # pattern written with its optional leading paren — `case x in (x)gh pr merge 7
+        # --admin`, which bash accepts and which ran the merge while being read as nothing at
+        # all. The same `)` inside `$()`, `f()` or `<()` closes a paren that is not at the
+        # start of its word, and those stay whole.
+        $flush->() if $cur =~ /^\(/;
+      } else {
+        $flush->();
+      }
+      next;
+    }
     $cur .= $c; $i++;
   }
-  push @w, $cur if length $cur;
+  $flush->();
   return @w;
+}
+
+# operands <the words after the command word>
+# A redirection is not an argument, wherever it sits. The shell takes it out of the
+# command's words before running it — `gh pr merge 7 < x --admin` really runs
+# `gh pr merge 7 --admin` — so a rule that reads positions has to see what the shell sees.
+# Without this, splitting a word at its operator (above) traded one defect for another:
+# `gh>out pr merge 7 --admin` became `gh` plus the operands `>out pr merge 7 --admin`, and
+# the subcommand path read `>out pr merge 7`, which matches no rule about `pr merge`.
+# The target too, when the operator ends the word and the filename is the next one; `2>&1`
+# ends in its own target and takes nothing after it, which is why the test is whether the
+# operator ends the word and not how many words a redirection has.
+#
+# Stated limit: a redirection is therefore absent from `words`, so no rule can be written
+# about where output goes. Nothing needs one today. The day one does, it needs a field of
+# its own, not a reading of `raw` — `raw` is the text, and matching the text is what this
+# whole file exists to replace.
+sub operands {
+  my (@w) = @_;
+  my @out;
+  while (@w) {
+    my $w = shift @w;
+    if ($w !~ $proc_subst && $w =~ /^(?:$redir_fd)(?:$redir_op)(.*)$/) {
+      shift @w if $1 eq '' && @w;    # the target, when it is its own word
+      next;
+    }
+    push @out, $w;
+  }
+  return @out;
 }
 
 # The segment with every word unquoted and the command word in place of whatever spelled
@@ -396,11 +550,15 @@ sub segment_words {
   # count of parens the walk happened to open — that count belongs to the whole command line
   # and `(cd x && gh pr merge --admin)` puts the opening paren in a different segment from
   # the closing one.
-  if (@w && $w[-1] !~ /["'\\]/) {
+  # A loop over the words and not over one word: `((gh pr merge 7 --admin))` now ends in two
+  # of them, `--admin)` and `)`, because the word splitter ends a word after a `)` that
+  # closes nothing. Stripping only the last left the `--admin)` behind, with its paren, for
+  # every rule anchored on a word boundary to walk past.
+  while (@w && $w[-1] !~ /["'\\]/) {
     my $last = $w[-1];
-    while ($last =~ /\)$/ && ($last =~ tr/)//) > ($last =~ tr/(//)) { chop $last }
-    $w[-1] = $last;
-    pop @w unless length $last;
+    last unless $last =~ /\)$/ && ($last =~ tr/)//) > ($last =~ tr/(//);
+    chop $last;
+    if (length $last) { $w[-1] = $last } else { pop @w }
   }
 
   my @out = (length $cmd ? ($cmd) : ());
@@ -458,9 +616,16 @@ sub command_word {
       # the command word: `coproc CO { gh pr merge 7 --admin; }` was allowed, named `CO`.
       # `coproc` without a name was already right, which is why only one of the two forms
       # was ever tested. The name is punctuation here, like a function header is.
+      # Any **compound command**, which is what bash actually allows after the name — not
+      # just a brace, and not just a brace or a paren. Its grammar lists `( )`, `{ }`,
+      # `(( ))`, `[[ ]]`, `if`, `case`, `while`, `until`, `for` and `select`, and
+      # `coproc CO if …`, `while`, `until`, `case` all ran the inner command while being read
+      # as `CO`. Two spellings were closed in two releases before the set was looked up.
       if ($w eq 'coproc' && @w > 1
           && $w[1] =~ /^[A-Za-z_][A-Za-z0-9_]*$/
-          && @w > 2 && $w[2] =~ /^\{/) {
+          && @w > 2
+          && ($w[2] =~ /^[({]/ || $w[2] =~ /^\[\[$/
+              || $w[2] =~ /^(?:if|case|while|until|for|select)$/)) {
         push @walked, shift @w;      # coproc
         push @walked, shift @w;      # the name
         next;
@@ -495,12 +660,32 @@ sub command_word {
     if ($after_function) { push @walked, $w; shift @w; $after_function = 0; next }
     # An assignment in front of a command: FOO=1 gh …
     if ($w =~ /^[A-Za-z_][A-Za-z0-9_]*=/) { push @walked, $w; shift @w; next }
-    # A redirection in front of a command: 2>/dev/null gh …
-    # `{fd}>log` too, which bash allows and which read as the command word: the segment was
-    # named `{fd}>log`, readable, and `{fd}>log gh pr merge 7 --admin` was allowed. Both
-    # spellings of the same grammar, and the first one shipped without the second.
-    if ($w =~ /^[0-9]*[<>]/ || $w =~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
-      push @walked, $w; shift @w; next;
+    # A redirection in front of a command: `2>/dev/null gh …`.
+    #
+    # And its target, when a blank separates the two. `2> /dev/null gh pr merge 7 --admin`
+    # was **allowed** — one space from the glued form, which is refused — because skipping
+    # one word left `/dev/null` as the command word, so the merge rule, which asks whether
+    # the command is `gh`, was never consulted. Thirteen spellings did it: `> out`, `1> out`,
+    # `2> /dev/null`, `>> out`, `&> out`, `>& out`, `< /dev/null`, `0< /dev/null`,
+    # `{fd}> out`, `{fd}>> out`, `2>&1 > out`, `FOO=1 > out`, `<<< x`. All measured, all
+    # really run the inner command.
+    #
+    # What decides is whether the operator **ends** the word: `2>` takes the next word,
+    # `2>&1` does not and must keep being skipped alone — it was already right, and a fix
+    # that broke it would trade one escape for another.
+    # The operators come from `$redir_op`, defined once above and read by the three places
+    # that need them. What 0.3.1 shipped here was a character class — an optional file
+    # descriptor then `<` or `>` — and it missed `&>` and `&>>` entirely, because they begin
+    # with neither: the operator itself became the command word, and `&> out gh pr merge 7
+    # --admin` ran. The first fix replaced the class with a list of seven, which is how five
+    # of bash's twelve came to be absent for the length of one commit; review caught that
+    # before it shipped. A list written inline is the shape this file keeps paying for, so
+    # there is one definition and its three readers share it.
+    if ($w !~ $proc_subst && $w =~ /^(?:$redir_fd)(?:$redir_op)(.*)$/) {
+      my $rest = $1;
+      push @walked, $w; shift @w;
+      push @walked, shift @w if $rest eq '' && @w;   # the target, when it is its own word
+      next;
     }
 
     # A subshell's opening paren sticks to the word: `(gh pr merge)` would otherwise name
@@ -520,7 +705,7 @@ sub command_word {
     if ($indirect{$name}) {
       return ($name, join(' ', @walked, $w),
               "the command it runs is not in this text ($name)",
-              [@w[1 .. $#w]]);
+              [operands(@w[1 .. $#w])]);
     }
     if ($wrapper{$name}) {
       # A help or version request performs nothing, whatever it asks about, so the segment
@@ -590,10 +775,19 @@ sub command_word {
         if ($boolean && $w[0] =~ $boolean) { push @walked, shift @w; next }
         return ($name, join(' ', @walked, @w),
                 "$name is given the option $w[0], and whether it takes a value is unknown here",
-                [@w[1 .. $#w]]);
+                [operands(@w[1 .. $#w])]);
       }
       next;
     }
+
+    # A word made only of closing parens runs nothing — it is punctuation the split left
+    # behind. `for ((i=0;i<1;i++)); do gh pr merge 7 --admin; done` cuts on the `;` inside the
+    # arithmetic head, and the third piece, `i++))`, is two words now that a word ends after a
+    # `)` that closes nothing: `i++)` is skipped as a label and the bare `)` was then reported
+    # unreadable, which asks — and `decide` stops at the first ask, so the merge rule below
+    # was never reached on a line that really merges. It also asked about
+    # `for ((i=0;i<3;i++)); do echo $i; done`, which is ordinary work.
+    if ($bare =~ /^\)+$/) { push @walked, $w; shift @w; next }
 
     # A `pattern)` label at the head of a segment is the second and later arms of a case:
     # `;;` ends an arm, the split cuts there, and the next segment opens with the label.
@@ -609,7 +803,7 @@ sub command_word {
     if ($bare =~ /\)$/ && $bare !~ /[\$`]/) {
       return ($name, join(' ', @walked, $w),
               'this looks like a case arm or a subshell, and the split cut inside it',
-              [@w[1 .. $#w]]);
+              [operands(@w[1 .. $#w])]);
     }
 
     # A command word cannot hold a blank. The shell would look for a file literally named
@@ -622,7 +816,7 @@ sub command_word {
     if ($bare =~ /\s/) {
       return ($name, join(' ', @walked, $w),
               'this holds a whole command line where a command word goes, so what runs is a program this text quotes rather than a command',
-              [@w[1 .. $#w]]);
+              [operands(@w[1 .. $#w])]);
     }
     # And it cannot begin with a dash. The shell would look for a file named `-p`, so a word
     # like that is always an option some prefix should have consumed and did not — the net
@@ -632,7 +826,7 @@ sub command_word {
     if ($bare =~ /^-/) {
       return ($name, join(' ', @walked, $w),
               'an option sits where the command word should be, so some prefix was not read correctly and what runs cannot be named',
-              [@w[1 .. $#w]]);
+              [operands(@w[1 .. $#w])]);
     }
 
     # Everything the shell would still expand before this becomes a command word.
@@ -645,10 +839,10 @@ sub command_word {
     # the construct (does this word glob?), not the character.
     $why = 'a pathname pattern'                  if !$why && $bare =~ /[*?]|\[[^]]*\]/;
     return ($name, join(' ', @walked, $w), "the command word is built by $why",
-            [@w[1 .. $#w]])
+            [operands(@w[1 .. $#w])])
       if $why;
 
-    return ($name, join(' ', @walked, $w), undef, [@w[1 .. $#w]]);
+    return ($name, join(' ', @walked, $w), undef, [operands(@w[1 .. $#w])]);
   }
   # Nothing left after the prefixes: this segment runs no command at all — a bare
   # assignment, a closing brace, a `done`. That is not something unreadable, it is nothing

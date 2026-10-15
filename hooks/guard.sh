@@ -582,13 +582,19 @@ while IFS= read -r segment; do
     fi
     while IFS= read -r field; do
       [ -n "$field" ] || continue
+      # Two questions, so two `case` statements. They were arms of one, and a `case` stops
+      # at its first match: `-f state=@file` matched `state=*`, so the field was counted as a
+      # write and never as a value that is not in this text. One `case` can only answer one
+      # question, and these two are independent of each other.
       case $field in
         state=*) writes_status=yes ;;
-        # `-F key=@file` reads the value from a file, and `@-` from stdin: the value is not
-        # in this text at all. So is the whole body under `--input`. The rule was detecting
-        # the write and then guessing the rest, against this file's own doctrine that an
-        # unknown is asked and never guessed — measured, `--input body.json` really sends
-        # the status and was allowed to every role.
+      esac
+      # `-F key=@file` reads the value from a file, and `@-` from stdin: the value is not in
+      # this text at all. So is the whole body under `--input`. The rule was detecting the
+      # write and then guessing the rest, against this file's own doctrine that an unknown is
+      # asked and never guessed — measured, `--input body.json` really sends the status and
+      # was allowed to every role.
+      case $field in
         *=@*) from_elsewhere=yes ;;
       esac
       [ "$field" = "context=$review_status" ] && names_it=yes
@@ -597,13 +603,19 @@ $(opt_values -f -F --field --raw-field)
 EOF
     opt_value --input >/dev/null 2>&1 && from_elsewhere=yes
   fi
-  if [ "$writes_status" = yes ] && [ "$from_elsewhere" = yes ] && [ "$role" != pr-reviewer ]; then
-    decide ask "ola-workflow: this writes a commit status and takes its content from a file or from stdin, so whether it sets the $review_status status cannot be read here. Confirm only if you know it does not."
-  fi
+  # The refusal is tested **before** the question, because `decide` stops at the first answer
+  # and the two can both be true: `-f state=@body -f context=$review_status` names the status
+  # in its own text *and* takes a field from a file. Asked first, it turned a refusal into a
+  # question whose reason was false — "whether it sets the $review_status status cannot be
+  # read here", about a line that spells it out. When the text names it, nothing else needs
+  # reading.
   if [ "$writes_status" = yes ] && [ "$names_it" = yes ] && [ -n "$review_status" ]; then
     if [ "$role" != pr-reviewer ]; then
       decide deny "ola-workflow: only the pr-reviewer sets the $review_status status, because it is what the merge gate reads. Ask the coordinator to dispatch a review."
     fi
+  fi
+  if [ "$writes_status" = yes ] && [ "$from_elsewhere" = yes ] && [ "$role" != pr-reviewer ]; then
+    decide ask "ola-workflow: this writes a commit status and takes its content from a file or from stdin, so whether it sets the $review_status status cannot be read here. Confirm only if you know it does not."
   fi
 done <<<"$segments"
 
