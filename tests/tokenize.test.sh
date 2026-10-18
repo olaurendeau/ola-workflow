@@ -62,6 +62,34 @@ sees() {
   fi
 }
 
+# runs_nothing <label> <command line>
+# The mirror of `sees`, for a construct that runs no command at all. Three verdicts, because
+# the interesting failures are different: the shell must run none of the stubs, the tokenizer
+# must name none of them, and the line must not come out unreadable — the third is not a
+# nicety, it is an ask on every call, and it is what `inzip=$((inzip+1))` cost before this
+# section existed.
+runs_nothing() {
+  local label=$1 line=$2 got unreadable
+  got=$(commands_of "$line")
+  unreadable=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r 'select(.readable == false) | .raw' | tr '\n' ' ')
+  TOKENIZE_LOG=$WORK/log; : >"$TOKENIZE_LOG"
+  ( cd "$WORK" && TOKENIZE_LOG=$WORK/log PATH="$WORK/stubs:$PATH" bash -c "$line" >/dev/null 2>&1 )
+  if [ -s "$WORK/log" ]; then
+    ko "$label: the shell ran '$(tr '\n' ' ' <"$WORK/log")', so this row is wrong — in: $line"
+  else
+    ok "$label: the shell runs nothing"
+  fi
+  case " $got " in
+    *" gh "*|*" git "*|*" npm "*) ko "$label: the tokenizer named '$got' on a line that runs nothing" ;;
+    *) ok "$label: and the tokenizer names no command" ;;
+  esac
+  if [ -n "$unreadable" ]; then
+    ko "$label: reported unreadable ($unreadable), which spends an ask per call"
+  else
+    ok "$label: and asks nothing"
+  fi
+}
+
 # names <label> <command line> <expected command word>
 # The tokenizer half only, for a line whose execution cannot be measured here. Every use
 # must be backed by a measured row of the same grammatical class, asserted where it is used.
@@ -422,6 +450,42 @@ for lone in ')' '))' ')))'; do
   fi
 done
 
+echo "--- arithmetic runs no command, and the shell decides which parens are arithmetic"
+# `$(( … ))` and `(( … ))` are expressions, and an expression runs nothing: `((gh pr merge 7
+# --admin))` is a syntax error, not a merge. So the splitter hollows them out — and a
+# hollowed construct is a place a command could hide, which is why every row below is
+# measured on both halves rather than argued.
+#
+# Which `((` is arithmetic is decided textually, not by trying to parse: scanning after the
+# `((` with a paren depth, the first `)` at depth 0 must be followed by another `)`.
+# Otherwise the construct is a command substitution or a subshell holding a `(`, and the
+# body runs. The obvious rule — "the two closing parens are glued" — is wrong, and
+# `((gh …) && (:))` is the counter-example: it ends in `))` and all three shells run the
+# merge. Measured on bash 3.2.57, bash 5.3.20 and zsh 5.9, which agree on every row here.
+runs_nothing 'an arithmetic command'                '((i=1))'
+runs_nothing 'an increment, the form that asked'    'inzip=$((inzip+1))'
+runs_nothing 'an increment in double quotes'        'echo "$((i+1))"'
+runs_nothing 'nested parens in an expression'       'x=$(( (1)+(2) ))'
+runs_nothing 'a semicolon inside an expression'     'x=$((echo x; :))'
+runs_nothing 'a merge spelled as an arithmetic command'   '((gh pr merge 7 --admin))'
+runs_nothing 'a merge spelled as an arithmetic expansion' 'x=$((gh pr merge 7 --admin))'
+
+# The same text one character apart, where the body does run. Each of these is the reason
+# the hollowing is conditional.
+sees 'a subshell wearing two parens'       '((gh pr merge 7 --admin) )' gh
+sees 'the same, with a semicolon'          '((gh pr merge 7 --admin); :)' gh
+sees 'the same, ending in two parens'      '((gh pr merge 7 --admin) && (:))' gh
+sees 'an expansion that is a subshell'     'x=$((gh pr merge 7 --admin) )' gh
+sees 'a substitution in an expression'     'x=$(( $(gh pr merge 7 --admin) + 1 ))' gh
+sees 'a backquoted one'                    'x=$(( `gh pr merge 7 --admin` + 1 ))' gh
+sees 'nested arithmetic around one'        'x=$(( $(( $(gh pr merge 7 --admin) )) + 1 ))' gh
+sees 'an arithmetic command around one'    '(( $(gh pr merge 7 --admin) ))' gh
+# The construct leaves no text behind, so the splitter keeps a letter where it stood: without
+# it, the `#` below starts a word, the comment branch drops the rest of the line, and the
+# merge on the next line is never seen.
+sees 'a comment after an arithmetic command' '((i=1)) #x
+gh pr merge 7 --admin' gh
+
 echo "--- an escaped operator is an argument, not an operator"
 # Two lookbehinds in the splitter decide whether a `|` or an `&` belongs to a redirection
 # written just before it. They read the text with escapes neutralised, because a `\>` is an
@@ -478,7 +542,8 @@ reference=$(printf '%s' 'gh pr merge 7 --admin' | perl "$TOKENIZE" | jq -r '.nor
 for prefix_form in \
     'gh pr merge 7 --admin' \
     '(gh pr merge 7 --admin)' \
-    '((gh pr merge 7 --admin))' \
+    '( (gh pr merge 7 --admin) )' \
+    '((gh pr merge 7 --admin) )' \
     'exec gh pr merge 7 --admin' \
     '(exec gh pr merge 7 --admin)' \
     'command gh pr merge 7 --admin' \

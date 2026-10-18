@@ -113,6 +113,69 @@ sub closing_backtick {
   return length($s);
 }
 
+# `$((` opens an arithmetic expansion, and arithmetic runs no command: `$((echo RAN; :))` is
+# a syntax error, not an execution. But only for some spellings, and the shell decides
+# textually rather than by trying to parse: scanning the text after `$((` with a paren
+# depth, the first `)` found at depth 0 decides. Followed by another `)` it terminates an
+# arithmetic expansion. Followed by anything else, the construct is a command substitution
+# holding a subshell, and `$((echo RAN) )` and `$((echo RAN) && (:))` both run `echo` —
+# measured on bash 3.2.57, bash 5.3.20 and zsh 5.9, all three agreeing on all eleven
+# spellings in tests/tokenize.test.sh. The second of those is why the obvious rule — "the
+# two closing parens are glued" — is wrong: it ends in `))` and it runs a command.
+# Returns the index of the last character of the terminating `))`, or -1 when this is not
+# arithmetic and the caller must read the body as a command line, as it always has.
+# A quote or a backslash in the expression also gives -1: there bash reads a quoted `)` as
+# text while zsh ends the substitution on it, so the two shells run different things and
+# this file cannot be right for both. The conservative answer costs an ask on
+# `$(( "a)b" ))`, which bash refuses outright.
+sub arith_end {
+  my ($s, $i) = @_;                   # $i is the index of the FIRST `(` of the pair
+  return -1 unless substr($s, $i, 2) eq '((';
+  my ($depth, $j) = (0, $i + 2);
+  while ($j < length $s) {
+    my $c = substr($s, $j, 1);
+    return -1 if $c eq '\\' || $c eq "'" || $c eq '"';
+    # A substitution's own parens are its business, and a `)` inside it closes nothing here.
+    if ($c eq '$' && substr($s, $j + 1, 1) eq '(') { $j = closing_paren($s, $j + 2) + 1; next }
+    if ($c eq '`') { $j = closing_backtick($s, $j + 1) + 1; next }
+    if ($c eq '(') { $depth++; $j++; next }
+    if ($c eq ')') {
+      if ($depth > 0) { $depth--; $j++; next }
+      return substr($s, $j + 1, 1) eq ')' ? $j + 1 : -1;
+    }
+    $j++;
+  }
+  return -1;                          # never terminated
+}
+
+# The expression runs nothing, but a substitution inside it does: `$(( $(id -u) + 1 ))` runs
+# `id`, measured. So the caller hollows the construct out to `$()` and this walk hands every
+# substitution the expression holds to the splitter — otherwise hollowing it would be a way
+# to run a command this file never reports. Quotes cannot appear at this level, arith_end
+# having refused them, so there is nothing here to skip over.
+sub scan_arith {
+  my ($s, $j, $end) = @_;
+  while ($j <= $end) {
+    my $c = substr($s, $j, 1);
+    if ($c eq '\\') { $j += 2; next }
+    if ($c eq '`') {
+      my $e = closing_backtick($s, $j + 1);
+      split_line(substr($s, $j + 1, $e - $j - 1));
+      $j = $e + 1; next;
+    }
+    if ($c eq '$' && substr($s, $j + 1, 2) eq '((') {
+      my $a = arith_end($s, $j + 1);
+      if ($a >= 0) { scan_arith($s, $j + 3, $a - 1); $j = $a + 1; next }
+    }
+    if (($c eq '$' || $c eq '<' || $c eq '>') && substr($s, $j + 1, 1) eq '(') {
+      my $e = closing_paren($s, $j + 2);
+      split_line(substr($s, $j + 2, $e - $j - 2));
+      $j = $e + 1; next;
+    }
+    $j++;
+  }
+}
+
 # A quoted string is code when it is the argument of something that runs code.
 # `(?:\s+--)?` after the option: `--` ends options, so `bash -c -- "gh pr merge 7"` runs
 # exactly what `bash -c "gh pr merge 7"` runs. Without it the string stayed a string, the
@@ -184,6 +247,11 @@ sub split_line {
         last if $d eq '"';
         if ($d eq '\\') { $str .= substr($s, $i, 2); $i += 2; next }
         if ($d eq '$' && substr($s, $i + 1, 1) eq '(') {
+          my $a = arith_end($s, $i + 1);
+          if ($a >= 0) {
+            scan_arith($s, $i + 3, $a - 1);
+            $str .= '$()'; $i = $a + 1; next;
+          }
           my $e = closing_paren($s, $i + 2);
           split_line(substr($s, $i + 2, $e - $i - 2));
           $str .= '$()'; $i = $e + 1; next;
@@ -202,6 +270,11 @@ sub split_line {
     }
 
     if ($c eq '$' && substr($s, $i + 1, 1) eq '(') {
+      my $a = arith_end($s, $i + 1);
+      if ($a >= 0) {
+        scan_arith($s, $i + 3, $a - 1);
+        $cur .= '$()'; $syn .= '$()'; $i = $a + 1; next;
+      }
       my $e = closing_paren($s, $i + 2);
       split_line(substr($s, $i + 2, $e - $i - 2));
       $cur .= '$()'; $syn .= '$()'; $i = $e + 1; next;
@@ -215,6 +288,22 @@ sub split_line {
       my $e = closing_backtick($s, $i + 1);
       split_line(substr($s, $i + 1, $e - $i - 1));
       $cur .= '$()'; $syn .= '$()'; $i = $e + 1; next;
+    }
+
+    # `(( … ))` where a command is expected is the arithmetic command, and it obeys the same
+    # textual rule as `$(( … ))`, measured the same way: `((i=1))` and `((gh pr merge 7
+    # --admin))` are both arithmetic — the second is a syntax error on bash 3.2, bash 5.3 and
+    # zsh 5.9, not a merge — while `((gh …) )`, `((gh …); :)` and `((gh …) && (:))` are nested
+    # subshells that all three shells run. Only the expression disappears: nothing is left in
+    # `$cur`, so the construct contributes no command word, and `((i++))` no longer costs an
+    # ask per call. `$syn` keeps a letter, because a word WAS here: emptied, it would make
+    # `((i=1)) #x; gh …` look like a comment at the start of a line and drop the merge.
+    if ($c eq '(' && substr($s, $i, 2) eq '((' && ($syn eq '' || $syn =~ /[\s;&|(\n]\z/)) {
+      my $a = arith_end($s, $i);
+      if ($a >= 0) {
+        scan_arith($s, $i + 2, $a - 1);
+        $syn .= 'x'; $i = $a + 1; next;
+      }
     }
 
     # A # starts a comment only at the beginning of a word.

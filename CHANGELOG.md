@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.3.3
+
+**0.3.2 demandait confirmation à chaque incrément.** `((i++))` et `inzip=$((inzip+1))` sont
+de l'arithmétique, et 0.3.2 les lisait comme des sous-shells mal découpés.
+
+```
+claude plugin update ola-workflow@ola-workflow
+```
+
+### Une expression n'est pas une commande, et le découpeur tombait dedans
+
+Signalé depuis une session réelle, deux fois ([#48](https://github.com/olaurendeau/ola-workflow/issues/48)) :
+
+```
+ola-workflow: this command cannot be read … the split cut inside it (at: ( inzip+1)).
+```
+
+Le corps de `$((inzip+1))` est `(inzip+1)`, qui n'est pas une ligne de commande. Le découpage
+tombait dedans et le segment sortait illisible — une confirmation par appel, sur n'importe
+quel projet, pour un incrément de boucle. Même défaut sur `((i++))` et sur `"$((i+1))"`.
+
+Les deux formes sont maintenant creusées : l'expression disparaît, et le garde-fou se taît.
+
+### Ce que creuser aurait pu cacher
+
+Creuser une expansion est une place où une commande peut se cacher, donc chacune des seize
+nouvelles lignes de `tests/tokenize.test.sh` est **mesurée des deux côtés** : ce que le
+tokenizer annonce, et ce que le shell exécute vraiment avec un faux `gh` sur le PATH.
+
+La suite passe de 305 à 345 assertions. Sept lignes en portent trois chacune — le shell
+n'exécute rien, le tokenizer ne nomme rien, et la ligne n'est pas illisible, la troisième
+étant celle qui coûtait une confirmation par appel. Neuf en portent deux. Une s'ajoute dans
+la boucle des préfixes.
+
+**Une substitution imbriquée dans une expression s'exécute.** `$(( $(gh pr merge 7 --admin) +
+1 ))` lance `gh`, et quatre orthographes de cette forme — `$( )`, backquotes, arithmétique
+imbriquée, commande arithmétique — sont des lignes de test. Couper la récursion fait tomber
+les quatre.
+
+**Et `$((` n'est pas toujours de l'arithmétique.** `$((echo RAN) )` exécute `echo` sur
+bash 3.2.57, bash 5.3.20 et zsh 5.9. La règle qui vient à l'esprit — « les deux parenthèses
+fermantes sont collées » — est **fausse**, et je l'ai écrite avant de la mesurer :
+`$((echo RAN) && (:))` finit par `))` et exécute quand même. Une seule ligne de test la
+réfute, et c'est elle qui tombe quand on remet la mauvaise règle.
+
+La règle que les trois shells appliquent est textuelle : en balayant après `$((` avec une
+profondeur de parenthèses, le premier `)` à profondeur 0 décide. Suivi d'un `)`, c'est une
+expansion arithmétique, et l'expression ne s'exécute jamais — `((gh pr merge 7 --admin))` est
+une erreur de syntaxe sur les trois shells, pas un merge. Suivi d'autre chose, c'est un
+sous-shell, et le corps tourne.
+
+Un guillemet dans l'expression reste illisible, donc demandé : bash y lit un `)` entre
+guillemets comme du texte, zsh y termine la substitution, et les deux exécutent alors des
+choses différentes. Ce fichier ne peut pas avoir raison pour les deux.
+
+### Une affirmation fausse retirée de la suite
+
+Une ligne de `tests/tokenize.test.sh` affirmait depuis 0.3.1 que
+`((gh pr merge 7 --admin))` doit se lire comme un merge, au titre des préfixes qui changent
+la façon d'atteindre une commande sans changer ses opérandes. Aucun shell ne l'exécute. Elle
+est remplacée par les deux formes qui, elles, l'exécutent : `( (gh …) )` et `((gh …) )`.
+
 ## 0.3.2
 
 **0.3.1 shipped with seven ways to merge past the guard and a script that can delete your
