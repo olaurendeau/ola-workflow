@@ -79,6 +79,12 @@ Two commands, in one exact form each, run with a stronger token:
 
 `<SHA>` is the full 40 characters, and nothing may come before, after or around the command.
 
+The base token cannot read check runs: GitHub gives the Checks API to no personal token, so
+`gh pr checks` fails with "Resource not accessible by personal access token". The brief has
+the agents read a SHA's GitHub Actions jobs and its commit statuses instead, which carry the
+same names. A check posted by an app other than GitHub Actions is in neither, and the agents
+are told to ask you about a required check they cannot find.
+
 How it is wired:
 
 - [`hooks/session.sh`](hooks/session.sh), on `SessionStart`, appends one line to

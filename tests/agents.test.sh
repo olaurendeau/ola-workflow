@@ -755,6 +755,21 @@ for want in keychain off; do
   fi
 done
 
+# The base token cannot read check runs, so `gh pr checks` fails for every role (measured
+# on GitHub, 2026-10-19). An agent not told so reads that failure as a refusal of its role,
+# or as checks that are not green. The brief gives what does work, and only where the tokens
+# are on: with them off, `gh pr checks` works and the detour is noise.
+if grep -qF 'actions/runs?head_sha=<SHA>' "$WORK/out-keychain" && grep -qF 'gh pr checks' "$WORK/out-keychain"; then
+  ok "with the tokens on, the brief says gh pr checks fails and how to read the checks instead"
+else
+  ko "with the tokens on, the brief does not say how to read the checks without the Checks API"
+fi
+if grep -qE 'head_sha|gh pr checks' "$WORK/out-off"; then
+  ko "with the tokens off, the brief still steers away from gh pr checks"
+else
+  ok "with the tokens off, the brief leaves gh pr checks alone"
+fi
+
 # The guard that read command lines is gone, so nothing shipped may still promise it. A net
 # over prose, not a proof: it catches the phrasings this project actually wrote.
 CLAIMANTS=("${ALL[@]}" "$BRIEF" "$ROOT/README.md" "$ROOT/skills/workflow-init/SKILL.md")
