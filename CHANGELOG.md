@@ -52,9 +52,10 @@ the same 403.
 - Without the tokens, every gh call in a project with a profile fails with a 401, and the
   session is told so when it starts.
 - The coordinator has to give `--match-head-commit` the full 40-character SHA.
-- `gh pr checks` fails with the role tokens: GitHub gives check runs to no personal token.
-  The brief reads a SHA's checks as its Actions jobs and its statuses instead. A check run
-  by an app other than GitHub Actions cannot be read that way, and the agents ask.
+- `gh pr checks` fails with the role tokens: GitHub gives check runs to no fine-grained
+  token (a classic one with `repo` can read them). The brief reads a SHA's checks as its
+  Actions jobs and its statuses instead. A check run by an app other than GitHub Actions
+  cannot be read that way, and the agents ask.
 
 ### Not stopped, and said so in the README
 
