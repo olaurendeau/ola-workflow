@@ -180,39 +180,53 @@ echo
 echo "Anything else, decide yourself and favour the option closest to existing code."
 echo "Record a decision where the work lives: Decision: … — Reason: …"
 echo
-# The guard's own state, read from the profile like everything else. An agent has to know
-# whether a rule it is about to break will stop it: told it will be asked and seeing no
-# prompt, it reads the silence as sanction — which is why this line exists and why
-# tests/agents.test.sh ties what the prompts claim to what the shipped guard does.
+# What GitHub itself refuses, read from the profile like everything else. An agent has to know
+# whether a rule it is about to break will stop it: told it will be refused and seeing no
+# refusal, it reads the silence as sanction — which is why this section exists and why
+# tests/agents.test.sh ties what it says to the key.
 echo "## What stops you"
-case $(with_default guard enforce) in
-  log)
-    cat <<'WATCHING'
-Nothing. The guard reads every Bash call and decides, and this project has it on `log`: it
-writes down what it would have refused and lets the command run. So every rule above is a
-rule you apply yourself, and silence is not permission — it only means nobody switched the
-refusals on yet.
-WATCHING
+review_status=$(with_default merge.review_status agent-review)
+tokens=$(with_default github_tokens keychain)
+[ "$tokens" = off ] || [ "$mode" = integrated ] || tokens=discreet
+case $tokens in
+  discreet)
+    cat <<'DISCREET_STOPS'
+GitHub refuses merging a pull request and writing a commit status to every role in this
+project, however the command is written: every Bash command runs with a GitHub token that can
+do neither, and in discreet mode no command gets a stronger one. What else this mode forbids
+is in its own section below, and nothing refuses that.
+DISCREET_STOPS
+    ;;
+  off)
+    cat <<'NOTHING'
+Nothing. This project's profile turns the role tokens off, so you work with the human's own
+GitHub login and every right it has. Every rule above is a rule you apply yourself, and
+silence is not permission — it only means nobody switched the refusals on.
+NOTHING
     ;;
   *)
-    cat <<'ENFORCED'
-The guard refuses **two** operations that belong to another role, and asks about a command it
-cannot read without running it. It reads what a shell would really run, not the text, so
-quoting, a wrapper or the API form of the same operation are one command to it — spelling it
-differently changes nothing.
-
-What it refuses:
+    cat <<ENFORCED
+GitHub refuses **two** operations to every role but the one that owns them, however the
+command is written — \`gh\`, \`gh api\`, a script, \`curl\`:
 - merging a pull request, to anyone but the coordinator;
-- writing the review status the merge gate reads, to anyone but the pr-reviewer.
+- writing a commit status, to anyone but the pr-reviewer.
 
-**Everything else above is a rule nothing applies.** Pushing to the base branch, tagging,
-releasing, publishing, changing repository settings: the guard does not know them yet, so
-they hold only as far as you hold them. Do not read the absence of a refusal as permission —
-on those, you are the enforcement.
-- A refusal names the role that owns the command. Report it, do not work around it.
-- A question means the command word is not in the line — `eval`, `source`, `$EDITOR`. Answer
-  it only if you know what the line runs.
-- If the guard itself breaks, it blocks rather than passes.
+Every Bash command runs with a GitHub token that can do neither. Two commands, in one exact
+form each, run with a stronger one — nothing may come before, after or around them, and the
+SHA is the full 40 characters:
+
+    coordinator  gh pr merge <N> --squash --match-head-commit <SHA>
+    pr-reviewer  gh api repos/{owner}/{repo}/statuses/<SHA> -f state=<success|failure> -f context=$review_status -f description='<one line>'
+
+- A 403 on one of these means you are not the role that owns it, or the form is not exactly
+  this one. Report it; do not look for another way or another token.
+- A 401 on every gh call means the human has not created the tokens yet. Say so: they run
+  \`ola-workflow-tokens setup\`.
+
+**Everything else above is a rule nothing applies.** Pushing to the base branch — \`git push\`
+uses the human's own credentials — tagging, releasing, publishing, changing repository
+settings: they hold only as far as you hold them. Do not read the absence of a refusal as
+permission; on those, you are the enforcement.
 ENFORCED
     ;;
 esac
@@ -310,13 +324,26 @@ $(req=$(get merge.required_checks '(none declared)'); printf '%s' "$req" | sed '
 - no file touched under: $(get merge.sensitive_paths '(none declared)' | tr '\n' ' ')
 - no sensitive pattern in the patch
 
-Then: gh pr merge <N> --squash --match-head-commit <the SHA you checked>
+Then, in exactly this form, with the full SHA you checked:
+
+    gh pr merge <N> --squash --match-head-commit <SHA>
 
 A file in a sensitive path, or a sensitive pattern in the patch, means the human merges.
 Say so and stop; do not look for a way around it.
 INTEGRATED
 else
   profile_dir=$(ola_profile_dir "$dir")
+  # Discreet mode gives no command a stronger token, so with the tokens on GitHub refuses a
+  # merge and a status to every role here.
+  if [ "$(with_default github_tokens keychain)" = off ]; then
+    discreet_stops="Nothing refuses any of it here: silence is not permission, you are the
+enforcement."
+  else
+    discreet_stops="GitHub refuses a merge and a commit status here to every role, the
+coordinator and the pr-reviewer included. The rest of this section — an issue, a comment,
+a label, a push, a pull request — nothing refuses: silence is not permission, you are the
+enforcement."
+  fi
   cat <<DISCREET
 ## Memory — discreet mode
 
@@ -339,9 +366,6 @@ And two actions need the human to confirm, because they are the only ones other
 contributors see: pushing a branch, and opening a pull request. Propose them, explain what
 they will contain, and wait for an answer.
 
-Wait for it even if nothing interrupts you. Read *What stops you* above: it says whether a
-command of another role would be refused here, and the two prohibitions in this section are
-not among the rules the guard knows yet. So for these, silence is not permission — you are
-the enforcement.
+Wait for it even if nothing interrupts you. $discreet_stops
 DISCREET
 fi

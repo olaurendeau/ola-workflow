@@ -15,9 +15,9 @@
 # resolution gives up: falling through would be the way back in for the file it distrusts.
 #
 # Nothing found means nothing found: every function returns 1 and prints nothing, and the
-# caller decides. The guard stays inert, which is what keeps this plugin invisible in a
+# caller decides. The hooks stay inert, which is what keeps this plugin invisible in a
 # project that has not opted in. No function may abort a shell that sourced it, so every
-# variable that can be unset is read defensively: the guard will source this file.
+# variable that can be unset is read defensively: the hooks source this file.
 #
 # jq and perl only, and nothing that needs bash 4: the host runs bash 3.2.
 

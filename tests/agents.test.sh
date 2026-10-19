@@ -649,12 +649,12 @@ forbid_key verify_ui '(playwright|maestro|simctl|ios-simulator|--width [0-9])' \
   'a way of looking at the project'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
 forbid_key mode '(integrated|discreet) mode means' 'what a mode means'
-# The guard's own state is the one a prompt must never state, and for the sharpest reason:
-# an agent told it will be refused, that is not, reads the silence as sanction — and one told
-# nothing will stop it, while the guard refuses, learns that a refusal is a bug to work
+# Whether GitHub refuses is the one fact a prompt must never state, and for the sharpest
+# reason: an agent told it will be refused, that is not, reads the silence as sanction — and
+# one told nothing will stop it, while GitHub refuses, learns that a 403 is a bug to work
 # around. Both are worse than not knowing. The brief reads the key and says which it is.
-forbid_key guard '(OLA_WORKFLOW_GUARD|guard is (on|off|enforcing|inert)|the guard (does not|never) (block|refuse))' \
-  'whether the guard applies'
+forbid_key github_tokens '(GH_TOKEN|github_tokens|ola-workflow-has-no-base-token|(merge|review|base) token)' \
+  'which GitHub token an agent holds'
 
 # Both directions: every value-bearing key has a prohibition, and every prohibition names a
 # key the schema declares.
@@ -722,187 +722,48 @@ for key in $(grep -v '^[[:space:]]*#' "$BRIEF" |
   fi
 done
 
-# --- No prompt may promise a guard that does not guard --------------------------------
-# While hooks/guard.sh is inert, a present-tense claim that the guard refuses or asks is
-# false, and in discreet mode it is dangerous: an agent told it will be asked, that pushes
-# without asking and sees no prompt, reads the silence as sanction. So the claim is tied to
-# the guard's actual state rather than to anyone's memory of it — when A3 makes the guard
-# real, this assertion inverts and says so.
-# Ask the guard instead of reading it. The first version inferred inertness from two
-# textual proxies — a last code line of `exit 0`, and no mention of permissionDecision —
-# and both break in the silent direction under the two things A3 will actually do: wrap the
-# guard in a function, and write the decision emitters before wiring them. The assertion
-# would then skip itself while printing a line that reads like a pass, on exactly the
-# commit where the claim starts mattering. Behaviour cannot be fooled that way.
-# The question is what a user experiences, which is neither "does the guard have rules"
-# nor "does its suite expect decisions". A guard can hold every rule and ship them turned
-# off — which is exactly what it does today, on purpose, because the rate of `ask` on real
-# sessions is not measured yet. So the probe asks the guard, with a profile, in the
-# environment it ships with, and a prompt may claim only what that answers.
-#
-# Earlier versions got this wrong twice: inferring inertness from the text of guard.sh
-# (broken by the two refactors A3 performs) and from one Bash payload (blind to a rule
-# about files). This asks the shipped artefact the user's own question.
-GUARD_SUITE=$ROOT/tests/guard.test.sh
-suite_cases=$(grep -cE '^[[:space:]]*(check|enforced) (allow|deny|ask)' "$GUARD_SUITE" || true)
-if [ "$suite_cases" -gt 0 ]; then
-  ok "the guard suite states $suite_cases decisions in the form this derivation reads"
-else
-  ko "the guard suite states no decision in the form read here, so the derivation is blind"
-fi
-
+# --- What stops an agent is said by the brief, and only by the brief -------------------
+# Whether GitHub refuses a merge or a review status depends on one profile key,
+# github_tokens, and the brief is the one reader of the profile. So the brief says which it
+# is, for both values, and nothing else shipped may claim either way — the `forbid_key
+# github_tokens` prohibition above covers the prompts. An agent told it will be refused,
+# that is not, reads the silence as sanction; one told nothing will stop it, while GitHub
+# refuses, learns to work around a 403.
 ola_scratch agents
 WORK=$OLA_SCRATCH
 trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 
-# $HOME is redirected before the probe and not only before the brief, because a profile
-# under the real $HOME wins over the fixture's committed one — the probe would then be
-# measuring this machine's configuration.
-probe_repo=$WORK/guard-probe
-mkdir -p "$probe_repo/.claude"
-git -C "$probe_repo" -c init.defaultBranch=main init -q 2>/dev/null
-printf '{"mode":"integrated","base_branch":"main"}\n' >"$probe_repo/.claude/workflow.json"
-
-guard_decides=no
-for cmd in '$(echo gh) pr merge 7' 'git push --force origin main' 'gh pr merge 7 --squash' \
-           'eval gh pr merge 7' 'npm publish'; do
-  said=$(jq -n --arg c "$cmd" --arg d "$probe_repo" \
-    '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"probe",cwd:$d,
-      agent_type:"ola-workflow:developer",tool_input:{command:$c}}' |
-    "$ROOT/hooks/guard.sh" 2>/dev/null)
-  status=$?
-  if [ -n "$said" ] || [ "$status" != 0 ]; then
-    guard_decides=yes
-    break
+for want in keychain off; do
+  probe=$WORK/stops-$want
+  mkdir -p "$probe/.claude"
+  git -C "$probe" -c init.defaultBranch=main init -q 2>/dev/null
+  printf '{"mode":"integrated","github_tokens":"%s"}\n' "$want" >"$probe/.claude/workflow.json"
+  # Through a file, not a pipe: `… | grep -q` reported a miss on output that holds the
+  # match, and the file lets the failure show what was printed.
+  "$BRIEF" "$probe" >"$WORK/out-$want" 2>"$WORK/err-$want" || true
+  # The content, not the heading: both arms print the heading.
+  case $want in
+    keychain) expect='GitHub refuses' ;;
+    off)      expect='^Nothing\.' ;;
+  esac
+  if grep -q '## What stops you' "$WORK/out-$want" && grep -qE "$expect" "$WORK/out-$want"; then
+    ok "the brief says what stops an agent when github_tokens is $want, and says the right thing"
+  else
+    ko "the brief says nothing right about what stops an agent when github_tokens is $want: $(head -c 100 "$WORK/err-$want" "$WORK/out-$want" | tr '\n' ' ')"
   fi
 done
 
-# The witness: the same guard, with enforcement on, does decide. Without it this block
-# would read "inert" just as happily from a guard that is broken, or from a profile the
-# fixture failed to write — and then no prompt could ever be allowed to mention the guard.
-enforced_said=$(jq -n --arg d "$probe_repo" \
-  '{hook_event_name:"PreToolUse",tool_name:"Bash",session_id:"probe2",cwd:$d,
-    agent_type:"ola-workflow:developer",tool_input:{command:"$(echo gh) pr merge"}}' |
-  OLA_WORKFLOW_GUARD=enforce "$ROOT/hooks/guard.sh" 2>/dev/null)
-if [ -n "$enforced_said" ]; then
-  ok "witness: the guard does decide when enforcement is on, so this probe measures something"
+# The guard that read command lines is gone, so nothing shipped may still promise it. A net
+# over prose, not a proof: it catches the phrasings this project actually wrote.
+CLAIMANTS=("${ALL[@]}" "$BRIEF" "$ROOT/README.md" "$ROOT/skills/workflow-init/SKILL.md")
+claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents|reads)|tokeniz' \
+  "${CLAIMANTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+if [ -z "$claims" ]; then
+  ok "nothing shipped promises the command-line guard that was removed"
 else
-  ko "witness: the guard decides nothing even when enforcing — the probe below is vacuous"
-fi
-
-if [ "$guard_decides" = no ]; then
-  for payload in \
-    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin HEAD"}}' \
-    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"gh pr merge 7 --squash"}}' \
-    '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":".github/workflows/ci.yml","content":"x"}}' \
-    '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"hooks/guard.sh"}}'; do
-    said=$(printf '%s' "$payload" | "$ROOT/hooks/guard.sh" 2>/dev/null)
-    status=$?
-    if [ -n "$said" ] || [ "$status" != 0 ]; then
-      ko "the guard decides something its own suite never expects: $said"
-      guard_decides=yes
-      break
-    fi
-  done
-fi
-
-
-# The README is read here, and only here. It was in none of these lists, and that was the
-# hole a review measured: the README makes claims about what the guard refuses, and appending
-# a flatly false one left every assertion green — while I cited those assertions as the
-# guarantee that the claims were true.
-#
-# **And it still is, in part.** This is a pattern over prose, and prose paraphrases without
-# limit: a review wrote thirteen denials this misses, including "the guard lets everything
-# through" — the very phrase the passing message below uses. So it is a **net**, not a proof.
-# What it catches is the literal phrasings this project has actually written, which is worth
-# having because those are what get copied forward; what it cannot catch is a sentence nobody
-# has written yet.
-#
-# The claims that have to be *true* rather than merely unrepeated are the numbers, and none
-# of them is asserted here. They are produced by `make measure`, which is the only honest
-# answer to "how do you know" — three of them were published wrong, twice because the method
-# was wrong rather than the number.
-#
-# One thing this does buy, and it is why the `no` arm below is not vacuous: the README is
-# phrased so the shipped text matches the claim pattern. Measured — make the guard inert and
-# that arm fires on the README, not on nothing.
-#
-# Only this one narrow pattern, though, and not the prohibition table above: the README
-# *documents* this plugin, so it shows `make check` and a base branch as examples on purpose,
-# and a table meant to stop a prompt hard-coding a project's values would fire on every line
-# of it. What the README must not do is promise a refusal that does not happen — or deny one
-# that does.
-CLAIMANTS=("${ALL[@]}" "$BRIEF" "$ROOT/README.md")
-
-if [ "$guard_decides" = no ]; then
-  claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents)' \
-    "${CLAIMANTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
-  if [ -z "$claims" ]; then
-    ok "the guard decides nothing its suite expects, and nothing shipped claims otherwise"
-  else
-    ko "the guard decides nothing yet, and these promise otherwise: $claims"
-  fi
-else
-  # The guard decides something now, and this arm is what that switch turns on.
-  #
-  # It asks of the **brief** and not of the five prompts, and that is a change from the shape
-  # this assertion was written in ("all six must say so"). The reason is the one this project
-  # keeps: whether the guard applies is a value in the profile, the brief is the single reader
-  # of the profile, and five prompts restating a conditional fact would drift apart one
-  # justified edit at a time — the exact failure the brief exists to prevent.
-  #
-  # It is not a weakening, because the other half is asserted from the other side: the
-  # `forbid_key guard` prohibition above means no prompt may make a claim about enforcement
-  # of its own, in either direction. Together: the one reader states it, and nobody else may.
-  if grep -qE 'guard (refuses|blocks|will ask|asks|prevents)' "$BRIEF"; then
-    ok "the guard decides, and the brief — the one reader of the profile — says so"
-  else
-    ko "the guard decides now, and the brief tells an agent nothing will stop it"
-  fi
-  # And the inverse, which is the dangerous direction: nothing shipped may say the guard lets
-  # everything through while it refuses. An agent that reads that and then sees a refusal
-  # learns to treat the refusal as a bug to work around.
-  # Tolerant of what sits between the subject and the claim, because the first version was
-  # not and missed the sentence that was on the README at the time: "The guard is still
-  # **inert**" — "still" and two asterisks away from `guard is inert`. Enumerating spellings
-  # is the method that always misses one, and here the one it missed was the live sentence it
-  # existed to catch.
-  denials=$(grep -liE 'guard[^.]{0,60}(inert|allows everything|never refuses|never blocks|blocks nothing|does not block)' \
-    "${CLAIMANTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
-  if [ -z "$denials" ]; then
-    ok "the guard decides, and nothing shipped says it lets everything through"
-  else
-    ko "the guard decides, and these say it does not: $denials"
-  fi
-  # And it must say so for *both* values of the key, or the half that matters is missing: an
-  # agent told nothing will stop it, while the guard refuses, learns to treat a refusal as a
-  # bug to work around.
-  for want in enforce log; do
-    probe=$WORK/stops-$want
-    mkdir -p "$probe/.claude"
-    git -C "$probe" -c init.defaultBranch=main init -q 2>/dev/null
-    printf '{"mode":"integrated","guard":"%s"}\n' "$want" >"$probe/.claude/workflow.json"
-    # Through a file, not a pipe: `… | grep -q` reported a miss on output that holds the
-    # match, and a harness that lies about the thing it measures is worse than no harness.
-    # The file also lets the failure show what was printed.
-    "$BRIEF" "$probe" >"$WORK/out-$want" 2>"$WORK/err-$want" || true
-    # The *content*, not the heading: both branches print the heading, so grepping for it
-    # left the suite green on a brief that told a log-mode agent "The guard refuses…" — the
-    # exact defect the comment above cites. An assertion that cannot tell the two arms apart
-    # is an assertion about a heading.
-    case $want in
-      enforce) expect='guard refuses' ;;
-      log)     expect='Nothing\.' ;;
-    esac
-    if grep -q '## What stops you' "$WORK/out-$want" && grep -qE "$expect" "$WORK/out-$want"; then
-      ok "the brief says what stops an agent when guard is $want, and says the right thing"
-    else
-      ko "the brief says nothing about what stops an agent when guard is $want: $(head -c 100 "$WORK/err-$want" "$WORK/out-$want" | tr '\n' ' ')"
-    fi
-  done
+  ko "these still promise the removed command-line guard: $claims"
 fi
 
 # --- The brief, per mode --------------------------------------------------------------

@@ -10,7 +10,7 @@
     {
       "name": "ola-workflow",
       "source": "./",
-      "description": "Profile-driven agent workflow (coordinator, product designer, design reviewer, architect, developers, PR reviewer) with a PreToolUse guard.",
+      "description": "Profile-driven agent workflow (coordinator, product designer, design reviewer, architect, developers, PR reviewer), with role-scoped GitHub tokens.",
       "version": "0.3.2",
       "author": {
         "name": "Olivier Laurendeau",

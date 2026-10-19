@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # What does a PreToolUse payload hold when the agent comes from a plugin?
 #
-# Two things the Claude Code docs do not say, and that the guard of A3 and the default
+# Two things the Claude Code docs do not say, and that the hooks and the default
 # session agent of B16 both depend on:
 #   1. the exact value of agent_type for a plugin agent, as a subagent and as the session
 #      agent (--agent);
@@ -95,7 +95,7 @@ for entry in "${labels[@]}"; do
 done
 
 echo
-echo "payload fields available to the guard (union over every payload recorded):"
+echo "payload fields available to the hooks (union over every payload recorded):"
 cat "$OUT"/spike-*.jsonl 2>/dev/null | jq -rs 'map(keys) | add | unique | join(", ")'
 
 echo
