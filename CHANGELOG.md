@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 **The guard that read command lines is gone. GitHub refuses instead.** Every agent now works
 with a token that can neither merge nor write a commit status, and two exact commands get a

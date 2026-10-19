@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "ola-workflow",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Profile-driven agent workflow: a coordinator dispatches a product designer, a design reviewer, an architect, developers in isolated worktrees and an independent PR reviewer, while GitHub itself keeps merging and the review status with the roles that own them: every agent holds a token that can do neither, and two exact commands get a stronger one. Each project is configured by a profile file, so nothing has to be committed to the project itself.",
   "author": {
     "name": "Olivier Laurendeau",
