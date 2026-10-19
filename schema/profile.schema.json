@@ -54,6 +54,7 @@
         "reviewer": {
           "description": "The slot, or slots, reserved for reviewers: one per review that may run at the same time.",
           "type": ["string", "integer", "array"],
+          "minItems": 1,
           "items": { "type": ["string", "integer"] }
         }
       }

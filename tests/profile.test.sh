@@ -481,6 +481,8 @@ expect_problem '{"mode": "discreet", "slots": {"developers": [{"a": 1}]}}' \
   'developers[0]: expected' 'slot items are scalars'
 expect_problem '{"mode": "discreet", "slots": {"reviewer": [{"a": 1}]}}' \
   'reviewer[0]: expected' 'reviewer slot items are scalars'
+expect_problem '{"mode": "discreet", "slots": {"reviewer": []}}' \
+  'at least 1 required' 'a list of reviewer slots is not empty'
 expect_problem '{"mode": "discreet", "slots": {"reviewer": true}}' \
   'expected ["string","integer","array"], got boolean' 'a reviewer slot is a value or a list'
 # One reviewer slot or several: the single value predates the list and must stay valid.
