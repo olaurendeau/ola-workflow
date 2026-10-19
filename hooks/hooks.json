@@ -1,6 +1,18 @@
 {
-  "description": "ola-workflow: PreToolUse guard for Bash calls",
+  "description": "ola-workflow: the base GitHub token for every Bash call of a session, and a stronger one for two exact commands",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session.sh"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -8,7 +20,7 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/elevate.sh"],
             "timeout": 10
           }
         ]

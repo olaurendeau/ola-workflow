@@ -12,9 +12,9 @@
       "description": "integrated: the agents may write to the forge, and the coordinator may merge. discreet: memory stays local, no issue/label/status is ever written, push and PR creation need a human, and nothing is ever merged. Either value is legal in either location, though a committed profile is normally integrated and one you keep for someone else's repository is normally discreet.",
       "enum": ["integrated", "discreet"]
     },
-    "guard": {
-      "description": "enforce: the PreToolUse guard refuses what a role does not own, and asks about a command it cannot read. log: it decides exactly the same way and lets the command run, writing the decision to OLA_WORKFLOW_GUARD_LOG when that is set. Defaults to enforce, because a profile is how a project opts in and a rule nothing applies is not a rule. Set log to watch what it would do before letting it do it.",
-      "enum": ["enforce", "log"]
+    "github_tokens": {
+      "description": "keychain: every agent of a session works with the base GitHub token from the macOS keychain, which can neither merge nor write a commit status, and only the coordinator's exact merge command and the pr-reviewer's exact review-status command get a stronger one. GitHub refuses everything else with a 403, however it is spelled. off: the agents use the human's own GitHub login, with every right it has, and only the prompts keep merging and the review status with their roles. Defaults to keychain; the tokens are created with `ola-workflow-tokens setup`.",
+      "enum": ["keychain", "off"]
     },
     "language": {
       "description": "Languages to write in. Defaults to English everywhere.",
@@ -69,7 +69,7 @@
       }
     },
     "merge": {
-      "description": "The merge gate the guard enforces itself, since a free GitHub plan has no ruleset.",
+      "description": "The merge gate the coordinator checks before merging, since a free GitHub plan has no ruleset to check it.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

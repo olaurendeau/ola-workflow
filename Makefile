@@ -24,13 +24,10 @@ validate: ## Validates the plugin and marketplace manifests (job `manifests`)
 
 check: lint test validate ## Everything the CI runs
 
-measure: ## Measures what the guard asks about and what it costs per Bash call
-	@scripts/measure.sh
-
 spike: ## Replays the agent-identity spike and prints the measured values
 	scripts/spike/agent-identity.sh
 
 spike-artifact: ## Prints how to replay the artifact spike in an interactive session
 	scripts/spike/agent-artifact.sh --interactive
 
-.PHONY: help lint test validate check measure spike spike-artifact
+.PHONY: help lint test validate check spike spike-artifact

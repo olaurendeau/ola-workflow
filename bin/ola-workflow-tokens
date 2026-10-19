@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# ola-workflow-tokens — creates and checks the GitHub tokens the agents work with.
+#
+#   ola-workflow-tokens setup [kind…]   for each kind (default: all three), opens GitHub's
+#                                       form already filled in, then stores what you paste
+#                                       in the macOS keychain
+#   ola-workflow-tokens status          which tokens exist, who they act as, when they expire
+#   ola-workflow-tokens url <kind>      the pre-filled creation URL, for another browser
+#
+# The kinds, and why there are three (hooks/lib/github-tokens.sh says it in full):
+#   base     every agent, every command: reads the code, writes PRs and issues, reads
+#            statuses — and can neither merge nor write a status
+#   merge    the coordinator's `gh pr merge`, nothing else
+#   review   the pr-reviewer's review status, nothing else
+#
+# This is the human's command, run in a terminal: it reads secrets from the keyboard.
+set -uo pipefail
+
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=hooks/lib/github-tokens.sh
+. "$SELF_DIR/../hooks/lib/github-tokens.sh"
+
+usage() { sed -n '4,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+describe() {
+  case $1 in
+    base)   echo "every agent; cannot merge or write a status" ;;
+    merge)  echo "the coordinator's gh pr merge only" ;;
+    review) echo "the pr-reviewer's review status only" ;;
+  esac
+}
+
+url_for() { # url_for <kind>
+  local desc
+  desc=$(describe "$1" | sed 's/ /+/g; s/;/%3B/g; s/'"'"'/%27/g')
+  printf 'https://github.com/settings/personal-access-tokens/new?name=ola-workflow+%s&description=%s&expires_in=90&%s\n' \
+    "$1" "$desc" "$(ola_token_permissions "$1")"
+}
+
+check_kind() {
+  case " $OLA_TOKEN_KINDS " in
+    *" $1 "*) ;;
+    *) echo "unknown kind '$1' — one of: $OLA_TOKEN_KINDS" >&2; exit 2 ;;
+  esac
+}
+
+need_keychain() {
+  command -v security >/dev/null 2>&1 && return 0
+  echo "ola-workflow-tokens: the tokens live in the macOS keychain, and \`security\` is not on this PATH." >&2
+  exit 2
+}
+
+setup() {
+  local kind kinds=("$@")
+  need_keychain
+  [ -t 0 ] || { echo "ola-workflow-tokens setup reads tokens from the keyboard: run it in a terminal." >&2; exit 2; }
+  [ "${#kinds[@]}" -gt 0 ] || read -r -a kinds <<<"$OLA_TOKEN_KINDS"
+  for kind in "${kinds[@]}"; do check_kind "$kind"; done
+  for kind in "${kinds[@]}"; do
+    echo "== $kind — $(describe "$kind")"
+    echo "   Permissions: $(ola_token_permissions "$kind" | tr '&' ' ')"
+    echo "   On the form, choose 'Only select repositories' and pick each project that has a profile."
+    url=$(url_for "$kind")
+    echo "   $url"
+    command -v open >/dev/null 2>&1 && open "$url"
+    echo "   Paste the token at the prompt (twice; nothing is echoed)."
+    security add-generic-password -U -a "$OLA_TOKEN_ACCOUNT" -s "$(ola_token_service "$kind")" \
+      -l "ola-workflow $kind GitHub token" -w || { echo "   not stored" >&2; exit 1; }
+    echo "   stored."
+    echo
+  done
+  status
+}
+
+status() {
+  local kind token login expiry rc=0
+  need_keychain
+  for kind in $OLA_TOKEN_KINDS; do
+    if ! token=$(ola_token_read "$kind"); then
+      printf '%-7s missing — ola-workflow-tokens setup %s\n' "$kind" "$kind"
+      rc=1
+      continue
+    fi
+    if login=$(GH_TOKEN=$token gh api user --jq .login 2>/dev/null); then
+      expiry=$(GH_TOKEN=$token gh api -i user 2>/dev/null |
+        sed -n 's/^[Gg]ithub-[Aa]uthentication-[Tt]oken-[Ee]xpiration: *//p' | tr -d '\r')
+      printf '%-7s ok, acts as %s, expires %s\n' "$kind" "$login" "${expiry:-never}"
+    else
+      printf '%-7s present, but GitHub rejects it (expired or revoked?)\n' "$kind"
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
+case ${1:-} in
+  setup)  shift; setup "$@" ;;
+  status) status ;;
+  url)    [ $# -eq 2 ] || usage; check_kind "$2"; url_for "$2" ;;
+  *)      usage ;;
+esac

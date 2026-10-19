@@ -1,5 +1,65 @@
 # Changelog
 
+## Unreleased
+
+**The guard that read command lines is gone. GitHub refuses instead.** Every agent now works
+with a token that can neither merge nor write a commit status, and two exact commands get a
+stronger one. Create the tokens once, in a terminal:
+
+```
+ola-workflow-tokens setup
+```
+
+### Why
+
+The guard had to work out, from the text of a command, what a shell would run, and then
+refuse a merge or a review status to the wrong role. Each spelling it missed was a merge it
+let through: 0.3.2 fixed fifty-seven of them, and `gh ${x} pr merge` (#41), `f ( ){ … }`
+(#42) and `gh pr --repo o/r merge` (#43) were still open. Each spelling it could not read
+was a question to the human, which is how ordinary commands kept stopping the session.
+
+A token has no spelling. `gh pr merge`, `gh api -X PUT …/merge`, `curl` and a script all hit
+the same 403.
+
+### What changed
+
+- `hooks/session.sh` (SessionStart) gives every Bash command of a session in a project
+  with a profile the **base** token, through `CLAUDE_ENV_FILE`. Subagents get it too
+  (measured on Claude Code 2.1.302). The token is read from the macOS keychain on each
+  command and never written to a file.
+- `hooks/elevate.sh` (PreToolUse) runs two commands with a stronger token, and only these
+  two:
+  - `gh pr merge <N> --squash --match-head-commit <SHA>` from the coordinator gets the
+    **merge** token;
+  - `gh api repos/{owner}/{repo}/statuses/<SHA> -f state=… -f context=<review_status> …`
+    from the pr-reviewer gets the **review** token.
+
+  Each form is matched by one regular expression, over a character set with no shell
+  metacharacter in it, and only in integrated mode. Every other command passes untouched,
+  so your permission rules apply exactly as written, and nothing is asked any more because
+  a command could not be read.
+- A form the hook does not recognise runs with the base token and gets a 403. A mistake
+  costs a retry, never a merge.
+- `bin/ola-workflow-tokens`: `setup` opens GitHub's form pre-filled for each of the three
+  fine-grained tokens and stores them in the keychain, and `status` says who each acts as
+  and when it expires.
+
+### Breaking
+
+- The `guard` profile key is gone, along with `OLA_WORKFLOW_GUARD`, `OLA_WORKFLOW_GUARD_LOG`
+  and `make measure`. A profile that still sets `guard` fails `ola-profile validate`: remove
+  the key. It is replaced by `github_tokens`, `keychain` (the default) or `off`.
+- Without the tokens, every gh call in a project with a profile fails with a 401, and the
+  session is told so when it starts.
+- The coordinator has to give `--match-head-commit` the full 40-character SHA.
+
+### Not stopped, and said so in the README
+
+- An agent that reads the keychain itself.
+- `git push` to the base branch: git uses your own credentials, and a free private
+  repository has no ruleset.
+- The merge gate's conditions: GitHub checks who merges, not whether the checks were green.
+
 ## 0.3.2
 
 **0.3.1 shipped with seven ways to merge past the guard and a script that can delete your
