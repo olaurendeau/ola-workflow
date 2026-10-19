@@ -25,14 +25,16 @@ Les deux formes sont maintenant creusées : l'expression disparaît, et le garde
 
 ### Ce que creuser aurait pu cacher
 
-Creuser une expansion est une place où une commande peut se cacher, donc chacune des seize
-nouvelles lignes de `tests/tokenize.test.sh` est **mesurée des deux côtés** : ce que le
-tokenizer annonce, et ce que le shell exécute vraiment avec un faux `gh` sur le PATH.
+Creuser une expansion est une place où une commande peut se cacher, donc les nouvelles lignes
+de `tests/tokenize.test.sh` sont **mesurées des deux côtés** : ce que le tokenizer annonce, et
+ce que le shell exécute vraiment avec un faux `gh` sur le PATH qui se journalise. Quatre font
+exception et le disent où elles sont : deux sur `sh`, dont l'identité dépend de l'hôte, et
+deux où rien ne s'exécute et où l'ask est le prix d'un désaccord entre shells.
 
-La suite passe de 305 à 345 assertions. Sept lignes en portent trois chacune — le shell
-n'exécute rien, le tokenizer ne nomme rien, et la ligne n'est pas illisible, la troisième
-étant celle qui coûtait une confirmation par appel. Neuf en portent deux. Une s'ajoute dans
-la boucle des préfixes.
+La suite passe de 305 à **362** assertions, soit 57 : huit lignes en portent trois chacune —
+le shell n'exécute rien, le tokenizer ne nomme rien, et la ligne n'est pas illisible, cette
+troisième étant celle qui coûtait une confirmation par appel — quatorze en portent deux,
+quatre en portent une, et une s'ajoute dans la boucle des préfixes. 24 + 28 + 4 + 1.
 
 **Une substitution imbriquée dans une expression s'exécute.** `$(( $(gh pr merge 7 --admin) +
 1 ))` lance `gh`, et quatre orthographes de cette forme — `$( )`, backquotes, arithmétique
@@ -54,6 +56,37 @@ sous-shell, et le corps tourne.
 Un guillemet dans l'expression reste illisible, donc demandé : bash y lit un `)` entre
 guillemets comme du texte, zsh y termine la substitution, et les deux exécutent alors des
 choses différentes. Ce fichier ne peut pas avoir raison pour les deux.
+
+### Creuser dépend du shell qui va lire le texte
+
+La première relecture de cette correction a trouvé une évasion que j'y avais introduite :
+`((cmd))` est la commande arithmétique de bash, de zsh et de ksh, mais **`sh`, `dash` et
+busybox `ash` n'en ont pas**. Pour eux le même texte est deux sous-shells imbriqués, et le
+corps s'exécute :
+
+```
+$ PATH=$FAKE:$PATH dash -c "((gh pr merge 7 --admin))"
+GH A TOURNE: pr merge 7 --admin
+```
+
+Or ce fichier descend délibérément dans un corps de `dash -c` — l'énumération des
+interpréteurs dont il lit l'argument de `-c` contient `dash`. Creuser `(( … ))` là-dedans
+était donc un merge que plus aucune règle ne voyait : refusé par 0.3.2, autorisé en silence
+par la première version de ce correctif.
+
+Le creusement de la commande arithmétique est maintenant conditionné au shell qui va lire le
+texte. `sh` compte comme n'en ayant pas — c'est bash sur macOS et dash sur Debian, et refuser
+un merge qui n'était de toute façon qu'une erreur de syntaxe ne coûte rien, tandis que
+l'inverse est un merge. Ce que la fonction ne sait pas nommer est traité de la même façon.
+
+L'**expansion** `$(( … ))` n'a pas ce défaut : dash 0.5.12 et busybox ash ne retombent jamais
+en substitution de commande, ils refusent chaque orthographe ambiguë avec « Missing `))` ».
+
+Cinq lignes de test mesurent la grammaire de dash, et deux celle de `sh` — avec une
+précaution que la relecture a rendue nécessaire : `sees` et `runs_nothing` exécutent
+`bash -c`, donc une affirmation sur un autre shell leur est par construction incontestable.
+Ces lignes mettent le shell visé **dans la ligne testée** (`dash -c "…"`), de sorte que bash
+démarre dash et que le faux `gh` enregistre ce que dash a lancé.
 
 ### Une affirmation fausse retirée de la suite
 

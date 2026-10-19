@@ -103,9 +103,11 @@ names() {
 }
 
 # asks <label> <command line> <substring of the reason>
-# What cannot be known without running it is declared, never guessed. Each of these is a
-# command the shell does run, so silence here would be a miss and a refusal would be a
-# false positive: the caller is meant to ask.
+# What cannot be known without running it is declared, never guessed. Almost every row here
+# is a command the shell does run, so silence would be a miss and a refusal a false
+# positive: the caller is meant to ask. Two rows in the arithmetic section are the
+# exception, and say so where they stand — there nothing runs, and the ask is the price of
+# two shells disagreeing about the same text.
 asks() {
   local label=$1 line=$2 why=$3 reasons
   reasons=$(printf '%s' "$line" | perl "$TOKENIZE" | jq -r 'select(.readable == false) | .reason' | tr '\n' '|')
@@ -485,6 +487,52 @@ sees 'an arithmetic command around one'    '(( $(gh pr merge 7 --admin) ))' gh
 # merge on the next line is never seen.
 sees 'a comment after an arithmetic command' '((i=1)) #x
 gh pr merge 7 --admin' gh
+
+echo "--- a -c body is read with the grammar of the shell that will read it"
+# `((cmd))` is bash's arithmetic command, and zsh's and ksh's. `sh`, `dash` and busybox `ash`
+# have no such thing: they read the same text as two nested subshells, so the body RUNS.
+# This file descends into a `dash -c` body on purpose, so hollowing `(( … ))` there was a
+# merge that no rule saw — a silent allow where 0.3.2 denied. Measured: dash 0.5.12 and
+# busybox ash both merge, bash 3.2.57, bash 5.3.20, zsh 5.9 and ksh all refuse it.
+#
+# The shell half measures the named shell and not bash, without a new helper: the line under
+# test is itself a `dash -c …`, so bash starts dash and the stub records what dash ran. That
+# matters, because `sees` and `runs_nothing` hard-code `bash -c`, and a claim about another
+# shell's grammar is one they could otherwise never contradict.
+if command -v dash >/dev/null; then
+  sees 'a merge in a dash body'      'dash -c "((gh pr merge 7 --admin))"' gh
+  sees 'after another command'       'dash -c "echo hi; ((gh pr merge 7 --admin))"' gh
+  sees 'three parens deep'           'dash -c "(((gh pr merge 7 --admin)))"' gh
+  sees 'an expression spaced out'    'dash -c "(( (gh pr merge 7 --admin) ))"' gh
+  sees 'env in front of it'          'env dash -c "((gh pr merge 7 --admin))"' gh
+else
+  # Both halves of every row above are measured where dash exists, which is the host this
+  # was written on and the CI runner; here only the tokenizer can be.
+  for dashless in 'dash -c "((gh pr merge 7 --admin))"' \
+                  'dash -c "echo hi; ((gh pr merge 7 --admin))"' \
+                  'dash -c "(((gh pr merge 7 --admin)))"' \
+                  'dash -c "(( (gh pr merge 7 --admin) ))"' \
+                  'env dash -c "((gh pr merge 7 --admin))"'; do
+    names 'a merge in a dash body, no dash on this host' "$dashless" gh
+  done
+fi
+# `sh` is bash on macOS and dash on Debian, so what the shell half would measure depends on
+# the host. The tokenizer's answer must not: it reads `sh` as a shell with no arithmetic
+# command, which is the conservative half of the two. Refusing a merge that was only ever a
+# syntax error costs nothing; the other way round is a merge.
+names 'a merge in an sh body'        'sh -c "((gh pr merge 7 --admin))"' gh
+names 'the options glued'            'sh -ce "((gh pr merge 7 --admin))"' gh
+# And a shell that does have one keeps it, body included.
+runs_nothing 'an arithmetic command in a bash body' 'bash -c "((gh pr merge 7 --admin))"'
+# `eval` runs in the current shell, so it inherits its grammar: the expression is hollowed,
+# nothing is left to name, and what remains is the ask `eval` always costs. It denied on
+# 0.3.2 — on a line bash refuses as a syntax error, so the refusal was right by accident.
+asks 'an arithmetic command in an eval' 'eval "((gh pr merge 7 --admin))"' 'eval'
+# The one branch of arith_end the mutations cannot reach, and the second exception to the
+# note on `asks`: a quote in the expression. bash reads a quoted `)` as text, zsh ends the
+# substitution on it, and the two then run different things — so the line stays unreadable
+# and the guard asks. Nothing runs here on any shell measured, so the ask hides nothing.
+asks 'a quote in an expression' 'x=$(( "gh pr merge 7 --admin" ))' 'a whole command line'
 
 echo "--- an escaped operator is an argument, not an operator"
 # Two lookbehinds in the splitter decide whether a `|` or an `&` belongs to a redirection

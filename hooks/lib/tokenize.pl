@@ -119,9 +119,12 @@ sub closing_backtick {
 # depth, the first `)` found at depth 0 decides. Followed by another `)` it terminates an
 # arithmetic expansion. Followed by anything else, the construct is a command substitution
 # holding a subshell, and `$((echo RAN) )` and `$((echo RAN) && (:))` both run `echo` —
-# measured on bash 3.2.57, bash 5.3.20 and zsh 5.9, all three agreeing on all eleven
-# spellings in tests/tokenize.test.sh. The second of those is why the obvious rule — "the
-# two closing parens are glued" — is wrong: it ends in `))` and it runs a command.
+# measured on bash 3.2.57, bash 5.3.20 and zsh 5.9, which agree on every row of the
+# arithmetic section of tests/tokenize.test.sh. The second of those is why the obvious
+# rule — "the two closing parens are glued" — is wrong: it ends in `))` and it runs a
+# command. dash 0.5.12 and busybox ash never fall back at all: they refuse every ambiguous
+# spelling with "Missing `))`", so this rule is safe for them in the only direction that
+# matters. The arithmetic COMMAND is another story — see body_arith_cmd.
 # Returns the index of the last character of the terminating `))`, or -1 when this is not
 # arithmetic and the caller must read the body as a command line, as it always has.
 # A quote or a backslash in the expression also gives -1: there bash reads a quoted `)` as
@@ -154,22 +157,22 @@ sub arith_end {
 # to run a command this file never reports. Quotes cannot appear at this level, arith_end
 # having refused them, so there is nothing here to skip over.
 sub scan_arith {
-  my ($s, $j, $end) = @_;
+  my ($s, $j, $end, $arith) = @_;
   while ($j <= $end) {
     my $c = substr($s, $j, 1);
     if ($c eq '\\') { $j += 2; next }
     if ($c eq '`') {
       my $e = closing_backtick($s, $j + 1);
-      split_line(substr($s, $j + 1, $e - $j - 1));
+      split_line(substr($s, $j + 1, $e - $j - 1), $arith);
       $j = $e + 1; next;
     }
     if ($c eq '$' && substr($s, $j + 1, 2) eq '((') {
       my $a = arith_end($s, $j + 1);
-      if ($a >= 0) { scan_arith($s, $j + 3, $a - 1); $j = $a + 1; next }
+      if ($a >= 0) { scan_arith($s, $j + 3, $a - 1, $arith); $j = $a + 1; next }
     }
     if (($c eq '$' || $c eq '<' || $c eq '>') && substr($s, $j + 1, 1) eq '(') {
       my $e = closing_paren($s, $j + 2);
-      split_line(substr($s, $j + 2, $e - $j - 2));
+      split_line(substr($s, $j + 2, $e - $j - 2), $arith);
       $j = $e + 1; next;
     }
     $j++;
@@ -191,8 +194,37 @@ my $runs_code = qr{(?:^|[\s;&|(])(?:
   | eval
 )(?:\s+--)?\s+\z}x;
 
+# Whether the interpreter about to read a `-c` body has an arithmetic command at all.
+# `((i=1))` is one in bash, zsh and ksh. `sh`, `dash` and busybox `ash` have no such thing:
+# they read the same text as two nested subshells, so the body RUNS. Measured with a logging
+# `gh` on the PATH — `dash -c "((gh pr merge 7 --admin))"` merges on dash 0.5.12 and on
+# busybox ash, while bash 3.2.57, bash 5.3.20, zsh 5.9 and ksh all refuse it as an
+# expression. This file descends into a `dash -c` body on purpose ($runs_code above
+# enumerates `dash`), so hollowing `(( … ))` there was a merge that no rule saw: deny on
+# 0.3.2, silent allow without it.
+# `sh` is in neither camp by name — it is bash on macOS and dash on Debian — so it counts as
+# not having one. That is the safe direction: the construct stays a subshell, its command
+# word stays visible, and refusing a merge that was only ever a syntax error costs nothing.
+# Anything this function cannot name is answered the same way, for the same reason.
+# `eval` runs in the current shell and inherits.
+my %arith_cmd_shell = map { $_ => 1 } qw(bash zsh ksh ksh93 mksh);
+sub body_arith_cmd {
+  my ($syn, $inherited) = @_;
+  return $inherited if $syn =~ /(?:^|[\s;&|(])eval(?:\s+--)?\s+\z/;
+  for my $w (reverse($syn =~ /([^\s;&|()]+)/g)) {
+    next if $w =~ /^-/;                     # the options of the interpreter, not its name
+    my ($base) = $w =~ m{([^/]+)\z};        # a path names the same shell
+    return $arith_cmd_shell{$base} ? 1 : 0;
+  }
+  return 0;
+}
+
 sub split_line {
-  my ($s) = @_;
+  # $arith says whether the shell about to read this text has an arithmetic command, which
+  # decides whether `(( … ))` is hollowed. It is true at the top level — the Bash tool runs
+  # bash — and `body_arith_cmd` answers it for the body of a `-c` the splitter descends into.
+  my ($s, $arith) = @_;
+  $arith = 1 unless defined $arith;
   my $cur = '';
   # The same text with every escaped character replaced by a letter, which is what the
   # lookbehinds below must read. They ask "does the segment so far end in a redirection
@@ -234,7 +266,7 @@ sub split_line {
       my $j = index($s, "'", $i + 1);
       $j = length($s) if $j < 0;
       my $body = substr($s, $i + 1, $j - $i - 1);
-      if ($syn =~ $runs_code) { split_line($body); $cur .= '""'; $syn .= '""' }
+      if ($syn =~ $runs_code) { split_line($body, body_arith_cmd($syn, $arith)); $cur .= '""'; $syn .= '""' }
       else { $cur .= substr($s, $i, $j - $i + 1); $syn .= substr($s, $i, $j - $i + 1) }
       $i = $j + 1; next;
     }
@@ -249,22 +281,22 @@ sub split_line {
         if ($d eq '$' && substr($s, $i + 1, 1) eq '(') {
           my $a = arith_end($s, $i + 1);
           if ($a >= 0) {
-            scan_arith($s, $i + 3, $a - 1);
+            scan_arith($s, $i + 3, $a - 1, $arith);
             $str .= '$()'; $i = $a + 1; next;
           }
           my $e = closing_paren($s, $i + 2);
-          split_line(substr($s, $i + 2, $e - $i - 2));
+          split_line(substr($s, $i + 2, $e - $i - 2), $arith);
           $str .= '$()'; $i = $e + 1; next;
         }
         if ($d eq '`') {
           my $e = closing_backtick($s, $i + 1);
-          split_line(substr($s, $i + 1, $e - $i - 1));
+          split_line(substr($s, $i + 1, $e - $i - 1), $arith);
           $str .= '$()'; $i = $e + 1; next;
         }
         $str .= $d; $i++;
       }
       $i++;
-      if ($syn =~ $runs_code) { split_line($str); $cur .= '""'; $syn .= '""' }
+      if ($syn =~ $runs_code) { split_line($str, body_arith_cmd($syn, $arith)); $cur .= '""'; $syn .= '""' }
       else { $cur .= '"' . $str . '"'; $syn .= '"' . $str . '"' }
       next;
     }
@@ -272,21 +304,21 @@ sub split_line {
     if ($c eq '$' && substr($s, $i + 1, 1) eq '(') {
       my $a = arith_end($s, $i + 1);
       if ($a >= 0) {
-        scan_arith($s, $i + 3, $a - 1);
+        scan_arith($s, $i + 3, $a - 1, $arith);
         $cur .= '$()'; $syn .= '$()'; $i = $a + 1; next;
       }
       my $e = closing_paren($s, $i + 2);
-      split_line(substr($s, $i + 2, $e - $i - 2));
+      split_line(substr($s, $i + 2, $e - $i - 2), $arith);
       $cur .= '$()'; $syn .= '$()'; $i = $e + 1; next;
     }
     if (($c eq '<' || $c eq '>') && substr($s, $i + 1, 1) eq '(') {
       my $e = closing_paren($s, $i + 2);
-      split_line(substr($s, $i + 2, $e - $i - 2));
+      split_line(substr($s, $i + 2, $e - $i - 2), $arith);
       $cur .= $c . '()'; $syn .= $c . '()'; $i = $e + 1; next;
     }
     if ($c eq '`') {
       my $e = closing_backtick($s, $i + 1);
-      split_line(substr($s, $i + 1, $e - $i - 1));
+      split_line(substr($s, $i + 1, $e - $i - 1), $arith);
       $cur .= '$()'; $syn .= '$()'; $i = $e + 1; next;
     }
 
@@ -298,10 +330,11 @@ sub split_line {
     # `$cur`, so the construct contributes no command word, and `((i++))` no longer costs an
     # ask per call. `$syn` keeps a letter, because a word WAS here: emptied, it would make
     # `((i=1)) #x; gh …` look like a comment at the start of a line and drop the merge.
-    if ($c eq '(' && substr($s, $i, 2) eq '((' && ($syn eq '' || $syn =~ /[\s;&|(\n]\z/)) {
+    if ($c eq '(' && substr($s, $i, 2) eq '((' && $arith
+        && ($syn eq '' || $syn =~ /[\s;&|(\n]\z/)) {
       my $a = arith_end($s, $i);
       if ($a >= 0) {
-        scan_arith($s, $i + 2, $a - 1);
+        scan_arith($s, $i + 2, $a - 1, $arith);
         $syn .= 'x'; $i = $a + 1; next;
       }
     }
@@ -639,7 +672,7 @@ sub segment_words {
   # count of parens the walk happened to open — that count belongs to the whole command line
   # and `(cd x && gh pr merge --admin)` puts the opening paren in a different segment from
   # the closing one.
-  # A loop over the words and not over one word: `((gh pr merge 7 --admin))` now ends in two
+  # A loop over the words and not over one word: `sh -c "((gh pr merge 7 --admin))"` ends in two
   # of them, `--admin)` and `)`, because the word splitter ends a word after a `)` that
   # closes nothing. Stripping only the last left the `--admin)` behind, with its paren, for
   # every rule anchored on a word boundary to walk past.
