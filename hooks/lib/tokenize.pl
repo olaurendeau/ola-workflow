@@ -44,6 +44,27 @@ $input = '' unless defined $input;
 # command, and the shell has already joined it by the time it runs.
 $input =~ s/\\\n//g;
 
+# Which shells have an arithmetic command, and which read `((cmd))` as two nested subshells
+# that RUN the body. bash, zsh and ksh have one; `sh`, `dash` and busybox `ash` do not.
+# Measured with a logging `gh` on the PATH: `dash -c "((gh pr merge 7 --admin))"` merges, on
+# dash 0.5.12 and on busybox ash, while bash 3.2.57, bash 5.3.20, zsh 5.9 and ksh all refuse
+# it as an expression. This file hands text to another shell in two places — the body of a
+# `-c`, and the body of a heredoc fed to a shell — and both consult this table, because
+# hollowing `(( … ))` for a shell that has no such construct is a merge that no rule sees.
+# `sh` is in neither camp by name: it is bash on macOS and dash on Debian, so it counts as
+# not having one. That is the safe direction — the construct stays a subshell, its command
+# word stays visible, and refusing a merge that was only ever a syntax error costs nothing.
+# Any name that cannot be classified is answered the same way, for the same reason.
+my %arith_cmd_shell = map { $_ => 1 } qw(bash zsh ksh ksh93 mksh);
+
+# True while the text at the top level may hold an arithmetic command. A heredoc fed to a
+# POSIX shell is the one place where top-level text is read by something other than the shell
+# that runs the line, and it stays in `$input` by design — so there is no descent to carry a
+# flag, and this one is lowered for the whole line instead. Coarse on purpose: a line that
+# feeds a heredoc to `dash` and also increments a counter spends an ask on the counter. The
+# other way round is `dash <<EOF` + `((gh pr merge 7 --admin))`, which merges.
+my $top_arith = 1;
+
 # Heredoc bodies are text, not commands — a pull request body may quote a command without
 # running it, and reading the body as code is the false positive this removal exists to
 # prevent. The exception is a heredoc fed to a shell (`sh <<EOF`), where the body *is* the
@@ -54,7 +75,10 @@ $input =~ s{
   ^([^\n]*?)(?<!<)<<(?!<)-?[ \t]*(['"]?)(\w+)\2([^\n]*)\n(.*?)^[ \t]*\3[ \t]*$
 }{
   my ($whole, $pre, $post, $body) = ($&, $1, $4, $5);
-  if ("$pre$post" =~ m{(?:^|[\s|;&(/])(?:ba|z|da|k)?sh(?:\s|$)}) { $whole }
+  if ("$pre$post" =~ m{(?:^|[\s|;&(/])((?:ba|z|da|k)?sh)(?:\s|$)}) {
+    $top_arith = 0 unless $arith_cmd_shell{$1};
+    $whole;
+  }
   else {
     push @bodies, $body;
     "$pre<<HEREDOC_$#bodies $post";
@@ -194,20 +218,6 @@ my $runs_code = qr{(?:^|[\s;&|(])(?:
   | eval
 )(?:\s+--)?\s+\z}x;
 
-# Whether the interpreter about to read a `-c` body has an arithmetic command at all.
-# `((i=1))` is one in bash, zsh and ksh. `sh`, `dash` and busybox `ash` have no such thing:
-# they read the same text as two nested subshells, so the body RUNS. Measured with a logging
-# `gh` on the PATH — `dash -c "((gh pr merge 7 --admin))"` merges on dash 0.5.12 and on
-# busybox ash, while bash 3.2.57, bash 5.3.20, zsh 5.9 and ksh all refuse it as an
-# expression. This file descends into a `dash -c` body on purpose ($runs_code above
-# enumerates `dash`), so hollowing `(( … ))` there was a merge that no rule saw: deny on
-# 0.3.2, silent allow without it.
-# `sh` is in neither camp by name — it is bash on macOS and dash on Debian — so it counts as
-# not having one. That is the safe direction: the construct stays a subshell, its command
-# word stays visible, and refusing a merge that was only ever a syntax error costs nothing.
-# Anything this function cannot name is answered the same way, for the same reason.
-# `eval` runs in the current shell and inherits.
-my %arith_cmd_shell = map { $_ => 1 } qw(bash zsh ksh ksh93 mksh);
 sub body_arith_cmd {
   my ($syn, $inherited) = @_;
   return $inherited if $syn =~ /(?:^|[\s;&|(])eval(?:\s+--)?\s+\z/;
@@ -221,8 +231,9 @@ sub body_arith_cmd {
 
 sub split_line {
   # $arith says whether the shell about to read this text has an arithmetic command, which
-  # decides whether `(( … ))` is hollowed. It is true at the top level — the Bash tool runs
-  # bash — and `body_arith_cmd` answers it for the body of a `-c` the splitter descends into.
+  # decides whether `(( … ))` is hollowed. `body_arith_cmd` answers it for the body of a `-c`
+  # the splitter descends into; `$top_arith` answers it for the line itself, which the Bash
+  # tool runs with bash unless the line hands a heredoc to a POSIX shell.
   my ($s, $arith) = @_;
   $arith = 1 unless defined $arith;
   my $cur = '';
@@ -973,7 +984,7 @@ sub command_word {
 }
 
 # ------------------------------------------------------------------------------- output
-split_line($input);
+split_line($input, $top_arith);
 for my $seg (@segments) {
   my ($cmd, $resolved, $reason, $operands) = command_word($seg);
   my $trimmed = $seg;

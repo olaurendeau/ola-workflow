@@ -29,6 +29,11 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 
 command -v perl >/dev/null || { echo "needs perl" >&2; exit 2; }
 command -v jq >/dev/null || { echo "needs jq" >&2; exit 2; }
+# Hard, like perl and jq: the rows below are claims about the grammar of a shell that is not
+# bash, and a host without dash can only check the tokenizer half of them. That fallback was
+# written first, and it reported a smaller suite and left dash's grammar measured nowhere —
+# a suite that quietly asserts less is worse than one that refuses to run.
+command -v dash >/dev/null || { echo "needs dash (a POSIX shell without an arithmetic command)" >&2; exit 2; }
 
 ola_scratch tokenize
 WORK=$OLA_SCRATCH
@@ -499,23 +504,11 @@ echo "--- a -c body is read with the grammar of the shell that will read it"
 # test is itself a `dash -c …`, so bash starts dash and the stub records what dash ran. That
 # matters, because `sees` and `runs_nothing` hard-code `bash -c`, and a claim about another
 # shell's grammar is one they could otherwise never contradict.
-if command -v dash >/dev/null; then
-  sees 'a merge in a dash body'      'dash -c "((gh pr merge 7 --admin))"' gh
-  sees 'after another command'       'dash -c "echo hi; ((gh pr merge 7 --admin))"' gh
-  sees 'three parens deep'           'dash -c "(((gh pr merge 7 --admin)))"' gh
-  sees 'an expression spaced out'    'dash -c "(( (gh pr merge 7 --admin) ))"' gh
-  sees 'env in front of it'          'env dash -c "((gh pr merge 7 --admin))"' gh
-else
-  # Both halves of every row above are measured where dash exists, which is the host this
-  # was written on and the CI runner; here only the tokenizer can be.
-  for dashless in 'dash -c "((gh pr merge 7 --admin))"' \
-                  'dash -c "echo hi; ((gh pr merge 7 --admin))"' \
-                  'dash -c "(((gh pr merge 7 --admin)))"' \
-                  'dash -c "(( (gh pr merge 7 --admin) ))"' \
-                  'env dash -c "((gh pr merge 7 --admin))"'; do
-    names 'a merge in a dash body, no dash on this host' "$dashless" gh
-  done
-fi
+sees 'a merge in a dash body'      'dash -c "((gh pr merge 7 --admin))"' gh
+sees 'after another command'       'dash -c "echo hi; ((gh pr merge 7 --admin))"' gh
+sees 'three parens deep'           'dash -c "(((gh pr merge 7 --admin)))"' gh
+sees 'an expression spaced out'    'dash -c "(( (gh pr merge 7 --admin) ))"' gh
+sees 'env in front of it'          'env dash -c "((gh pr merge 7 --admin))"' gh
 # `sh` is bash on macOS and dash on Debian, so what the shell half would measure depends on
 # the host. The tokenizer's answer must not: it reads `sh` as a shell with no arithmetic
 # command, which is the conservative half of the two. Refusing a merge that was only ever a
@@ -533,6 +526,40 @@ asks 'an arithmetic command in an eval' 'eval "((gh pr merge 7 --admin))"' 'eval
 # substitution on it, and the two then run different things — so the line stays unreadable
 # and the guard asks. Nothing runs here on any shell measured, so the ask hides nothing.
 asks 'a quote in an expression' 'x=$(( "gh pr merge 7 --admin" ))' 'a whole command line'
+
+echo "--- a heredoc fed to a shell is that shell's program, not the line's"
+# The other place this file hands text to another shell. A heredoc body is text by default —
+# a pull request body may quote a command without running it — except when it is fed to a
+# shell, where it is the program and stays in the input to be split. There is no descent to
+# carry a flag there, so the flag is lowered for the whole line instead.
+# This was the second regression the review caught: the body was being read with bash's
+# grammar while bash was handing it to dash.
+sees 'a merge in a heredoc fed to dash' 'dash <<EOF
+((gh pr merge 7 --admin))
+EOF' gh
+sees 'the dash-stripping form'          'dash <<-EOF
+((gh pr merge 7 --admin))
+EOF' gh
+# `sh` again: what the shell half would measure depends on whether this host's `sh` is bash
+# or dash, and the tokenizer's answer must not.
+names 'a merge in a heredoc fed to sh'  'sh <<EOF
+((gh pr merge 7 --admin))
+EOF' gh
+names 'a path to it'                    '/bin/sh <<EOF
+((gh pr merge 7 --admin))
+EOF' gh
+names 'reading its program from stdin'  'sh -s <<EOF
+((gh pr merge 7 --admin))
+EOF' gh
+# A shell that has an arithmetic command keeps it in a heredoc too.
+runs_nothing 'an arithmetic command in a heredoc fed to bash' 'bash <<EOF
+((gh pr merge 7 --admin))
+EOF'
+# And the witness this whole treatment exists for: a heredoc that is NOT fed to a shell is
+# text, and reading it as code is the false positive the marker was written to prevent.
+runs_nothing 'a heredoc that is text' 'cat <<EOF
+((gh pr merge 7 --admin))
+EOF'
 
 echo "--- an escaped operator is an argument, not an operator"
 # Two lookbehinds in the splitter decide whether a `|` or an `&` belongs to a redirection

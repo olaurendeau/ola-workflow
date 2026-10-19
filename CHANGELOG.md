@@ -31,10 +31,10 @@ ce que le shell exécute vraiment avec un faux `gh` sur le PATH qui se journalis
 exception et le disent où elles sont : deux sur `sh`, dont l'identité dépend de l'hôte, et
 deux où rien ne s'exécute et où l'ask est le prix d'un désaccord entre shells.
 
-La suite passe de 305 à **362** assertions, soit 57 : huit lignes en portent trois chacune —
+La suite passe de 305 à **375** assertions, soit 70 : huit lignes en portent trois chacune —
 le shell n'exécute rien, le tokenizer ne nomme rien, et la ligne n'est pas illisible, cette
 troisième étant celle qui coûtait une confirmation par appel — quatorze en portent deux,
-quatre en portent une, et une s'ajoute dans la boucle des préfixes. 24 + 28 + 4 + 1.
+quatre en portent une, et une s'ajoute dans la boucle des préfixes. 24 + 28 + 4 + 1, puis 4 + 3 + 6 pour les heredocs.
 
 **Une substitution imbriquée dans une expression s'exécute.** `$(( $(gh pr merge 7 --admin) +
 1 ))` lance `gh`, et quatre orthographes de cette forme — `$( )`, backquotes, arithmétique
@@ -87,6 +87,34 @@ précaution que la relecture a rendue nécessaire : `sees` et `runs_nothing` ex�
 `bash -c`, donc une affirmation sur un autre shell leur est par construction incontestable.
 Ces lignes mettent le shell visé **dans la ligne testée** (`dash -c "…"`), de sorte que bash
 démarre dash et que le faux `gh` enregistre ce que dash a lancé.
+
+### Et la même erreur une seconde fois, dans un heredoc
+
+Le deuxième cycle de relecture a trouvé la même faute par un autre chemin. Un corps de
+heredoc donné à un shell reste **dans le texte de premier niveau** — par conception : c'est
+là qu'il doit être lu, puisque c'est le programme de ce shell. Il n'y a donc pas de descente
+pour porter le drapeau, et le drapeau de premier niveau valait « bash », au motif que l'outil
+Bash lance bash. Sauf que bash, ici, ne lit pas ce texte : il le passe à dash.
+
+```
+dash <<EOF
+((gh pr merge 7 --admin))
+EOF
+```
+
+Refusé par 0.3.2, autorisé en silence par le correctif précédent. Le drapeau est maintenant
+abaissé pour toute la ligne dès qu'un heredoc est donné à un shell POSIX. Grossier à dessein :
+une ligne qui donne un heredoc à `dash` *et* incrémente un compteur paiera une confirmation
+pour le compteur. L'inverse est un merge.
+
+Un heredoc qui n'est **pas** donné à un shell reste du texte, et une ligne de test le vérifie
+— c'est le faux positif que le marqueur existe pour éviter : un corps de pull request peut
+citer une commande sans la lancer.
+
+`dash` est désormais une dépendance dure de la suite, au même titre que `perl` et `jq`. La
+première version dégradait cinq lignes mesurées en lignes de tokenizer seul quand `dash`
+manquait, et annonçait un total plus petit — une suite qui en affirme moins sans le dire est
+pire qu'une suite qui refuse de tourner.
 
 ### Une affirmation fausse retirée de la suite
 
