@@ -1,11 +1,11 @@
 # Same steps as the CI jobs, so `make check` is the CI.
 # Nothing has to be installed on the host: shellcheck runs in its own container.
 SHELLCHECK_IMAGE ?= koalaman/shellcheck:v0.11.0
-# Derived, not enumerated. The list was written out by hand under a target whose help text
-# says "every shell script", and it had stopped being that: `scripts/measure.sh` and
-# `scripts/scratch.sh` were missing — the script that could delete the repository and the one
-# written to stop it. An enumeration that drifts from the claim above it is the defect this
-# repository keeps finding, and a Makefile can ask git instead of remembering.
+# Derived, not enumerated. The list was once written out by hand under a target whose help
+# text says "every shell script", and it had stopped being that: two scripts were missing,
+# one of them able to delete the repository. An enumeration that drifts from the claim above
+# it is the defect this repository keeps finding, and a Makefile can ask git instead of
+# remembering.
 SHELL_FILES := $(shell git ls-files '*.sh' 'bin/*')
 
 help: ## Shows this help

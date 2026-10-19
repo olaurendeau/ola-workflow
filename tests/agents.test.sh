@@ -908,6 +908,22 @@ case $integrated in
   *) ko "the integrated brief does not name the review status from the profile" ;;
 esac
 
+# Reviewer slots: a single value, as brief_for writes it, or a list, one reviewer per slot.
+case $integrated in
+  *'reviewers: 9'*) ok "the brief names a single reviewer slot" ;;
+  *) ko "the brief does not name the single reviewer slot from the profile" ;;
+esac
+listed=$WORK/listed
+mkdir -p "$listed/.claude"
+git -C "$listed" -c init.defaultBranch=main init -q 2>/dev/null
+git -C "$listed" remote add origin https://github.com/someone/listed.git 2>/dev/null
+printf '{"mode":"integrated","slots":{"developers":[1,2],"reviewer":[8,9]}}\n' \
+  >"$listed/.claude/workflow.json"
+case $("$BRIEF" "$listed") in
+  *'reviewers: 8 9'*) ok "the brief names every reviewer slot of a list" ;;
+  *) ko "the brief does not name both reviewer slots of [8,9]" ;;
+esac
+
 # A value the profile does not state is announced as a default before the rules, not
 # presented as one of them. Unmarked, a reviewer enforces a budget nobody set.
 minimal=$WORK/minimal

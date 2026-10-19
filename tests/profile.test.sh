@@ -479,6 +479,22 @@ expect_problem '{"mode": "discreet", "commands": [{"allow_args": "x"}]}' \
   'commands[0]/cmd: required key is missing' 'a command needs its cmd'
 expect_problem '{"mode": "discreet", "slots": {"developers": [{"a": 1}]}}' \
   'developers[0]: expected' 'slot items are scalars'
+expect_problem '{"mode": "discreet", "slots": {"reviewer": [{"a": 1}]}}' \
+  'reviewer[0]: expected' 'reviewer slot items are scalars'
+expect_problem '{"mode": "discreet", "slots": {"reviewer": true}}' \
+  'expected ["string","integer","array"], got boolean' 'a reviewer slot is a value or a list'
+# One reviewer slot or several: the single value predates the list and must stay valid.
+for value in '9' '"r1"' '[8, 9]'; do
+  printf '{"mode": "discreet", "slots": {"reviewer": %s}}\n' "$value" >"$WORK/reviewers.json"
+  out=$("$CLI" validate "$WORK/reviewers.json" 2>&1)
+  total=$((total + 1))
+  if [ -z "$out" ]; then
+    echo "ok    validate: slots.reviewer may be $value"
+  else
+    echo "FAIL  validate: slots.reviewer $value refused ('$out')"
+    failures=$((failures + 1))
+  fi
+done
 # Valid JSON that is not an object: the schema interpreter has the useful message, so
 # validate must not flatten it to "not valid JSON".
 for value in '[1,2]' '"hello"' '42' 'true' 'null'; do

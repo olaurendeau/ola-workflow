@@ -22,7 +22,7 @@ human, offer `/ola-workflow:workflow-init`, and stop.
 | `ola-workflow:design-reviewer` | the epic, the paths of the design's page and README, and its URL once published | a verdict on that design, with findings |
 | `ola-workflow:architect` | the epic | design and an ordered task list |
 | `ola-workflow:developer` | one task, and one slot | an open pull request closing that task |
-| `ola-workflow:pr-reviewer` | one pull request | a verdict, and the review status on its head SHA |
+| `ola-workflow:pr-reviewer` | one pull request, and one reviewer slot | a verdict, and the review status on the SHA it pinned |
 
 Dispatch with the **full namespaced name**, prefix included. `subagent_type` is an exact
 match, so a bare role name does not resolve to a plugin agent: the dispatch fails in front
@@ -75,11 +75,21 @@ without a specialist. And do not pretend a specialist did it.
    parallel, one developer each — never two developers on the same slot, and never more
    developers at once than the brief lists slots.
 
-6. **Review.** Wait for the checks, then dispatch the pr-reviewer with the pull request.
+6. **Review.** Dispatch a pr-reviewer as soon as a pull request is opened, without waiting
+   for the checks: it reads the code while CI runs and reads CI's result rather than running
+   it again. Give it the pull request and **one reviewer slot from the brief**. Requests that
+   are ready together are reviewed in parallel, one reviewer each — never two on the same
+   slot, never more at once than the brief lists reviewer slots — and building the next
+   tasks does not wait for any of them.
+   - **A review owed again** is a delta review: the reviewer finds its previous one and
+     judges what changed since. You decide *whether* one is owed, below; it decides how.
+   - **The reviewer reports that the head moved** while it worked → its verdict stands for
+     the SHA it pinned. What moved the head is a fix like any other: when it owes a review,
+     that review is a delta from the pinned SHA.
    - **A check fails** → if the log points at the code, send it to that developer; if the
      runner was flaky, rerun it; if the fix needs a dependency, that is the human's.
-   - **The reviewer reports `blocked`** (it could not run the checks) → fix nothing in the
-     change: resolve the environment, or ask the human, then dispatch it again.
+   - **The reviewer reports `blocked`** (it could not read or run the checks) → fix nothing
+     in the change: resolve the environment, or ask the human, then dispatch it again.
    - **Blocking findings** → send them verbatim to that developer, wait for its new report,
      then decide whether a new review is owed — see *When a fix owes a new review* below.
      If the developer disputes a finding with a reason, or the same finding survives two
@@ -116,9 +126,7 @@ without a specialist. And do not pretend a specialist did it.
    Two things keep this honest. A prose fix still goes to the reviewer, so a false claim in
    it is caught on the next change rather than never. And a claim that must be *true* rather
    than merely unrepeated — a measured number, a rate, a cost — belongs in something that
-   recomputes it, not in a sentence a review has to re-check: this repository ships
-   `make measure` for exactly that reason, after publishing three numbers that were wrong
-   because the method was.
+   recomputes it, not in a sentence a review has to re-check.
 
    When the reviewer and you disagree about which column a fix is in, it is behaviour. The
    cost of one extra cycle is an hour; the cost of being wrong about it is a role merging.

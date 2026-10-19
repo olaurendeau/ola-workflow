@@ -150,12 +150,13 @@ echo "Any {slot} in those commands is replaced by the slot you were given. Read 
 echo "with the slot already substituted: ola-profile get check.affected --slot <n>"
 echo
 echo "## Slots"
-printf 'Variable: %s · developers: %s · reviewer: %s\n' \
+printf 'Variable: %s · developers: %s · reviewers: %s\n' \
   "$(with_default slots.var SLOT)" \
   "$(get slots.developers '(none declared)' | tr '\n' ' ')" \
-  "$(get slots.reviewer '(none declared)')"
+  "$(get slots.reviewer '(none declared)' | tr '\n' ' ')"
 echo "A slot is what keeps parallel work from colliding on ports, databases and containers."
-echo "Never run a command with another agent's slot."
+echo "Never run a command with another agent's slot. One agent per slot: never more"
+echo "developers at once than developer slots, nor more reviewers than reviewer slots."
 echo
 echo "## A reviewable pull request"
 printf 'At most %s changed lines' "$(with_default pr.max_lines 1000)"
