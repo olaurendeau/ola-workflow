@@ -14,7 +14,7 @@
   "slots": {
     "var": "SLOT",
     "developers": [1, 2],
-    "reviewer": 9
+    "reviewer": [8, 9]
   },
   "pr": {
     "max_lines": 1000,

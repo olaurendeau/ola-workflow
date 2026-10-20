@@ -3,7 +3,7 @@
 # This interprets the schema rather than restating it, so the schema stays the single
 # source of truth: a key added there is checked here with no code change. It covers the
 # keywords the profile schema uses — type, enum, required, properties,
-# additionalProperties: false, items, minimum — and ignores anything else.
+# additionalProperties: false, items, minItems, minimum — and ignores anything else.
 #
 # Prints one line per problem; no output means the profile is valid.
 
@@ -25,6 +25,9 @@ def errors($schema; $path):
       else [] end )
   + ( if ($schema | has("minimum")) and ($v | type) == "number" and $v < $schema.minimum
       then ["\($path): \($v) is below the minimum of \($schema.minimum)"]
+      else [] end )
+  + ( if ($schema | has("minItems")) and ($v | type) == "array" and ($v | length) < $schema.minItems
+      then ["\($path): \($v | length) items, at least \($schema.minItems) required"]
       else [] end )
   + ( if ($v | type) == "object" then
         ( (($schema.required // []) - ($v | keys))

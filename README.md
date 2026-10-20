@@ -214,7 +214,7 @@ is also what validates it — point your editor at it:
 | `language` | what to write in, for the human, the artifacts and the agents |
 | `base_branch` | the branch PRs target and nobody pushes to |
 | `check` | `full` (what CI runs), `affected` (the subset), `cleanup` |
-| `slots` | how parallel agents avoid colliding on ports, databases and containers |
+| `slots` | how parallel agents avoid colliding on ports, databases and containers: one per developer, and one or more for reviewers, each running a review at the same time |
 | `pr` | `max_lines`, `exclude`, `title` |
 | `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
 | `commands` | per-command `allow_args` / `deny_args` rules the brief states — nothing applies them yet |

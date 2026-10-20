@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+**Reviews were the bottleneck, so they run in parallel and each cycle reads only what
+changed.** #26 took fourteen full reviews in twenty-one hours, every one of them reading the
+whole diff again.
+
+- `slots.reviewer` takes a list, and the coordinator runs one reviewer per slot at once,
+  as it already did for developers. A single value still works, an empty list does not —
+  the schema validator now reads `minItems`. This repository now has two.
+- The pr-reviewer is dispatched when a request opens, without waiting for CI, and reads
+  CI's result on the SHA instead of running the full check again. It runs it itself only
+  when the SHA carries none of the required checks: discreet mode, or no CI.
+- A second review is a **delta**: the reviewer finds its previous one, says which blocking
+  finding is fixed, disputed or still open, and judges what changed since. A defect on an
+  untouched line is blocking only if the change made it reachable. The delta compares the
+  request's whole change at both SHAs, not its commits: `git range-diff` skips merge
+  commits, and would have shown the code written while resolving a conflict as unchanged.
+- A review is no longer thrown away when the head moves under it: it is published on the SHA
+  it pinned, which the merge gate never mistakes for the head, and the next cycle is a delta
+  from there. When CI cancelled that SHA's checks, the review carries no status at all.
+- In discreet mode, reviews are kept under `reviews/<branch>/`, so a review can be found again
+  after a rebase.
+- The coordinator no longer tells every project that it ships `make measure`, which went
+  with the guard in 0.4.0.
+
 ## 0.4.0
 
 **The guard that read command lines is gone. GitHub refuses instead.** Every agent now works
