@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 **Reviews were the bottleneck, so they run in parallel and each cycle reads only what
 changed.** #26 took fourteen full reviews in twenty-one hours, every one of them reading the
