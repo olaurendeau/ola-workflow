@@ -524,11 +524,79 @@ for f in "${AGENTS[@]}"; do
   if [ "$ignored" = 0 ]; then ok "$name: claims no frontmatter key that plugin agents ignore"; else ko "$name: sets a key that is ignored for a plugin agent"; fi
 done
 
-# Only the developer works in a worktree, and only the reviewer pins a model.
+# Only the developer works in a worktree.
 worktrees=$(grep -l '^isolation: worktree' "${AGENTS[@]}" | sed 's#.*/##' | tr '\n' ' ')
 if [ "$worktrees" = "developer.md " ]; then ok "only the developer is isolated in a worktree"; else ko "worktree isolation is on: ${worktrees:-nobody}"; fi
-models=$(grep -l '^model: ' "${AGENTS[@]}" | sed 's#.*/##' | tr '\n' ' ')
-if [ "$models" = "pr-reviewer.md " ]; then ok "only the reviewer pins a model"; else ko "a model is pinned on: ${models:-nobody}"; fi
+
+# --- What each agent runs on ------------------------------------------------------------
+# Declared here, not read off the files, for the reason the roles themselves are declared
+# above: an expectation taken from the thing it checks is not an expectation. `-` means the
+# key is absent, so that role follows the session — only the coordinator does, because it is
+# the session agent and the human picks its model.
+#
+# This replaced a pair of greps asserting "only the reviewer pins a model". That one
+# sentence covered two things at once — the reviewer pins one, nobody else does — and a map
+# only covers what it names, so this one names every file under `agents/`, `probe` included,
+# which the pair it replaces left out of its set.
+EXPECTED_MODEL="coordinator=- product-designer=sonnet design-reviewer=sonnet architect=opus developer=sonnet pr-reviewer=opus probe=haiku"
+EXPECTED_EFFORT="coordinator=- product-designer=- design-reviewer=- architect=- developer=high pr-reviewer=high probe=low"
+
+# fm_key <frontmatter> <key> → the value, or nothing. Takes the text rather than the path,
+# so the witness below can hand it a fixture instead of a file.
+fm_key() { printf '%s\n' "$1" | sed -n "s/^$2: *//p"; }
+
+# The witness beside the absences, and it is the whole of what keeps them honest: every
+# comparison below reads `-` once the pattern stops matching, and a map corrected to `-`
+# everywhere would then pass on seven files that pin nothing at all.
+fixture=$(printf 'name: x\nmodel: sonnet\neffort: high\n')
+if [ "$(fm_key "$fixture" model)" = sonnet ] && [ "$(fm_key "$fixture" effort)" = high ]; then
+  ok "the extractor reads a model and an effort off a frontmatter that has both"
+else
+  ko "the extractor reads no model or no effort off a fixture that has both"
+fi
+
+for f in "${ALL[@]}"; do
+  name=${f##*/}
+  stem=${name%.md}
+  fm=$(frontmatter "$f")
+  for key in model effort; do
+    case $key in
+      model) declared=$EXPECTED_MODEL ;;
+      effort) declared=$EXPECTED_EFFORT ;;
+    esac
+    got=$(fm_key "$fm" "$key")
+    want=
+    # A name is compared against a list of names with `case`, one pair at a time: a single
+    # pattern over the whole map would match a value where it meant to match a key.
+    for pair in $declared; do
+      case $pair in "$stem="*) want=${pair#*=} ;; esac
+    done
+    if [ -z "$want" ]; then
+      ko "$name: this suite declares no $key for it, so nothing says what it should run at"
+    elif [ "${got:--}" = "$want" ]; then
+      if [ "$want" = - ]; then
+        ok "$name: pins no $key, so it follows the session"
+      else
+        ok "$name: $key is $want"
+      fi
+    else
+      ko "$name: $key is '${got:--}', and this suite declares '$want'"
+    fi
+  done
+done
+
+# The pair that keeps the maps and the tree the same size. The loop above walks the files,
+# so it cannot see a name left in a map after its file goes, nor a map that names one agent
+# fewer than the other — and both would read as "nothing to check here".
+for entry in "model:$EXPECTED_MODEL" "effort:$EXPECTED_EFFORT"; do
+  key=${entry%%:*}
+  named=$(printf '%s' "${entry#*:}" | tr ' ' '\n' | grep -c .)
+  if [ "$named" = "${#ALL[@]}" ]; then
+    ok "the $key map names one agent per file under agents/"
+  else
+    ko "the $key map names $named agents, and agents/ holds ${#ALL[@]} files"
+  fi
+done
 
 # Who may publish, and who may write. The product-designer publishes its design to claude.ai
 # and writes the page it publishes, outside the repository — so `Write`, never `Edit`: there

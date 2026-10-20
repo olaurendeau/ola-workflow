@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 # What does a PreToolUse payload hold when the agent comes from a plugin?
 #
-# Two things the Claude Code docs do not say, and that the hooks and the default
-# session agent of B16 both depend on:
+# Three things the Claude Code docs do not say, and that the hooks, the default session
+# agent of B16 and the per-role models all depend on:
 #   1. the exact value of agent_type for a plugin agent, as a subagent and as the session
 #      agent (--agent);
-#   2. whether the settings.json "agent" key accepts a namespaced plugin agent name.
+#   2. whether the settings.json "agent" key accepts a namespaced plugin agent name;
+#   3. whether a frontmatter `effort` reaches a plugin subagent at all, and what outranks
+#      it. The docs list `effort` as a subagent key and name three keys a plugin agent
+#      ignores, `effort` not among them — which is a sentence, not a measurement. The
+#      payload carries an `effort` field, so this one can be read rather than believed.
+#      Scenario 1 shows the session's, 2 the one `probe` pins, 4-7 whether the same file
+#      run as a session agent reads it at all, and 8 what the environment does to it.
+#
+# The model cannot be measured this way: no payload field carries it.
 #
 # Nothing is installed: --plugin-dir loads the plugin for one session only, and the
 # payloads are written outside the repository. Re-run this after a Claude Code upgrade.
@@ -77,20 +85,28 @@ run 7 'settings "agent" key, in .claude/settings.json' "$PROBE" -- \
   claude -p --plugin-dir "$REPO" --setting-sources user,project,local --allowedTools Bash
 RUN_DIR="$OUT"
 
+# Scenario 2 again, with an effort in the environment. `probe` pins `effort: low`, and the
+# docs say the variable outranks the frontmatter; the payload says whether it does.
+run 8 'subagent, CLAUDE_CODE_EFFORT_LEVEL=high' \
+  'Call the Agent tool once with subagent_type "ola-workflow:probe" and prompt "go". If the call fails, quote the error verbatim and stop.' -- \
+  env CLAUDE_CODE_EFFORT_LEVEL=high claude -p --plugin-dir "$REPO" --allowedTools Bash Agent
+
 echo
-printf '%-4s %-48s %-28s %-10s %s\n' '#' 'scenario' 'agent_type' 'agent_id' 'calls'
-printf '%-4s %-48s %-28s %-10s %s\n' '---' '---' '---' '---' '---'
+printf '%-4s %-48s %-28s %-10s %-8s %s\n' '#' 'scenario' 'agent_type' 'agent_id' 'effort' 'calls'
+printf '%-4s %-48s %-28s %-10s %-8s %s\n' '---' '---' '---' '---' '---' '---'
 for entry in "${labels[@]}"; do
   n=${entry%%|*}
   label=${entry#*|}
   log="$OUT/spike-$n.jsonl"
   calls=$(grep -c . "$log" 2>/dev/null | tr -d ' ')
   if [ "${calls:-0}" -eq 0 ]; then
-    printf '%-4s %-48s %-28s %-10s %s\n' "$n" "$label" '(no Bash call)' '-' 0
+    printf '%-4s %-48s %-28s %-10s %-8s %s\n' "$n" "$label" '(no Bash call)' '-' '-' 0
   else
     atype=$(jq -r 'if has("agent_type") then .agent_type else "<absent>" end' "$log" | tail -1)
     aid=$(jq -r 'if has("agent_id") then "present" else "<absent>" end' "$log" | tail -1)
-    printf '%-4s %-48s %-28s %-10s %s\n' "$n" "$label" "$atype" "$aid" "$calls"
+    # `effort` is an object, `{"level": "high"}`, not a string: measured, not assumed.
+    effort=$(jq -r 'if has("effort") then (.effort.level // (.effort | tostring)) else "<absent>" end' "$log" | tail -1)
+    printf '%-4s %-48s %-28s %-10s %-8s %s\n' "$n" "$label" "$atype" "$aid" "$effort" "$calls"
   fi
 done
 

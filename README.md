@@ -61,6 +61,51 @@ exit before doing anything, and its sessions keep your own GitHub login.
 Until the merge gate exists, the coordinator checks it by hand against the forge: GitHub
 checks *who* merges, not whether the checks were green.
 
+## What each agent runs on
+
+| agent | `model` | `effort` | what it buys |
+|---|---|---|---|
+| coordinator | *(none)* | *(none)* | the session agent: the human picks its model |
+| product-designer | `sonnet` | *(none)* | long writing, bounded by a glossary and a brief |
+| design-reviewer | `sonnet` | *(none)* | a checklist held against one page |
+| architect | `opus` | *(none)* | a plausible split whose third task needs the fifth is paid for in full |
+| developer | `sonnet` | `high` | the largest volume here, on a task already specified file by file |
+| pr-reviewer | `opus` | `high` | the defect the author could not see — twice at a time, since 0.5.0 runs a reviewer per slot |
+| probe | `haiku` | `low` | one `echo`, so that a hook records a payload |
+
+The rule is **Opus where a wrong judgement costs a whole cycle, Sonnet where the volume is.**
+The two reviewers are not the same kind of reviewer, which is why they are not on the same
+model: the design-reviewer holds a page against criteria somebody already wrote down, and
+the pr-reviewer has to find what nobody wrote down.
+
+The two `effort` pins are a ceiling rather than a cut. They hold the two heaviest roles at
+`high` however high the session is set, and the session is what they used to follow.
+
+The coordinator pins nothing, deliberately. It is the role a project names as its session
+agent, and a frontmatter `effort` is measured to have no effect at all there — see
+[Agent identity](#agent-identity). So a key on the coordinator would be either ignored, or,
+for the model, a choice taken behind the human who set the session's.
+
+Two things follow from pinning the others:
+
+- **`CLAUDE_CODE_SUBAGENT_MODEL` no longer reaches them.** A model resolves in this order:
+  the `model` parameter of the dispatch, then the frontmatter, then that variable, then the
+  session's model. Past the second step the variable is never read, so the one remaining way
+  to run a role on something else for a single dispatch is that parameter — which the
+  coordinator holds.
+- **`effort` and `model` are not claims of the same strength.** A `PreToolUse` payload
+  carries `effort`, so what a plugin subagent reflects at is *measured* — see
+  [Agent identity](#agent-identity). No payload field carries the model, so that column is
+  read from the documentation and seen in the session, not measured.
+
+`tests/agents.test.sh` keeps this table as a map declared beside the test: a role that stops
+pinning its model, pins another one, or is added without being named in the map fails by
+name.
+
+What is deliberately **not** written here is a saving. A saving is a number that has to be
+*true*, not merely unchallenged, so it belongs to something that recomputes it rather than to
+a sentence every later review would have to check again.
+
 ## GitHub tokens
 
 The agents never hold your GitHub login. In a project with a profile, every Bash command of
@@ -277,18 +322,22 @@ them:
 ## Agent identity
 
 <!-- spike:begin -->
-Two things the documentation does not say, and that both the hooks and the default session
-agent depend on. Measured with `make spike` on **Claude Code 2.1.296**, 2026-10-10:
+Three things the documentation does not say, and that the hooks, the default session agent
+and the per-role models all depend on. Measured with `make spike` on **Claude Code 2.1.305**,
+2026-10-20:
 
-| scenario | `agent_type` | `agent_id` |
-|---|---|---|
-| main session, no agent | *absent* | *absent* |
-| subagent, `subagent_type: ola-workflow:probe` | `ola-workflow:probe` | present |
-| subagent, `subagent_type: probe` | — the call fails, see below | — |
-| `--agent ola-workflow:probe` | `ola-workflow:probe` | *absent* |
-| `--agent probe` | `ola-workflow:probe` | *absent* |
-| `"agent"` passed with `--settings` | `ola-workflow:probe` | *absent* |
-| `"agent"` in a project's `.claude/settings.json` | `ola-workflow:probe` | *absent* |
+| scenario | `agent_type` | `agent_id` | `effort` |
+|---|---|---|---|
+| main session, no agent | *absent* | *absent* | `high` |
+| subagent, `subagent_type: ola-workflow:probe` | `ola-workflow:probe` | present | `low` |
+| subagent, `subagent_type: probe` | — the call fails, see below | — | — |
+| `--agent ola-workflow:probe` | `ola-workflow:probe` | *absent* | `medium` |
+| `--agent probe` | `ola-workflow:probe` | *absent* | `medium` |
+| `"agent"` passed with `--settings` | `ola-workflow:probe` | *absent* | `medium` |
+| `"agent"` in a project's `.claude/settings.json` | `ola-workflow:probe` | *absent* | `medium` |
+| subagent, `CLAUDE_CODE_EFFORT_LEVEL=high` | `ola-workflow:probe` | present | `high` |
+
+The `effort` column is read from the payload of the same probe, which pins `effort: low`.
 
 What this means:
 
@@ -317,12 +366,26 @@ What this means:
 
   So the coordinator has to dispatch `ola-workflow:developer`, never `developer`. The same
   holds for a skill's `agent:` key.
+- **A frontmatter `effort` reaches a subagent — and only a subagent.** `probe` pins
+  `effort: low`: dispatched with the Agent tool it runs at `low`, and the very same file run
+  as a session agent runs at `medium`, which is the model's own default and not what the file
+  asks for. The key is read exactly where the work happens, and the coordinator could not pin
+  its own effort even if that were wanted.
+- **`CLAUDE_CODE_EFFORT_LEVEL` outranks the frontmatter.** The same dispatch with it set to
+  `high` runs at `high`, not at the `low` the file asks for — so it is the session's escape
+  hatch from every effort this plugin pins. The model has no hatch of that shape: there the
+  frontmatter outranks `CLAUDE_CODE_SUBAGENT_MODEL`, not the other way round.
+- **No payload field carries the model.** The fields below are all a hook is offered, so what
+  a role runs *on* cannot be measured this way — only what it runs *at*. That is the whole
+  difference in strength between the two columns of
+  [What each agent runs on](#what-each-agent-runs-on).
 
 The fields a `PreToolUse` payload offers a hook, as measured:
 `agent_id`, `agent_type`, `cwd`, `effort`, `hook_event_name`, `permission_mode`, `prompt_id`,
-`session_id`, `tool_input`, `tool_name`, `tool_use_id`, `transcript_path`.
+`session_id`, `tool_input`, `tool_name`, `tool_use_id`, `transcript_path`. `effort` is an
+object — `{"level": "high"}` — not a string.
 
-Re-run `make spike` after a Claude Code upgrade: none of this is contractual. The seven
+Re-run `make spike` after a Claude Code upgrade: none of this is contractual. The eight
 scenarios live in [`scripts/spike/agent-identity.sh`](scripts/spike/agent-identity.sh); it
 loads the plugin with `--plugin-dir`, so nothing is installed and nothing is written inside
 the repository.

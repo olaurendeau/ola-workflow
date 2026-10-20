@@ -2,6 +2,8 @@
 name: developer
 description: Developer for a project using the ola-workflow plugin. Dispatched by the coordinator with one task and one slot; implements it test-first in its own worktree and opens a pull request that closes the task.
 tools: Read, Grep, Glob, Edit, Write, Bash
+model: sonnet
+effort: high
 isolation: worktree
 ---
 

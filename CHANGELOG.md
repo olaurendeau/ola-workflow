@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+**Each role says which model it runs on, instead of inheriting the session's.** Two agents
+out of seven pinned one; the other five ran on whatever the session was set to — and since
+0.5.0 runs one reviewer per slot, that meant two Opus reviews at a time on every new head
+SHA.
+
+- Opus where a wrong judgement costs a whole cycle: the architect, whose split is paid for in
+  full when its third task turns out to need its fifth, and the pr-reviewer, which has to find
+  what nobody wrote down. Sonnet where the volume is: the developer, the product-designer and
+  the design-reviewer, each holding a page or a task against criteria somebody already wrote.
+  The coordinator pins nothing — it is the session agent, and the model there is the one
+  chosen for the session.
+- The developer and the pr-reviewer pin `effort: high`. That is a ceiling, not a cut: it keeps
+  the two heaviest roles at `high` however high the session is set, and the session is what
+  they used to follow.
+- Measured rather than believed: a frontmatter `effort` reaches a plugin **subagent**, and is
+  ignored when the same file runs as a session agent, where the model's own default applies.
+  `CLAUDE_CODE_EFFORT_LEVEL` overrides it; `CLAUDE_CODE_SUBAGENT_MODEL`, the other way round,
+  no longer reaches a role that pins a model. The spike grew an eighth scenario and an
+  `effort` column, the payload's `effort` turned out to be an object rather than a string, and
+  everything it records was re-measured on Claude Code 2.1.305.
+- The suite holds the whole table as a map declared beside it, `probe` included — which the
+  assertion it replaces left out of its set. A role that stops pinning its model, pins another
+  one, or arrives without being named in the map fails by name.
+
+No figure is given for what this saves, deliberately: a number that has to be *true* belongs
+to something that recomputes it, not to a line in a changelog.
+
 ## 0.5.0
 
 **Reviews were the bottleneck, so they run in parallel and each cycle reads only what
