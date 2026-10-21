@@ -299,7 +299,11 @@ protected branch and no required checks.
 
 This repository carries its own profile in
 [`.claude/workflow.json`](.claude/workflow.json): the workflow is developed with the
-workflow, which is the only honest test of how generic it is.
+workflow, which is the only honest test of how generic it is. Its
+[`.claude/settings.json`](.claude/settings.json) makes every session opened here an
+`ola-workflow:coordinator`, on the installed plugin rather than this tree, so the plugin is
+not rewritten under itself while it works. For an ordinary session, name another agent:
+`claude --agent <name>`.
 
 |  | integrated | discreet |
 |---|---|---|
