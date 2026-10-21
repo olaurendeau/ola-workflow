@@ -40,12 +40,14 @@ the prompts carry and nothing applies, which is a different thing from a rule. S
 In place: the manifests, the CI,
 the test harness, the answer to how a plugin agent is identified (see
 [Agent identity](#agent-identity)), the project profile with its schema and its
-`ola-profile` CLI, the **six agents** — a coordinator that frames and dispatches, a product
+`ola-profile` CLI, the **seven agents** — a coordinator that frames and dispatches, a product
 designer that turns a request into criteria a test can prove and the words a user reads, and
 for visual work publishes the design as a claude.ai artifact it keeps at one URL, a design
 reviewer that judges that page against the epic, an architect that splits an
-epic into reviewable tasks, developers that build test-first in their own worktrees, and an
-independent reviewer — and the **role tokens**.
+epic into reviewable tasks, developers that build test-first in their own worktrees, an
+independent reviewer, and a security reviewer dispatched beside it when a change touches the
+paths the project declares, whose blocking findings each go to a second, cold reading before
+a developer sees them — and the **role tokens**.
 
 A project with no profile is unaffected, which is the whole point of the design: both hooks
 exit before doing anything, and its sessions keep your own GitHub login.
@@ -71,14 +73,15 @@ checks *who* merges, not whether the checks were green.
 | architect | `opus` | *(none)* | a plausible split whose third task needs the fifth is paid for in full |
 | developer | `sonnet` | `high` | the largest volume here, on a task already specified file by file |
 | pr-reviewer | `opus` | `high` | the defect the author could not see — twice at a time, since 0.5.0 runs a reviewer per slot |
+| security-reviewer | `opus` | `high` | a path from an attacker to a sink, and the refutation of every path that is not one: a false positive costs a developer a cycle |
 | probe | `haiku` | `low` | one `echo`, so that a hook records a payload |
 
 The rule is **Opus where a wrong judgement costs a whole cycle, Sonnet where the volume is.**
-The two reviewers are not the same kind of reviewer, which is why they are not on the same
-model: the design-reviewer holds a page against criteria somebody already wrote down, and
+The design-reviewer and the pr-reviewer are not the same kind of reviewer, which is why they
+are not on the same model: the design-reviewer holds a page against criteria somebody already wrote down, and
 the pr-reviewer has to find what nobody wrote down.
 
-The two `effort` pins are a ceiling rather than a cut. They hold the two heaviest roles at
+The `high` pins are a ceiling rather than a cut. They hold the three heaviest roles at
 `high` however high the session is set, and the session is what they used to follow.
 
 The coordinator pins nothing, deliberately. It is the role a project names as its session
@@ -262,10 +265,11 @@ is also what validates it — point your editor at it:
 | `slots` | how parallel agents avoid colliding on ports, databases and containers: one per developer, and one or more for reviewers, each running a review at the same time |
 | `pr` | `max_lines`, `exclude`, `title` |
 | `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
+| `security` | `paths`: the globs whose change gets a security review beside the code review; none, and nobody is dispatched |
 | `commands` | per-command `allow_args` / `deny_args` rules the brief states — nothing applies them yet |
 | `github_tokens` | `keychain` (the default) or `off` — see [GitHub tokens](#github-tokens) |
 | `db_hosts_allowed` | the databases an agent may connect to |
-| `context` | the documents the agents read: product, architecture, review checklist, glossary; and `design`, where each design is documented (`docs/design` by default, integrated mode only) |
+| `context` | the documents the agents read: product, architecture, review checklist, security precedents, glossary; and `design`, where each design is documented (`docs/design` by default, integrated mode only) |
 | `verify_ui` | how a change is seen running |
 | `escalation_extra` | what this project reserves for the human |
 

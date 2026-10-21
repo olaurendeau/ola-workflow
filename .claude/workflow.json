@@ -32,8 +32,20 @@
       "agents/**",
       "skills/**",
       "schema/**",
-      "Makefile"
+      "Makefile",
+      "docs/security-precedents.md"
     ]
+  },
+  "security": {
+    "paths": [
+      "hooks/**",
+      "bin/**",
+      ".github/**",
+      ".claude-plugin/**"
+    ]
+  },
+  "context": {
+    "security_precedents": "docs/security-precedents.md"
   },
   "escalation_extra": [
     "changing which GitHub token a role holds, or what a token may do",

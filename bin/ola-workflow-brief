@@ -158,6 +158,30 @@ echo "A slot is what keeps parallel work from colliding on ports, databases and 
 echo "Never run a command with another agent's slot. One agent per slot: never more"
 echo "developers at once than developer slots, nor more reviewers than reviewer slots."
 echo
+# Which changes are worth a security review is the project's to say, and whether a change
+# touches one is git's: the same pathspec dialect as every other glob here, matched by the
+# command that reads the diff rather than by an agent reading a list.
+echo "## Security review"
+security_paths=$(get security.paths)
+if [ -n "$security_paths" ]; then
+  echo "A pull request whose change touches one of these paths gets a security review beside"
+  echo "the code review. Dispatch the security-reviewer when this prints a file:"
+  echo
+  printf '    git diff --name-only origin/%s...<SHA> --' "$base"
+  while IFS= read -r glob; do printf " ':(glob)%s'" "$glob"; done <<<"$security_paths"
+  echo
+  echo
+  cat <<'SECURITY'
+It takes a reviewer slot of its own, beside the pr-reviewer. Each blocking finding it reports
+is pending verification until a second security-reviewer, dispatched on that one finding,
+confirms it; a verifier reads and runs nothing, so it needs no slot. Its verdict is advice
+the coordinator relays: it sets no commit status, and the merge gate does not read it.
+SECURITY
+else
+  echo "(none declared — the security-reviewer is not dispatched; the pr-reviewer's checklist"
+  echo "is the only security review)"
+fi
+echo
 echo "## A reviewable pull request"
 printf 'At most %s changed lines' "$(with_default pr.max_lines 1000)"
 excluded=$(get pr.exclude)
@@ -273,7 +297,7 @@ if [ -n "$ui_kind" ]; then
 fi
 echo "## Context — read these before writing anything"
 found=0
-for key in product architecture review_checklist glossary; do
+for key in product architecture review_checklist security_precedents glossary; do
   path=$(get "context.$key")
   if [ -n "$path" ]; then
     printf '%-18s %s\n' "$key:" "$path"
@@ -369,8 +393,8 @@ memory is local, under:
 
   $profile_dir/runs/<slug>/
 
-with epic.md, tasks/ and reviews/<branch>/<sha>.md. Keep the repository itself clean: git status
-must be as you found it.
+with epic.md, tasks/, reviews/<branch>/<sha>.md and security-reviews/<branch>/<sha>.md.
+Keep the repository itself clean: git status must be as you found it.
 
 ## What discreet mode forbids
 
