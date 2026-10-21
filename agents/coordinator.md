@@ -112,11 +112,12 @@ without a specialist. And do not pretend a specialist did it.
      lives, as for any finding, and open a task that adds it to the document
      `context.security_precedents` names: the pattern, why it is not exploitable, where it
      was ruled. Otherwise the same false positive comes back on the next request.
-   Done when the review on the current head SHA has no blocking finding; when a security
-   review is owed, it has reported on that same SHA and every finding it marked
-   `pending verification` has a verdict, none of them `confirmed` and still open; and every
-   suggestion is triaged. The security review sets no status and the merge gate does not
-   read it, so this is the only thing that keeps a merge from overtaking it.
+   Done when the review on the current head SHA has no blocking finding; no security
+   finding is `confirmed` and still open; the last security review owed — on the request,
+   then after each fix that owes one, below — has reported, and every finding it marked
+   `pending verification` has a verdict; and every suggestion is triaged. The security
+   review sets no status and the merge gate does not read it, so this is the only thing
+   that keeps a merge from overtaking it.
 
    ### When a fix owes a new review
 

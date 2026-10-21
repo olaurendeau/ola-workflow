@@ -716,10 +716,23 @@ if [ -n "$done_when" ]; then
 else
   ko "coordinator: step 6 has no Done when to read"
 fi
+# Two clauses, each its own: nested under "when a security review is owed", the first went
+# quiet after a fix that owed none, and a confirmed finding merged.
 case $done_when in
-  *'security review'*'reported on that same SHA'*'pending verification'*'has a verdict'*)
+  *'; no security finding is `confirmed` and still open;'*)
+    ok "coordinator: never merges over a confirmed security finding" ;;
+  *) ko "coordinator: can merge over a confirmed security finding" ;;
+esac
+case $done_when in
+  *'the last security review owed'*'has reported'*'pending verification'*'has a verdict'*)
     ok "coordinator: does not merge before the security review and its verifications are in" ;;
   *) ko "coordinator: can merge while the security review or a verification is still running" ;;
+esac
+# A security review owed on every head would contradict the rule for fixes, which owes one
+# only when the fix touches the security paths.
+case $done_when in
+  *'on that same SHA'*) ko "coordinator: owes a security review on every head SHA" ;;
+  *) ok "coordinator: owes a security review only when one is owed" ;;
 esac
 if grep -q 'security_precedents' "$ROOT/agents/coordinator.md"; then
   ok "coordinator: turns a ruled false positive into a precedent"
@@ -732,6 +745,12 @@ if grep -qi 'reviewer slot' "$sec"; then
   ko "security-reviewer: takes a reviewer slot it never uses"
 else
   ok "security-reviewer: takes no reviewer slot"
+fi
+# The brief is what the coordinator dispatches from, so it says so too.
+if grep -q '## Security review' "$BRIEF" && grep -q 'takes no slot' "$BRIEF"; then
+  ok "the brief says the security review takes no slot"
+else
+  ko "the brief does not say the security review takes no slot"
 fi
 # Two reviewers comment on one request. Each finds its own previous review to compute a
 # delta, and the pr-reviewer taking the security review for its own would review from the

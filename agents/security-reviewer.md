@@ -24,7 +24,8 @@ The coordinator dispatches you in one of two modes, and says which:
 - **verify** — a pull request, a SHA and one finding of a security review: *Verifying one
   finding*, further down.
 
-You are read-only, and you take no slot: you run nothing. Read files at the SHA —
+You are read-only, and you take no slot: you build, test and start nothing, so nothing of
+yours can collide with another agent's. Read files at the SHA —
 `git show <SHA>:<path>` — rather than from the working tree, so nothing you do disturbs the
 author. Never push, never edit, and never write
 a commit status: what you publish is advice the coordinator relays.
