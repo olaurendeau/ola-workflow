@@ -28,10 +28,9 @@ matching. With no paths declared, nobody is dispatched and the brief says so.
   read it. The coordinator does not merge until the security review owed has reported, every
   finding pending verification has a verdict, and none is confirmed and still open. It takes
   no slot: it builds, tests and starts nothing.
-- What it takes from published definitions — Anthropic's security review and its plugins,
-  Trail of Bits' differential review and false-positive check — and what it leaves: the
-  large community collections, a persona and a keyword list with no threshold, no exclusion
-  and no verification step.
+- In discreet mode, nothing goes on the forge: a security review is written to
+  `security-reviews/<branch>/<SHA>.md` under the memory directory, and each verification to
+  a file of its own beside it, `<SHA>.Sn.md`, since verifiers run in parallel.
 - The pr-reviewer no longer takes a `Security review of` or `Verification of` comment for its
   own previous review.
 
@@ -50,9 +49,10 @@ SHA.
   the design-reviewer, each holding a page or a task against criteria somebody already wrote.
   The coordinator pins nothing — it is the session agent, and the model there is the one
   chosen for the session.
-- The developer and the pr-reviewer pin `effort: high`. That is a ceiling, not a cut: it keeps
-  the two heaviest roles at `high` however high the session is set, and the session is what
-  they used to follow.
+- The developer and the pr-reviewer pin `effort: high`, and so does the security-reviewer
+  this release adds, on Opus like the pr-reviewer. That is a ceiling, not a cut: it keeps
+  the heaviest roles at `high` however high the session is set, and the session is what they
+  used to follow.
 - Measured rather than believed: a frontmatter `effort` reaches a plugin **subagent**, and is
   ignored when the same file runs as a session agent, where the model's own default applies.
   `CLAUDE_CODE_EFFORT_LEVEL` overrides it; `CLAUDE_CODE_SUBAGENT_MODEL`, the other way round,
