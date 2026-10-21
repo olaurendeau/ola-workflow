@@ -1,6 +1,42 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
+
+**A security reviewer, tuned for precision: a false positive here costs a developer a whole
+review cycle.** Until now security was one line of the pr-reviewer's checklist. A project
+opts in by listing, in `security.paths`, the globs whose change gets a security review beside
+the code review; the brief prints the `git diff` command that decides, so git does the
+matching. With no paths declared, nobody is dispatched and the brief says so.
+
+- A finding is a complete path — a source an attacker controls, a sink, and no effective
+  check between them — each with a file and a line. The reviewer lists candidates, then tries
+  to refute each through named tests: it predates the change, no privilege boundary is
+  crossed, the input is trusted, the check is only client side, a validation is *read*
+  elsewhere, a precedent covers it. What it cannot prove is counted, not reported.
+- A finding blocks only when all three hold: the change introduces it or makes it reachable,
+  it is proven line by line, and its severity is medium or above. A proven finding that
+  predates the change becomes a suggestion for a follow-up.
+- Each blocking finding is `pending verification` until a second security-reviewer,
+  dispatched on that one finding in a fresh context, confirms it — trying to refute it, and
+  forbidden to invent a defence it has not read. Only a `confirmed` finding reaches the
+  developer.
+- A false positive the human rules on becomes a precedent in the document
+  `context.security_precedents` names, read from the base branch so that a change cannot
+  excuse itself. This repository lists that file among its sensitive paths, so only the human
+  merges a new precedent.
+- Its verdict is advice the coordinator relays: no commit status, and the merge gate does not
+  read it. The coordinator does not merge until the security review owed has reported, every
+  finding pending verification has a verdict, and none is confirmed and still open. It takes
+  no slot: it builds, tests and starts nothing.
+- In discreet mode, nothing goes on the forge: a security review is written to
+  `security-reviews/<branch>/<SHA>.md` under the memory directory, and each verification to
+  a file of its own beside it, `<SHA>.Sn.md`, since verifiers run in parallel.
+- The pr-reviewer no longer takes a `Security review of` or `Verification of` comment for its
+  own previous review.
+
+**This repository opens every session as the coordinator**, through `.claude/settings.json`,
+on the installed plugin rather than this tree, so the plugin is not rewritten under itself
+while it works. `claude --agent <name>` opens any other.
 
 **Each role says which model it runs on, instead of inheriting the session's.** Two agents
 out of seven pinned one; the other five ran on whatever the session was set to — and since
@@ -13,9 +49,10 @@ SHA.
   the design-reviewer, each holding a page or a task against criteria somebody already wrote.
   The coordinator pins nothing — it is the session agent, and the model there is the one
   chosen for the session.
-- The developer and the pr-reviewer pin `effort: high`. That is a ceiling, not a cut: it keeps
-  the two heaviest roles at `high` however high the session is set, and the session is what
-  they used to follow.
+- The developer and the pr-reviewer pin `effort: high`, and so does the security-reviewer
+  this release adds, on Opus like the pr-reviewer. That is a ceiling, not a cut: it keeps
+  the heaviest roles at `high` however high the session is set, and the session is what they
+  used to follow.
 - Measured rather than believed: a frontmatter `effort` reaches a plugin **subagent**, and is
   ignored when the same file runs as a session agent, where the model's own default applies.
   `CLAUDE_CODE_EFFORT_LEVEL` overrides it; `CLAUDE_CODE_SUBAGENT_MODEL`, the other way round,
