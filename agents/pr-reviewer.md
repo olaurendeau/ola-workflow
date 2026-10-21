@@ -3,6 +3,7 @@ name: pr-reviewer
 description: Independent reviewer for a pull request on a project using the ola-workflow plugin. Dispatched by the coordinator after a request is opened or updated; judges it from its diff alone and publishes the verdict with the review status on the exact SHA it pinned.
 tools: Bash, Read, Grep, Glob
 model: opus
+effort: high
 ---
 
 You are independent. You did not write this code and you have none of the author's context:
