@@ -31,7 +31,7 @@ ko() { total=$((total + 1)); echo "FAIL  $1"; failures=$((failures + 1)); }
 # globbed, so that `probe` — which exists to dump a hook payload, not to work — is not held
 # to rules about modes and slots. Both directions are checked below, so a new file cannot
 # quietly escape either set.
-WORKFLOW_ROLES="coordinator product-designer design-reviewer architect developer pr-reviewer"
+WORKFLOW_ROLES="coordinator product-designer design-reviewer architect developer pr-reviewer security-reviewer"
 DIAGNOSTICS="probe"
 # Declared the same way as the roles, and for the same reason: the witness below compares
 # what is on disk against what is declared, and deriving the skills *from disk* made that
@@ -501,7 +501,7 @@ for f in "${AGENTS[@]}"; do
   fi
 done
 # The coordinator reads a Status from each of the others, and dispatches each of them.
-for role in product-designer design-reviewer architect developer pr-reviewer; do
+for role in product-designer design-reviewer architect developer pr-reviewer security-reviewer; do
   if grep -q 'Status:' "$ROOT/agents/$role.md"; then
     ok "$role: reports a Status, which the coordinator reads first"
   else
@@ -538,8 +538,8 @@ if [ "$worktrees" = "developer.md " ]; then ok "only the developer is isolated i
 # sentence covered two things at once — the reviewer pins one, nobody else does — and a map
 # only covers what it names, so this one names every file under `agents/`, `probe` included,
 # which the pair it replaces left out of its set.
-EXPECTED_MODEL="coordinator=- product-designer=sonnet design-reviewer=sonnet architect=opus developer=sonnet pr-reviewer=opus probe=haiku"
-EXPECTED_EFFORT="coordinator=- product-designer=- design-reviewer=- architect=- developer=high pr-reviewer=high probe=low"
+EXPECTED_MODEL="coordinator=- product-designer=sonnet design-reviewer=sonnet architect=opus developer=sonnet pr-reviewer=opus security-reviewer=opus probe=haiku"
+EXPECTED_EFFORT="coordinator=- product-designer=- design-reviewer=- architect=- developer=high pr-reviewer=high security-reviewer=high probe=low"
 
 # fm_key <frontmatter> <key> → the value, or nothing. Takes the text rather than the path,
 # so the witness below can hand it a fixture instead of a file.
@@ -601,7 +601,9 @@ done
 # Who may publish, and who may write. The product-designer publishes its design to claude.ai
 # and writes the page it publishes, outside the repository — so `Write`, never `Edit`: there
 # is no file of the project it has any business changing. The design-reviewer judges that
-# page and must not be able to touch it, which is the whole of its independence.
+# page and must not be able to touch it, which is the whole of its independence. The
+# security-reviewer is held to the same: it judges code, and could otherwise fix what it
+# found and call the finding closed.
 # tools_of <role> → its declared tools, one per line.
 tools_of() { frontmatter "$ROOT/agents/$1.md" | sed -n 's/^tools: *//p' | tr ',' '\n' | tr -d ' '; }
 for want in Artifact Write; do
@@ -620,7 +622,10 @@ for role in $WORKFLOW_ROLES; do
   fi
 done
 for unwanted in Edit Write; do
-  case $unwanted in Write) roles="design-reviewer" ;; *) roles="product-designer design-reviewer" ;; esac
+  case $unwanted in
+    Write) roles="design-reviewer security-reviewer" ;;
+    *) roles="product-designer design-reviewer security-reviewer" ;;
+  esac
   for role in $roles; do
     if tools_of "$role" | grep -qx "$unwanted"; then
       ko "$role: declares $unwanted, so it can change what it was asked to judge"
@@ -630,7 +635,7 @@ for unwanted in Edit Write; do
   done
 done
 # The witness for the absences above: they pass on a role whose tools line went missing.
-for role in product-designer design-reviewer; do
+for role in product-designer design-reviewer security-reviewer; do
   if [ -n "$(tools_of "$role")" ]; then ok "$role: has a tools line to read"; else ko "$role: has no tools line, so the absences above say nothing"; fi
 done
 
@@ -653,6 +658,108 @@ if grep -q 'artifact URL' "$ROOT/agents/coordinator.md"; then
   ok "coordinator: records the artifact URL in the epic"
 else
   ko "coordinator: never records the artifact URL in the epic"
+fi
+
+# --- The security review ---------------------------------------------------------------
+# A false positive here is not a comment someone scrolls past: a blocking finding sends a
+# developer round the review loop, then a delta review, then an arbitration. So each thing
+# that keeps one from reaching the developer is a sentence its owner must keep. Prose, not
+# proof — what these catch is the sentence deleted in a rewrite, which is how a safeguard
+# goes without anyone deciding it should.
+sec=$ROOT/agents/security-reviewer.md
+# The witness: the absence of a status below passes on a file that publishes nothing.
+if grep -q 'Security review of' "$sec"; then
+  ok "security-reviewer: publishes its review under a prefix of its own"
+else
+  ko "security-reviewer: publishes no review anyone, or the next cycle, can find"
+fi
+# Its findings are advice the coordinator relays. A status it wrote would be a second gate
+# nobody configured, and GitHub refuses it the token anyway.
+if grep -q 'statuses/' "$sec"; then
+  ko "security-reviewer: writes a commit status, and its verdict is advice"
+else
+  ok "security-reviewer: writes no commit status"
+fi
+if grep -q '^## Verifying one finding' "$sec" && grep -q 'Verification of' "$sec"; then
+  ok "security-reviewer: has a verify mode that publishes its verdict"
+else
+  ko "security-reviewer: has no verify mode, so a finding is only ever checked by its author"
+fi
+# Read at the head, a precedent could be added by the very change it excuses. Looked for in
+# the step that reads the precedents, not in the whole file: the refutation step reads the
+# base too, for another reason, and kept a file-wide grep green with this one rewritten.
+if awk '/^2\. \*\*Read what is settled/{on=1} /^3\. /{on=0} on' "$sec" | grep -qF 'origin/<base>:'; then
+  ok "security-reviewer: reads the precedents from the base branch"
+else
+  ko "security-reviewer: reads the precedents where the change under review can edit them"
+fi
+if grep -q 'all three hold' "$sec"; then
+  ok "security-reviewer: blocks only when all three conditions hold"
+else
+  ko "security-reviewer: no explicit rule says when a finding blocks"
+fi
+if grep -q 'pending verification' "$ROOT/agents/coordinator.md" &&
+   grep -qF 'Only a `confirmed` finding goes to the developer' "$ROOT/agents/coordinator.md"; then
+  ok "coordinator: sends a security finding to the developer only once it is confirmed"
+else
+  ko "coordinator: can send an unverified security finding to the developer"
+fi
+# The merge waits for the security review. It sets no status and the merge gate does not read
+# it, so this sentence is all that holds the coordinator back: written as "no finding is
+# confirmed", it was already true while the security review was still running, and while a
+# finding waited for its verifier. Read in the sentence that ends step 6, where it binds, as
+# one line: where prose wraps is not what it says.
+done_when=$(awk '/^   Done when the review on the current head SHA/{on=1} on && /^$/{exit} on' \
+  "$ROOT/agents/coordinator.md" | tr -s ' \n' '  ')
+if [ -n "$done_when" ]; then
+  ok "coordinator: step 6 ends on a Done when"
+else
+  ko "coordinator: step 6 has no Done when to read"
+fi
+# Two clauses, each its own: nested under "when a security review is owed", the first went
+# quiet after a fix that owed none, and a confirmed finding merged.
+case $done_when in
+  *'; no security finding is `confirmed` and still open;'*)
+    ok "coordinator: never merges over a confirmed security finding" ;;
+  *) ko "coordinator: can merge over a confirmed security finding" ;;
+esac
+case $done_when in
+  *'the last security review owed'*'has reported'*'pending verification'*'has a verdict'*)
+    ok "coordinator: does not merge before the security review and its verifications are in" ;;
+  *) ko "coordinator: can merge while the security review or a verification is still running" ;;
+esac
+# A security review owed on every head would contradict the rule for fixes, which owes one
+# only when the fix touches the security paths.
+case $done_when in
+  *'on that same SHA'*) ko "coordinator: owes a security review on every head SHA" ;;
+  *) ok "coordinator: owes a security review only when one is owed" ;;
+esac
+if grep -q 'security_precedents' "$ROOT/agents/coordinator.md"; then
+  ok "coordinator: turns a ruled false positive into a precedent"
+else
+  ko "coordinator: a false positive the human ruled on comes back on the next request"
+fi
+# It reads at the SHA and runs nothing, so a reviewer slot would only keep a pr-reviewer
+# waiting: a request touching a security path would take both slots of a project with two.
+if grep -qi 'reviewer slot' "$sec"; then
+  ko "security-reviewer: takes a reviewer slot it never uses"
+else
+  ok "security-reviewer: takes no reviewer slot"
+fi
+# The brief is what the coordinator dispatches from, so it says so too.
+if grep -q '## Security review' "$BRIEF" && grep -q 'takes no slot' "$BRIEF"; then
+  ok "the brief says the security review takes no slot"
+else
+  ko "the brief does not say the security review takes no slot"
+fi
+# Two reviewers comment on one request. Each finds its own previous review to compute a
+# delta, and the pr-reviewer taking the security review for its own would review from the
+# wrong SHA.
+if grep -q 'Security review of' "$ROOT/agents/pr-reviewer.md" &&
+   grep -q 'Verification of' "$ROOT/agents/pr-reviewer.md"; then
+  ok "pr-reviewer: does not take a security comment for its previous review"
+else
+  ko "pr-reviewer: may take a security comment for its own previous review"
 fi
 
 # --- One source, cited by all ---------------------------------------------------------
@@ -716,6 +823,10 @@ forbid_key db_hosts_allowed '(psql|mysql|mongosh|localhost:[0-9]|127\.0\.0\.1)' 
 forbid_key verify_ui '(playwright|maestro|simctl|ios-simulator|--width [0-9])' \
   'a way of looking at the project'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
+# The paths that get a security review, and the command that matches them, are the brief's:
+# a prompt that lists them has decided for every project which files are worth a look.
+forbid_key security '(security\.paths|:\(glob\)|security-precedents)' \
+  'which paths get a security review'
 forbid_key mode '(integrated|discreet) mode means' 'what a mode means'
 # Whether GitHub refuses is the one fact a prompt must never state, and for the sharpest
 # reason: an agent told it will be refused, that is not, reads the silence as sanction — and
@@ -748,7 +859,7 @@ done
 # fails at dispatch time, in front of the human.
 coord=$ROOT/agents/coordinator.md
 if [ -s "$coord" ]; then
-  for role in coordinator product-designer architect developer pr-reviewer; do
+  for role in coordinator product-designer architect developer pr-reviewer security-reviewer; do
     if grep -q "\`$role\`" "$coord"; then
       ko "coordinator.md names \`$role\` without its plugin prefix"
     else
@@ -990,6 +1101,56 @@ printf '{"mode":"integrated","slots":{"developers":[1,2],"reviewer":[8,9]}}\n' \
 case $("$BRIEF" "$listed") in
   *'reviewers: 8 9'*) ok "the brief names every reviewer slot of a list" ;;
   *) ko "the brief does not name both reviewer slots of [8,9]" ;;
+esac
+
+# The security review: which paths get one is the profile's, and git matches them, so the
+# brief hands over the command rather than the globs alone.
+for mode in integrated discreet; do
+  secured=$WORK/secured-$mode
+  mkdir -p "$secured/.claude"
+  git -C "$secured" -c init.defaultBranch=main init -q 2>/dev/null
+  git -C "$secured" remote add origin "https://github.com/someone/secured-$mode.git" 2>/dev/null
+  printf '{"mode":"%s","security":{"paths":["back/auth/**","Dockerfile*"]},%s}\n' "$mode" \
+    '"context":{"security_precedents":"notes/precedents.md"}' >"$secured/.claude/workflow.json"
+  "$BRIEF" "$secured" >"$WORK/secured-$mode.out" 2>&1
+  if grep -q '^## Security review' "$WORK/secured-$mode.out" &&
+     grep -qF "':(glob)back/auth/**' ':(glob)Dockerfile*'" "$WORK/secured-$mode.out"; then
+    ok "$mode: the brief gives the command that matches the security paths"
+  else
+    ko "$mode: the brief does not give the command matching security.paths: $(head -c 200 "$WORK/secured-$mode.out" | tr '\n' ' ')"
+  fi
+  # Whether a fix owes a security review is a question about the fix, not the request.
+  if grep -qF "<reviewed SHA>...<SHA> -- ':(glob)back/auth/**'" "$WORK/secured-$mode.out"; then
+    ok "$mode: the brief gives the command for a fix since the last review"
+  else
+    ko "$mode: the brief matches the security paths only against the whole request"
+  fi
+  if grep -qE '^security_precedents: +notes/precedents\.md' "$WORK/secured-$mode.out"; then
+    ok "$mode: the brief names the precedents document"
+  else
+    ko "$mode: the brief does not name context.security_precedents"
+  fi
+done
+if grep -q 'security-reviews/<branch>/<sha>.md' "$WORK/secured-discreet.out"; then
+  ok "discreet: the brief says where a security review is kept"
+else
+  ko "discreet: the brief does not say where a security review goes"
+fi
+for forbidden in 'gh pr comment' 'gh api'; do
+  if grep -qF "$forbidden" "$WORK/secured-discreet.out"; then
+    ko "discreet: the security section tells an agent how to run $forbidden"
+  else
+    ok "discreet: the security section gives no way to run $forbidden"
+  fi
+done
+# No paths: said, so that a quiet result is not read as a clean one.
+case $integrated in
+  *'## Security review'*'not dispatched'*) ok "no security paths: the brief says the security-reviewer is not dispatched" ;;
+  *) ko "no security paths: the brief is silent about the security review" ;;
+esac
+case $integrated in
+  *':(glob)'*) ko "no security paths: the brief still gives a matching command" ;;
+  *) ok "no security paths: the brief gives no matching command" ;;
 esac
 
 # A value the profile does not state is announced as a default before the rules, not

@@ -1,6 +1,6 @@
 ---
 name: coordinator
-description: Main-session agent for a project using the ola-workflow plugin. Takes requests from the human, frames them, dispatches the product-designer, design-reviewer, architect, developer and pr-reviewer agents, arbitrates what they escalate, and merges once a review is clean and the project's merge gate allows it.
+description: Main-session agent for a project using the ola-workflow plugin. Takes requests from the human, frames them, dispatches the product-designer, design-reviewer, architect, developer, pr-reviewer and security-reviewer agents, arbitrates what they escalate, and merges once a review is clean and the project's merge gate allows it.
 tools: Agent, SendMessage, AskUserQuestion, Read, Grep, Glob, Bash
 ---
 
@@ -23,6 +23,7 @@ human, offer `/ola-workflow:workflow-init`, and stop.
 | `ola-workflow:architect` | the epic | design and an ordered task list |
 | `ola-workflow:developer` | one task, and one slot | an open pull request closing that task |
 | `ola-workflow:pr-reviewer` | one pull request, and one reviewer slot | a verdict, and the review status on the SHA it pinned |
+| `ola-workflow:security-reviewer` | review: one pull request — verify: one pull request, its SHA and one finding | review: findings pending verification, and no status — verify: that finding confirmed or refuted |
 
 Dispatch with the **full namespaced name**, prefix included. `subagent_type` is an exact
 match, so a bare role name does not resolve to a plugin agent: the dispatch fails in front
@@ -99,8 +100,24 @@ without a specialist. And do not pretend a specialist did it.
    - **Suggestions** → triage each: fix now, keep as a follow-up task, or reject with a
      reason. Publish the triage; a suggestion silently dropped is a suggestion that comes
      back.
-   Done when the review on the current head SHA has no blocking finding and every
-   suggestion is triaged.
+   - **A security review** is owed when the command in the brief's *Security review* section
+     prints a file for this request. Dispatch the security-reviewer in review mode beside
+     the pr-reviewer; it reads and runs nothing, so it takes no slot. Its blocking findings come back
+     `pending verification`: dispatch it again in verify mode for each of them, in parallel,
+     with the request, the SHA and that one finding — a fresh reading, which the author of a
+     finding cannot give it. Only a `confirmed` finding goes to the developer, verbatim, and
+     from there it is a blocking finding like any other: a dispute, two cycles, the human. A
+     `refuted` one stops there. Its suggestions are triaged with the rest.
+   - **The human rules a security finding a false positive** → record it where the work
+     lives, as for any finding, and open a task that adds it to the document
+     `context.security_precedents` names: the pattern, why it is not exploitable, where it
+     was ruled. Otherwise the same false positive comes back on the next request.
+   Done when the review on the current head SHA has no blocking finding; no security
+   finding is `confirmed` and still open; the last security review owed — on the request,
+   then after each fix that owes one, below — has reported, and every finding it marked
+   `pending verification` has a verdict; and every suggestion is triaged. The security
+   review sets no status and the merge gate does not read it, so this is the only thing
+   that keeps a merge from overtaking it.
 
    ### When a fix owes a new review
 
@@ -122,6 +139,9 @@ without a specialist. And do not pretend a specialist did it.
    |---|---|
    | behaviour — code, a pattern, a rule, a default | a new review, on the new head SHA |
    | only prose — a comment, a README, a commit message | no new cycle; report it and merge |
+
+   A fix that owes a review owes a security review on the same terms, and only when the
+   brief's *Security review* command for a fix, from the SHA last reviewed, prints a file.
 
    Two things keep this honest. A prose fix still goes to the reviewer, so a false claim in
    it is caught on the next change rather than never. And a claim that must be *true* rather

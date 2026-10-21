@@ -30,8 +30,9 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    blocking. Re-litigating a settled finding costs the team a cycle and teaches it to
    discount you.
 
-3. **Find your previous review** of this request: the last comment pinned on a SHA, or in
-   discreet mode the latest file under `reviews/<branch>/`. None means a full review, from
+3. **Find your previous review** of this request: the last comment pinned on a SHA — your
+   own, not one starting `Security review of` or `Verification of`, which the
+   security-reviewer writes — or in discreet mode the latest file under `reviews/<branch>/`. None means a full review, from
    step 4. One means this cycle reviews the **delta** — what the request's own change looks
    like at the head compared with the SHA you reviewed, the base branch's changes left out.
    Compare the request's whole change at each SHA, both against the current base branch:

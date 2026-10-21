@@ -130,7 +130,7 @@ write comes from something you ran or something the human told you, and nothing 
    ```
    ola-profile validate <the path you wrote>   # every problem in that file, or silence
    ola-profile path                            # the profile that applies
-   ola-workflow-brief                          # the rules as the six agents receive them
+   ola-workflow-brief                          # the rules as the agents receive them
    ```
 
    Pass the path. `ola-profile validate` with no argument validates whichever profile

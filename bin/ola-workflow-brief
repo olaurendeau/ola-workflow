@@ -2,9 +2,9 @@
 # Prints the rules of the workflow for the project the session is working on, resolved
 # against its profile.
 #
-# This exists so that the rules are written once. Six agent prompts need the same facts —
+# This exists so that the rules are written once. Every agent prompt needs the same facts —
 # which mode, which branch, which commands, which slots, what this mode forbids, what is
-# reserved for the human — and six copies of those facts would drift apart one justified
+# reserved for the human — and a copy per prompt would drift apart one justified
 # edit at a time. So each agent starts by running this, and the prompts hold only what is
 # specific to their role.
 #
@@ -158,6 +158,37 @@ echo "A slot is what keeps parallel work from colliding on ports, databases and 
 echo "Never run a command with another agent's slot. One agent per slot: never more"
 echo "developers at once than developer slots, nor more reviewers than reviewer slots."
 echo
+# Which changes are worth a security review is the project's to say, and whether a change
+# touches one is git's: the same pathspec dialect as every other glob here, matched by the
+# command that reads the diff rather than by an agent reading a list.
+echo "## Security review"
+security_paths=$(get security.paths)
+if [ -n "$security_paths" ]; then
+  pathspec=""
+  while IFS= read -r glob; do pathspec="$pathspec ':(glob)$glob'"; done <<<"$security_paths"
+  echo "A pull request whose change touches one of these paths gets a security review beside"
+  echo "the code review. Dispatch the security-reviewer when this prints a file:"
+  echo
+  printf '    git diff --name-only origin/%s...<SHA> --%s
+' "$base" "$pathspec"
+  echo
+  echo "A fix owes a new one only when this prints a file, from the SHA last reviewed:"
+  echo
+  printf '    git diff --name-only <reviewed SHA>...<SHA> --%s
+' "$pathspec"
+  echo
+  cat <<'SECURITY'
+It reads at the SHA and runs nothing, so it takes no slot, nor does a verifier. Each blocking
+finding it reports is pending verification until a second security-reviewer, dispatched on
+that one finding, confirms it. Its verdict is advice the coordinator relays: it sets no
+commit status, and the merge gate does not read it — the coordinator waits for it all the
+same.
+SECURITY
+else
+  echo "(none declared — the security-reviewer is not dispatched; the pr-reviewer's checklist"
+  echo "is the only security review)"
+fi
+echo
 echo "## A reviewable pull request"
 printf 'At most %s changed lines' "$(with_default pr.max_lines 1000)"
 excluded=$(get pr.exclude)
@@ -273,7 +304,7 @@ if [ -n "$ui_kind" ]; then
 fi
 echo "## Context — read these before writing anything"
 found=0
-for key in product architecture review_checklist glossary; do
+for key in product architecture review_checklist security_precedents glossary; do
   path=$(get "context.$key")
   if [ -n "$path" ]; then
     printf '%-18s %s\n' "$key:" "$path"
@@ -369,8 +400,8 @@ memory is local, under:
 
   $profile_dir/runs/<slug>/
 
-with epic.md, tasks/ and reviews/<branch>/<sha>.md. Keep the repository itself clean: git status
-must be as you found it.
+with epic.md, tasks/, reviews/<branch>/<sha>.md and security-reviews/<branch>/<sha>.md.
+Keep the repository itself clean: git status must be as you found it.
 
 ## What discreet mode forbids
 

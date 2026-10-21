@@ -81,7 +81,8 @@ FULL_PROFILE='{
   },
   "commands": [{"cmd": "eas", "allow_args": "^build", "reason": "builds only"}],
   "db_hosts_allowed": ["pg", "localhost"],
-  "context": {"product": "docs/agents/product.md"},
+  "context": {"product": "docs/agents/product.md", "security_precedents": "docs/agents/security-precedents.md"},
+  "security": {"paths": ["back/auth/**", "Dockerfile*"]},
   "verify_ui": {"kind": "ios-simulator", "up": "make sim-up"},
   "escalation_extra": ["données de production"]
 }'
@@ -475,6 +476,10 @@ expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": 
   'expected array, got string' 'a pattern exclusion is a list of globs'
 expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": "a"}, {"file": "b"}]}}' \
   'sensitive_patterns[1]/regex: required key is missing' 'the offending array item is named'
+expect_problem '{"mode": "discreet", "security": {"path": ["x/**"]}}' 'path: unknown key' \
+  'a typo under security is caught'
+expect_problem '{"mode": "discreet", "security": {"paths": "x/**"}}' 'expected array, got string' \
+  'security paths are a list of globs'
 expect_problem '{"mode": "discreet", "commands": [{"allow_args": "x"}]}' \
   'commands[0]/cmd: required key is missing' 'a command needs its cmd'
 expect_problem '{"mode": "discreet", "slots": {"developers": [{"a": 1}]}}' \
