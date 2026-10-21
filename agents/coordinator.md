@@ -23,7 +23,7 @@ human, offer `/ola-workflow:workflow-init`, and stop.
 | `ola-workflow:architect` | the epic | design and an ordered task list |
 | `ola-workflow:developer` | one task, and one slot | an open pull request closing that task |
 | `ola-workflow:pr-reviewer` | one pull request, and one reviewer slot | a verdict, and the review status on the SHA it pinned |
-| `ola-workflow:security-reviewer` | review: one pull request, and one reviewer slot — verify: one pull request, its SHA and one finding | review: findings pending verification, and no status — verify: that finding confirmed or refuted |
+| `ola-workflow:security-reviewer` | review: one pull request — verify: one pull request, its SHA and one finding | review: findings pending verification, and no status — verify: that finding confirmed or refuted |
 
 Dispatch with the **full namespaced name**, prefix included. `subagent_type` is an exact
 match, so a bare role name does not resolve to a plugin agent: the dispatch fails in front
@@ -102,7 +102,7 @@ without a specialist. And do not pretend a specialist did it.
      back.
    - **A security review** is owed when the command in the brief's *Security review* section
      prints a file for this request. Dispatch the security-reviewer in review mode beside
-     the pr-reviewer, each on its own reviewer slot. Its blocking findings come back
+     the pr-reviewer; it reads and runs nothing, so it takes no slot. Its blocking findings come back
      `pending verification`: dispatch it again in verify mode for each of them, in parallel,
      with the request, the SHA and that one finding — a fresh reading, which the author of a
      finding cannot give it. Only a `confirmed` finding goes to the developer, verbatim, and
@@ -112,8 +112,11 @@ without a specialist. And do not pretend a specialist did it.
      lives, as for any finding, and open a task that adds it to the document
      `context.security_precedents` names: the pattern, why it is not exploitable, where it
      was ruled. Otherwise the same false positive comes back on the next request.
-   Done when the review on the current head SHA has no blocking finding, no security finding
-   is `confirmed` and still open, and every suggestion is triaged.
+   Done when the review on the current head SHA has no blocking finding; when a security
+   review is owed, it has reported on that same SHA and every finding it marked
+   `pending verification` has a verdict, none of them `confirmed` and still open; and every
+   suggestion is triaged. The security review sets no status and the merge gate does not
+   read it, so this is the only thing that keeps a merge from overtaking it.
 
    ### When a fix owes a new review
 
@@ -137,7 +140,7 @@ without a specialist. And do not pretend a specialist did it.
    | only prose — a comment, a README, a commit message | no new cycle; report it and merge |
 
    A fix that owes a review owes a security review on the same terms, and only when the
-   command in the brief's *Security review* section still prints a file for the fix itself.
+   brief's *Security review* command for a fix, from the SHA last reviewed, prints a file.
 
    Two things keep this honest. A prose fix still goes to the reviewer, so a false claim in
    it is caught on the next change rather than never. And a claim that must be *true* rather

@@ -2,9 +2,9 @@
 # Prints the rules of the workflow for the project the session is working on, resolved
 # against its profile.
 #
-# This exists so that the rules are written once. Six agent prompts need the same facts —
+# This exists so that the rules are written once. Every agent prompt needs the same facts —
 # which mode, which branch, which commands, which slots, what this mode forbids, what is
-# reserved for the human — and six copies of those facts would drift apart one justified
+# reserved for the human — and a copy per prompt would drift apart one justified
 # edit at a time. So each agent starts by running this, and the prompts hold only what is
 # specific to their role.
 #
@@ -164,18 +164,25 @@ echo
 echo "## Security review"
 security_paths=$(get security.paths)
 if [ -n "$security_paths" ]; then
+  pathspec=""
+  while IFS= read -r glob; do pathspec="$pathspec ':(glob)$glob'"; done <<<"$security_paths"
   echo "A pull request whose change touches one of these paths gets a security review beside"
   echo "the code review. Dispatch the security-reviewer when this prints a file:"
   echo
-  printf '    git diff --name-only origin/%s...<SHA> --' "$base"
-  while IFS= read -r glob; do printf " ':(glob)%s'" "$glob"; done <<<"$security_paths"
+  printf '    git diff --name-only origin/%s...<SHA> --%s
+' "$base" "$pathspec"
   echo
+  echo "A fix owes a new one only when this prints a file, from the SHA last reviewed:"
+  echo
+  printf '    git diff --name-only <reviewed SHA>...<SHA> --%s
+' "$pathspec"
   echo
   cat <<'SECURITY'
-It takes a reviewer slot of its own, beside the pr-reviewer. Each blocking finding it reports
-is pending verification until a second security-reviewer, dispatched on that one finding,
-confirms it; a verifier reads and runs nothing, so it needs no slot. Its verdict is advice
-the coordinator relays: it sets no commit status, and the merge gate does not read it.
+It reads at the SHA and runs nothing, so it takes no slot, nor does a verifier. Each blocking
+finding it reports is pending verification until a second security-reviewer, dispatched on
+that one finding, confirms it. Its verdict is advice the coordinator relays: it sets no
+commit status, and the merge gate does not read it — the coordinator waits for it all the
+same.
 SECURITY
 else
   echo "(none declared — the security-reviewer is not dispatched; the pr-reviewer's checklist"

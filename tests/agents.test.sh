@@ -704,10 +704,34 @@ if grep -q 'pending verification' "$ROOT/agents/coordinator.md" &&
 else
   ko "coordinator: can send an unverified security finding to the developer"
 fi
+# The merge waits for the security review. It sets no status and the merge gate does not read
+# it, so this sentence is all that holds the coordinator back: written as "no finding is
+# confirmed", it was already true while the security review was still running, and while a
+# finding waited for its verifier. Read in the sentence that ends step 6, where it binds, as
+# one line: where prose wraps is not what it says.
+done_when=$(awk '/^   Done when the review on the current head SHA/{on=1} on && /^$/{exit} on' \
+  "$ROOT/agents/coordinator.md" | tr -s ' \n' '  ')
+if [ -n "$done_when" ]; then
+  ok "coordinator: step 6 ends on a Done when"
+else
+  ko "coordinator: step 6 has no Done when to read"
+fi
+case $done_when in
+  *'security review'*'reported on that same SHA'*'pending verification'*'has a verdict'*)
+    ok "coordinator: does not merge before the security review and its verifications are in" ;;
+  *) ko "coordinator: can merge while the security review or a verification is still running" ;;
+esac
 if grep -q 'security_precedents' "$ROOT/agents/coordinator.md"; then
   ok "coordinator: turns a ruled false positive into a precedent"
 else
   ko "coordinator: a false positive the human ruled on comes back on the next request"
+fi
+# It reads at the SHA and runs nothing, so a reviewer slot would only keep a pr-reviewer
+# waiting: a request touching a security path would take both slots of a project with two.
+if grep -qi 'reviewer slot' "$sec"; then
+  ko "security-reviewer: takes a reviewer slot it never uses"
+else
+  ok "security-reviewer: takes no reviewer slot"
 fi
 # Two reviewers comment on one request. Each finds its own previous review to compute a
 # delta, and the pr-reviewer taking the security review for its own would review from the
@@ -1075,6 +1099,12 @@ for mode in integrated discreet; do
     ok "$mode: the brief gives the command that matches the security paths"
   else
     ko "$mode: the brief does not give the command matching security.paths: $(head -c 200 "$WORK/secured-$mode.out" | tr '\n' ' ')"
+  fi
+  # Whether a fix owes a security review is a question about the fix, not the request.
+  if grep -qF "<reviewed SHA>...<SHA> -- ':(glob)back/auth/**'" "$WORK/secured-$mode.out"; then
+    ok "$mode: the brief gives the command for a fix since the last review"
+  else
+    ko "$mode: the brief matches the security paths only against the whole request"
   fi
   if grep -qE '^security_precedents: +notes/precedents\.md' "$WORK/secured-$mode.out"; then
     ok "$mode: the brief names the precedents document"
