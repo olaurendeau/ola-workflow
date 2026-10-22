@@ -639,6 +639,24 @@ for role in product-designer design-reviewer security-reviewer; do
   if [ -n "$(tools_of "$role")" ]; then ok "$role: has a tools line to read"; else ko "$role: has no tools line, so the absences above say nothing"; fi
 done
 
+# The coordinator is the session agent, and a session agent's `tools:` list filters out MCP
+# tools too: without this entry a `claude --chrome` session under the coordinator has no
+# Claude in Chrome tool at all (#68). The server-level form is what Claude Code documents
+# for `tools`; the subagents work in worktrees and have no browser to drive.
+if tools_of coordinator | grep -qx 'mcp__claude-in-chrome__\*'; then
+  ok "coordinator: declares the Claude in Chrome tools, so a --chrome session keeps them"
+else
+  ko "coordinator: does not declare mcp__claude-in-chrome__*, so --chrome gives it no browser tool"
+fi
+for role in $WORKFLOW_ROLES; do
+  [ "$role" = coordinator ] && continue
+  if tools_of "$role" | grep -q '^mcp__'; then
+    ko "$role: declares an MCP tool, and only the coordinator drives the browser"
+  else
+    ok "$role: declares no MCP tool"
+  fi
+done
+
 # The words of an interface are decided by the product-designer, and the developer takes
 # them as they are. Unowned, they are written by whoever writes the code last.
 if grep -qE '^[0-9]+\. \*\*Write the words' "$ROOT/agents/product-designer.md"; then
