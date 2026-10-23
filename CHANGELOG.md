@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0
+
+**A session opened with Chrome connected, under the coordinator, had no browser tool at
+all.** Since 0.6.0 this repository opens every session as the coordinator, and a session
+agent's `tools:` list filters MCP tools exactly as it filters built-in ones: a list naming
+Bash and Read, with no entry for the Claude in Chrome server, left the browser unreachable
+even when it was connected (#68).
+
+- The coordinator declares `mcp__claude-in-chrome__*`, the server-level form Claude Code
+  documents for `tools`, so a session keeps the browser the human connected to it.
+- No other role declares an MCP tool, and the suite holds both halves: the coordinator has
+  the entry, every other workflow role has none. They work in worktrees, and have no browser
+  to drive.
+
 ## 0.6.0
 
 **A security reviewer, tuned for precision: a false positive here costs a developer a whole
