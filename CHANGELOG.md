@@ -16,7 +16,9 @@ tokens ships with it.
   `ola-workflow-pr-assets` pushes the PNG files to a `pr-assets` branch and prints the
   markdown to paste. A request that changes what a user sees carries a Captures block, a
   before/after table when an existing screen changes. Without `preview`, the brief says no
-  capture is expected.
+  capture is expected. When captures are expected, the pr-reviewer blocks a visible change
+  that has none. The `pr-assets` branch is as readable as the repository, so capture
+  development data only: nothing real, nothing private.
 - A link to the design (#101): in integrated mode, a request that follows a design links its
   published artifact, or names the page's path when it was never published. A missing line is
   a suggestion in review.
@@ -28,12 +30,18 @@ tokens ships with it.
   busy-waiting on CI, reads by line range, noisy commands silenced or bounded, short reports.
   The developer reads the passages it needs and runs the affected tests once, at the end. The
   pr-reviewer publishes its verdict without waiting for CI, reports the CI state on its own
-  line, and reads the changed passages at the SHA instead of whole files.
+  line, and reads the changed passages at the SHA instead of whole files. Its `agent-review`
+  status now judges the code alone, while CI may still be running, and is `failure`, naming
+  the check, when a required check had already failed for a reason outside the code. A green
+  `agent-review` no longer means a green CI: read the checks too before merging a request
+  that touches a sensitive path.
 - Resuming agents (#80, #94): a developer can take over a request whose branch another agent
   holds. The coordinator resumes an agent only if its last report is under five minutes old,
   and otherwise starts a fresh one of the same role: review findings go to a fresh developer.
-  It reads a running CI again at the next report instead of waiting, asks for the Report block
-  only, and proposes a fresh session when an epic closes.
+  The one exception is an agent that reported `needs-decision` with nothing pushed: it gets
+  the human's answer whatever its age, since its work exists only in its worktree. The
+  coordinator reads a running CI again at the next report instead of waiting, asks for the
+  Report block only, and proposes a fresh session when an epic closes.
 - Measuring the cost (#87): `scripts/token-cost.sh` computes from the session logs the
   weighted token cost by role and by PR, and the number of cache rewrites, so that an epic
   aimed at the cost has a before and an after.
@@ -44,8 +52,6 @@ Fixes:
   never has to be forced (#93).
 - The pr-reviewer writes line ranges as `sed -n '<a>,<b>p'`: `'a,bp'` read `a` as sed's
   append command (#95).
-- The suite now holds that the architect cites the brief's "captures are expected" before
-  naming the screens to capture, as the developer and the pr-reviewer already did (#100).
 
 ## 0.7.0
 
