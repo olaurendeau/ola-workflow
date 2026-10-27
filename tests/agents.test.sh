@@ -794,17 +794,39 @@ else
   ok "pr-reviewer: does not wait for the checks to finish"
 fi
 case $prr in
-  *'CI: green | running | failed: <check>'*)
+  *'CI: green | running | failed: <check> | cancelled'*)
     ok "pr-reviewer: reports where the CI stands, so the coordinator reads it again before merging" ;;
   *) ko "pr-reviewer: reports no CI line, so a status given while the checks ran looks final" ;;
 esac
+# Step 7 withholds the status of a SHA the head left; the line must have a value for it.
 case $prr in
-  *'git grep -n'*) ok "pr-reviewer: reads the neighbourhood of a change at the SHA by range" ;;
-  *) ko "pr-reviewer: nothing narrows its reading around the diff" ;;
+  *'Report `CI: cancelled`'*) ok "pr-reviewer: says what it reports when the checks were cancelled" ;;
+  *) ko "pr-reviewer: a cancelled check has no value on the CI line" ;;
 esac
 case $prr in
-  *'Do not read whole files'*) ok "pr-reviewer: does not read whole files at the SHA" ;;
+  *'git grep -n'*"sed -n 'a,bp'"*) ok "pr-reviewer: says how to read a range at the SHA" ;;
+  *) ko "pr-reviewer: names no way to read a range at the SHA, so every git show looks banned" ;;
+esac
+case $prr in
+  *'Never read a whole file that way'*) ok "pr-reviewer: does not read whole files at the SHA" ;;
   *) ko "pr-reviewer: may read whole files with git show, thousands of calls on a large request" ;;
+esac
+# The meaning of the status: it judges the code and the checks already failed, not the
+# checks green. Requiring them green is what made the reviewer wait for them.
+case $prr in
+  *'successful only with zero blocking findings **and** no required check already failed'*)
+    ok "pr-reviewer: a successful status needs no failed required check, not a green CI" ;;
+  *) ko "pr-reviewer: the meaning of a successful status is not the one that lets it publish while checks run" ;;
+esac
+case $prr in
+  *'successful only with'*'checks green on that SHA'*)
+    ko "pr-reviewer: requires the checks green to set a successful status, so it waits for them" ;;
+  *) ok "pr-reviewer: does not require the checks green to set a successful status" ;;
+esac
+case $prr in
+  *'Checks still running'*'judgement of the code alone'*'A required check already failed'*'status is `failure` and names the check'*)
+    ok "pr-reviewer: running checks do not hold the status, a failed one does" ;;
+  *) ko "pr-reviewer: nothing says what the status is while checks run or after one fails" ;;
 esac
 
 # --- One source, cited by all ---------------------------------------------------------

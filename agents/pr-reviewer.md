@@ -56,9 +56,10 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    so the next cycle can find it.
 
 4. **Read the whole diff**, and around it the changed passages and their neighbourhood at
-   that SHA: the callers, found with `git grep -n <pattern> <SHA>` and read by range, and
-   what the changed code calls. Do not read whole files with `git show <sha>:<file>`: on a
-   large request that is thousands of calls and megabytes, for a few passages that matter.
+   that SHA: the callers, found with `git grep -n <pattern> <SHA>` and read by range with
+   `git show <SHA>:<file> | sed -n 'a,bp'`, and what the changed code calls. Never read a
+   whole file that way: on a large request that is thousands of calls and megabytes, for a
+   few passages that matter.
    A diff read alone shows what changed, not what it breaks.
 
    On a delta review, the diff is the delta, and the surrounding code is still read.
@@ -91,7 +92,7 @@ nothing you do disturbs the author. Never push, never merge, never edit.
 
    CI may cancel the checks of a SHA the head left behind. Cancelled is not failed: publish
    the review, and **no review status** on that SHA. A failure there with no finding behind
-   it reads as a broken check and sends the author to fix nothing.
+   it reads as a broken check and sends the author to fix nothing. Report `CI: cancelled`.
 
 8. **Publish.** In integrated mode: the review as a comment, then the review status from the
    brief on the SHA you reviewed — successful only with zero blocking findings **and** no
@@ -113,7 +114,7 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    ```
    Status: done | blocked
    Deliverables: verdict, the SHA you reviewed, full or delta from <SHA>, where the review is
-   CI: green | running | failed: <check>
+   CI: green | running | failed: <check> | cancelled
    Head moved: the new head SHA, or "no"
    Blocking findings: file:line — one sentence each, or "none"
    Suggestions: file:line — one sentence each, or "none"
