@@ -1157,7 +1157,6 @@ case $discreet in
   *) ko "the discreet brief does not say where the memory goes" ;;
 esac
 
-# Design: where it is documented, where it is staged, and whether it may leave the machine.
 # The RFR label: the human sees which pull requests they can merge. The coordinator adds it
 # once the gate holds and removes it when it stops being true, in integrated mode only: the
 # workflow leaves no trace in a discreet project.
@@ -1168,6 +1167,17 @@ esac
 case $integrated in
   *'gh pr edit <N> --remove-label RFR'*) ok "integrated: the brief tells the coordinator to remove RFR" ;;
   *) ko "integrated: the brief never says how to remove the RFR label, so one stays on an old SHA" ;;
+esac
+# A pull request that returns to the human fails the gate on a sensitive path or pattern, and
+# it is exactly one the human needs to see: the label ignores those two conditions.
+case $integrated in
+  *'the sensitive paths and patterns aside'*'only'*'decide who merges'*)
+    ok "integrated: RFR goes on a pull request the human merges too" ;;
+  *) ko "integrated: RFR reads as never on a sensitive-path pull request, the very ones the human merges" ;;
+esac
+case $integrated in
+  *'gh label create RFR'*) ok "integrated: the brief says how to create the RFR label" ;;
+  *) ko "integrated: the brief gives no command to create the RFR label" ;;
 esac
 case $discreet in
   *RFR*) ko "discreet: the brief mentions the RFR label, and the workflow leaves no trace there" ;;
@@ -1184,6 +1194,7 @@ case $step7 in
   *) ok "coordinator: step 7 does not repeat the label commands" ;;
 esac
 
+# Design: where it is documented, where it is staged, and whether it may leave the machine.
 # Publishing an artifact sends the page to claude.ai, so in discreet mode it waits for the
 # human's yes — the brief says so, and says nothing about committing it to the repository.
 case $integrated in
