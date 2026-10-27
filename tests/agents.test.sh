@@ -978,6 +978,86 @@ for key in $FORBIDDEN_KEYS; do
   fi
 done
 
+# --- The coordinator spends no cache it need not -------------------------------------
+# An agent idle for more than five minutes rewrites its whole context when it is resumed
+# (about 130k tokens); a fresh one starts at about 6k. Each sentence is looked for in the
+# part that carries it, as one line: where prose wraps is not what it says, and a file-wide
+# grep stays green with the step rewritten.
+coord=$ROOT/agents/coordinator.md
+coord_part() { # coord_part <awk start regex> <awk stop regex> — that part of the prompt, as one line
+  awk -v s="$1" -v e="$2" '$0 ~ s {on=1; print; next} on && $0 ~ e {exit} on' "$coord" | tr -s ' \n' '  '
+}
+resume=$(coord_part '^## Resume or start fresh' '^## ')
+# shellcheck disable=SC2034  # read through ${!part} below
+step3b=$(coord_part '^   \\*\\*3b\\. ' '^4\\. \\*\\*')
+step6=$(coord_part '^6\\. \\*\\*Review' '^7\\. \\*\\*')
+step8=$(coord_part '^8\\. \\*\\*Close' '^## ')
+coord_all=$(tr -s ' \n' '  ' < "$coord")
+for part in resume step3b step6 step8; do
+  if [ -n "${!part}" ]; then
+    ok "witness: coordinator $part is readable"
+  else
+    ko "witness: coordinator $part is not where the assertions below look"
+  fi
+done
+case $resume in
+  *'SendMessage'*'less than 5 min'*'fresh agent of the same role'*)
+    ok "coordinator: resumes an agent only under 5 min, and otherwise starts a fresh one" ;;
+  *) ko "coordinator: nothing limits SendMessage to an agent that reported less than 5 min ago" ;;
+esac
+case $resume in
+  *'developer'*'the task'*'the pull request'*'findings word for word'*)
+    ok "coordinator: a fresh developer gets the task, the pull request and the findings" ;;
+  *) ko "coordinator: a fresh developer is not given what it needs to start cold" ;;
+esac
+case $resume in
+  *'product-designer'*'the epic'*'paths'*'URL'*'findings'*)
+    ok "coordinator: a fresh product-designer gets the epic, the paths, the URL and the findings" ;;
+  *) ko "coordinator: a fresh product-designer is not given what it needs to start cold" ;;
+esac
+case $resume in
+  *'pr-reviewer'*'the pull request'*'a reviewer slot'*'previous review'*)
+    ok "coordinator: a fresh pr-reviewer gets the pull request and a slot, and finds its previous review" ;;
+  *) ko "coordinator: a fresh pr-reviewer is not given what it needs to start cold" ;;
+esac
+case $resume in
+  *'130k'*'6k'*) ok "coordinator: the rule carries its reason, a cold resume against a fresh start" ;;
+  *) ko "coordinator: the rule does not say what a cold resume costs" ;;
+esac
+case $resume in
+  *'When in doubt, a fresh agent'*) ok "coordinator: in doubt, starts a fresh agent" ;;
+  *) ko "coordinator: in doubt, nothing says to start a fresh agent" ;;
+esac
+case $resume in
+  *'review findings'*'fresh developer'*)
+    ok "coordinator: review findings go to a fresh developer, as a review outlasts 5 min" ;;
+  *) ko "coordinator: review findings can go back to an agent whose cache has expired" ;;
+esac
+for part in step3b step6; do
+  case ${!part} in
+    *'Resume or start fresh'*) ok "coordinator: $part applies the resume rule" ;;
+    *) ko "coordinator: $part sends to an agent without the resume rule" ;;
+  esac
+done
+case $step6 in
+  *'CI is still running'*'does not wait'*'neither do you'*'next agent report'*'tell the human'*'merge is waiting for CI'*)
+    ok "coordinator: reads a running CI again at the next agent report, and tells the human the merge waits" ;;
+  *) ko "coordinator: says nothing of what to do when the CI is still running at merge time" ;;
+esac
+case $step6 in
+  *'rerun'*'green'*'confirmation'*'failure'*)
+    ok "coordinator: a flaky check that turns green is followed by a confirming review" ;;
+  *) ko "coordinator: a failure status left by a flaky check stays on the SHA and blocks the merge" ;;
+esac
+case $step8 in
+  *'fresh session'*'forge'*'memory'*) ok "coordinator: offers a fresh session when an epic closes" ;;
+  *) ko "coordinator: does not offer a fresh session when an epic closes" ;;
+esac
+case $coord_all in
+  *'only the Report block'*) ok "coordinator: asks an agent for its Report block only" ;;
+  *) ko "coordinator: asks for a detailed account that stays in its context" ;;
+esac
+
 # --- Dispatch names are namespaced ----------------------------------------------------
 # subagent_type is an exact match: a bare name does not resolve to a plugin agent, and the
 # spike in the README is where that was measured. A coordinator that writes `developer`
