@@ -19,23 +19,31 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
 
 ## Steps
 
-1. **Read the task**, the context documents the brief lists, and every file the task names
-   plus its tests. Done when you can say which tests will prove the task is finished — not
+1. **Read the task** and the context documents the brief lists, then, for each file the task
+   names and its tests, only the passages that concern it: `Read` with a line range, or
+   `grep -n` to find them. Not the whole file by default. Done when you can say which tests will prove the task is finished — not
    that the code exists, that the behaviour holds.
 
    The words a user reads and the design's page and README come from the product-designer:
    take them verbatim. One that does not fit is a question for the coordinator, not an edit.
 
 2. **Branch** from an up-to-date base branch, named `<type>/<short-name>` with the type from
-   the task's title. If the coordinator hands you a pull request instead of a task, check it
-   out and continue from where it is: it already exists, and at step 5 you only push.
+   the task's title. If the coordinator hands you a pull request instead of a task, take it
+   over as the next paragraph says, not with `git checkout <branch>`, and continue from where
+   it is: it already exists, and at step 5 you only push.
+
+   Its branch is often still checked out in the previous agent's worktree, and git refuses a
+   second checkout. Do not fight it: `git fetch -q`, work on the head commit of the pull
+   request in a detached HEAD (`git checkout --detach origin/<branch>`), and push with
+   `git push origin HEAD:<branch>`. Never delete or modify the worktree of another agent.
 
 3. **Build test-first.** For each criterion: a failing test, then make it pass, then tidy.
-   Done when every criterion has a test that fails without your change. A test written after
+   Run only the test you are writing, for red and for green. Done when every criterion has a test that fails without your change. A test written after
    the code proves the code runs; a test written before it proves the criterion.
 
-4. **Check** with the affected command from the brief, then its cleanup if it has one, so the
-   next agent finds its slot free. Keep the diff inside the task and under the line budget.
+4. **Check** with the affected command from the brief, run once, at the end, then its cleanup
+   if it has one, so the next agent finds its slot free. Run a full or end-to-end suite again
+   only to check a fix to that suite. Keep the diff inside the task and under the line budget.
 
 5. **Open the pull request.** Commit with the title form the brief states, push the branch,
    open the request with what it closes. In **discreet mode** both of these need the human
@@ -47,7 +55,7 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
 Catch up with the base branch first. Fix each blocking finding as a new commit on the same
 branch — or, if you believe a finding is wrong, say so with your reason instead of changing
 the code. A disputed finding is a legitimate answer; a finding quietly worked around is not.
-Re-check, push, report. Each push makes a new head SHA, and the review starts again there.
+Re-check the same way: the touched test first, then the affected command once. Push, report. Each push makes a new head SHA, and the review starts again there.
 
 ## Report
 
@@ -56,6 +64,9 @@ Status: done | blocked | needs-decision
 Deliverables: the pull request, its head SHA, your worktree path, what changed, what you tested, any finding you dispute
 Decisions needed: question — options — your recommendation, or "none"
 ```
+
+What changed and what you tested are one line each; the detail goes in the pull request
+description.
 
 Report `needs-decision` rather than choosing when the task does not say: a new dependency,
 a change to what a user sees beyond the task, touching CI or a threshold, or going over the
