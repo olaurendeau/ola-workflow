@@ -1561,6 +1561,42 @@ case $designed_brief in
   *) ok "integrated: a design directory the profile states carries no default note" ;;
 esac
 
+# The link to the design in the description (#99). A request that realises a design carries
+# the URL of its artifact, read in the design's README, or the path of its page when it was
+# never published. Integrated mode only: in discreet mode the workflow leaves no trace in
+# the project, and a link to an artifact would be one.
+design_flat=$(reviewable_of "$integrated" | tr '\n' ' ')
+case $design_flat in
+  *'a Design line, only if the task points at a design'*) ok "integrated: the description has a Design line, only for a task that points at a design" ;;
+  *) ko "integrated: the description has no conditional Design line" ;;
+esac
+case $design_flat in
+  *'a Design line'*'artifact URL'*'README'*'path of its page'*'never published'*) ok "integrated: the Design line is the README's URL, or the page's path when never published" ;;
+  *) ko "integrated: the Design line does not say where its URL comes from, nor what stands in when there is none" ;;
+esac
+# Placed after the summary sentences, before the Decision line.
+case $design_flat in
+  *'1 to 3 sentences'*'a Design line'*'Decision:'*) ok "integrated: the Design line comes after the summary and before the Decision" ;;
+  *) ko "integrated: the Design line is not placed after the summary sentences" ;;
+esac
+case $(reviewable_of "$discreet") in
+  *Design*) ko "discreet: the description asks for a Design line, a trace the mode does not leave" ;;
+  *) ok "discreet: the description has no Design line" ;;
+esac
+# The developer is not made to look for the URL: the architect gives it with the page.
+case $(step_of "$ROOT/agents/architect.md" 3 | tr '\n' ' ') in
+  *'draws a screen'*'README'*'artifact URL'*) ok "architect: a task that draws a screen gets the artifact URL with the page and the README" ;;
+  *) ko "architect: a task that draws a screen is not given the artifact URL" ;;
+esac
+# A missing Design line is a comfort the human asked for, never a reason to block: the
+# reviewer's Description point says it is a suggestion.
+design_review=$(printf '%s\n' "$review_checklist" | awk '/^- \*\*Description\*\*/{on=1; print; next} on && /^- /{exit} on' | tr '\n' ' ' | sed -n 's/.*\(Design line.*\)/\1/p')
+case $design_review in
+  *'is blocking'*) ko "pr-reviewer: the Design line is spoken of as blocking" ;;
+  *'Design line'*'suggestion'*) ok "pr-reviewer: a missing Design line is a suggestion" ;;
+  *) ko "pr-reviewer: the Description point does not make a missing Design line a suggestion" ;;
+esac
+
 # Integrated mode does carry the merge form, with the SHA pinned.
 case $integrated in
   *'--match-head-commit'*) ok "the integrated brief pins the merge to a SHA" ;;

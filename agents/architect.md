@@ -38,7 +38,8 @@ You are read-only: `Bash` is for reading the repository and the forge.
      already exist, since a "before" is due for those;
    - an epic that carries a design's page and README: the first task copies them, unchanged,
      into the design directory the brief names, and every task that draws a screen points at
-     them rather than re-describing them.
+     the page, the README and the artifact URL when the README has one, rather than
+     re-describing them.
 
 4. **Put the risk first.** If one part can invalidate the rest — a migration, a format
    change, an assumption about what the data looks like — it goes first, alone, so that
