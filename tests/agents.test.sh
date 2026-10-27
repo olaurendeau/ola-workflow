@@ -834,6 +834,55 @@ if grep -q 'Security review of' "$ROOT/agents/pr-reviewer.md" &&
 else
   ko "pr-reviewer: may take a security comment for its own previous review"
 fi
+# The checks take minutes and the review takes as long: a reviewer that waits for them to
+# end serialises the two. It reads them once and publishes; the merge gate reads the CI
+# again on its own, and the report's CI line tells the coordinator to.
+prr=$(tr '\n' ' ' < "$ROOT/agents/pr-reviewer.md" | tr -s ' ')
+# The witness: the paragraph that carried the old sentence is still there to be looked at.
+case $prr in
+  *'Do not run the full check yourself'*) ok "witness: pr-reviewer step 5 is readable" ;;
+  *) ko "witness: pr-reviewer step 5 is not where the absence below looks" ;;
+esac
+if printf '%s' "$prr" | grep -qiE 'wait(s|ing)? (for|until) (them|the checks?|CI)'; then
+  ko "pr-reviewer: waits for the checks to finish before it publishes"
+else
+  ok "pr-reviewer: does not wait for the checks to finish"
+fi
+case $prr in
+  *'CI: green | running | failed: <check> | cancelled'*)
+    ok "pr-reviewer: reports where the CI stands, so the coordinator reads it again before merging" ;;
+  *) ko "pr-reviewer: reports no CI line, so a status given while the checks ran looks final" ;;
+esac
+# Step 7 withholds the status of a SHA the head left; the line must have a value for it.
+case $prr in
+  *'Report `CI: cancelled`'*) ok "pr-reviewer: says what it reports when the checks were cancelled" ;;
+  *) ko "pr-reviewer: a cancelled check has no value on the CI line" ;;
+esac
+case $prr in
+  *'git grep -n'*"sed -n 'a,bp'"*) ok "pr-reviewer: says how to read a range at the SHA" ;;
+  *) ko "pr-reviewer: names no way to read a range at the SHA, so every git show looks banned" ;;
+esac
+case $prr in
+  *'Never read a whole file that way'*) ok "pr-reviewer: does not read whole files at the SHA" ;;
+  *) ko "pr-reviewer: may read whole files with git show, thousands of calls on a large request" ;;
+esac
+# The meaning of the status: it judges the code and the checks already failed, not the
+# checks green. Requiring them green is what made the reviewer wait for them.
+case $prr in
+  *'successful only with zero blocking findings **and** no required check already failed'*)
+    ok "pr-reviewer: a successful status needs no failed required check, not a green CI" ;;
+  *) ko "pr-reviewer: the meaning of a successful status is not the one that lets it publish while checks run" ;;
+esac
+case $prr in
+  *'successful only with'*'checks green on that SHA'*)
+    ko "pr-reviewer: requires the checks green to set a successful status, so it waits for them" ;;
+  *) ok "pr-reviewer: does not require the checks green to set a successful status" ;;
+esac
+case $prr in
+  *'Checks still running'*'judgement of the code alone'*'A required check already failed'*'status is `failure` and names the check'*)
+    ok "pr-reviewer: running checks do not hold the status, a failed one does" ;;
+  *) ko "pr-reviewer: nothing says what the status is while checks run or after one fails" ;;
+esac
 
 # --- One source, cited by all ---------------------------------------------------------
 # The pair that matters: the brief is stated once and needed by every agent. Each agent

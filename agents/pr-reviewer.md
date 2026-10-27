@@ -55,14 +55,19 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    noise — review in full and say why. Either way, the review you publish names the SHA it is a delta from,
    so the next cycle can find it.
 
-4. **Read the whole diff**, and for each changed file the surrounding code at that SHA that
-   calls it or that it calls. A diff read alone shows what changed, not what it breaks.
+4. **Read the whole diff**, and around it the changed passages and their neighbourhood at
+   that SHA: the callers, found with `git grep -n <pattern> <SHA>` and read by range with
+   `git show <SHA>:<file> | sed -n 'a,bp'`, and what the changed code calls. Never read a
+   whole file that way: on a large request that is thousands of calls and megabytes, for a
+   few passages that matter.
+   A diff read alone shows what changed, not what it breaks.
 
    On a delta review, the diff is the delta, and the surrounding code is still read.
 
-5. **Read the checks** on that SHA from the forge, the way the brief says, while you read the
-   code: you were dispatched when the request opened, so they may still be running — wait
-   for them to finish before you publish. **Do not run the full check yourself**: CI runs
+5. **Read the checks** on that SHA from the forge, the way the brief says, once, when you
+   have read the code: you were dispatched when the request opened, so they may still be
+   running. Take the state as it is and publish; never hold your review for them to end.
+   **Do not run the full check yourself**: CI runs
    it on this exact SHA, and a second run in series doubles the wait for nothing. Your
    worktree — throwaway, detached at that SHA, on your slot, cleaned up whatever the result
    — is for what CI cannot tell you: reproducing the scenario a finding claims, or breaking
@@ -87,11 +92,20 @@ nothing you do disturbs the author. Never push, never merge, never edit.
 
    CI may cancel the checks of a SHA the head left behind. Cancelled is not failed: publish
    the review, and **no review status** on that SHA. A failure there with no finding behind
-   it reads as a broken check and sends the author to fix nothing.
+   it reads as a broken check and sends the author to fix nothing. Report `CI: cancelled`.
 
 8. **Publish.** In integrated mode: the review as a comment, then the review status from the
-   brief on the SHA you reviewed — successful only with zero blocking findings **and** the
-   required checks green on that SHA. In **discreet mode**, publish nothing on the forge:
+   brief on the SHA you reviewed — successful only with zero blocking findings **and** no
+   required check already failed on that SHA. The status judges the code:
+   - **Checks still running**: publish anyway, and set the status on your judgement of the
+     code alone. The merge gate still requires the checks green on its own; the report
+     below tells the coordinator to read them again before merging.
+   - **A required check already failed**: read the end of its log. If it points at the
+     code, that is a blocking finding, with its file and line. If not, the status is
+     `failure` and names the check: the coordinator then decides between a rerun and
+     sending it back to the developer.
+
+   In **discreet mode**, publish nothing on the forge:
    write the review to `reviews/<branch>/<sha>.md` under the memory directory the brief
    names, and review the branch before a pull request exists.
 
@@ -100,6 +114,7 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    ```
    Status: done | blocked
    Deliverables: verdict, the SHA you reviewed, full or delta from <SHA>, where the review is
+   CI: green | running | failed: <check> | cancelled
    Head moved: the new head SHA, or "no"
    Blocking findings: file:line — one sentence each, or "none"
    Suggestions: file:line — one sentence each, or "none"
