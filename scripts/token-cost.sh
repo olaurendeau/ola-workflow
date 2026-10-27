@@ -15,12 +15,18 @@
 #   <dir>/*.jsonl                          the main session, role "coordinator"
 #   <dir>/<session>/subagents/agent-*.jsonl  a subagent; its role is the agentType of the
 #                                          sibling agent-*.meta.json, without the
-#                                          "ola-workflow:" prefix ("unknown" when absent)
+#                                          "ola-workflow:" prefix ("unknown" when absent, or when
+#                                          unreadable, which is then said on stderr)
 #
-# A call is an assistant record carrying message.usage. A request is logged several times
-# while it streams (output 8, then 123): the calls are deduplicated by requestId keeping
-# the record with the most output tokens — keeping the first would undercount the output,
-# which weighs 5. A requestId seen in two files counts once.
+# A call is an assistant record carrying message.usage, that the API served. Claude Code
+# also logs its own errors ("API Error: Can't reach the API server", a limit reached) as
+# assistant records with model "<synthetic>", isApiErrorMessage, no requestId and a usage
+# at zero: they are not calls. Counted, each would be a cache rewrite for 0, and would set
+# the previous context to 0, hiding the real rewrite that follows an error.
+# A request is logged several times while it streams (output 8, then 123): the calls are
+# deduplicated by requestId keeping the record with the most output tokens — keeping the
+# first would undercount the output, which weighs 5. A requestId seen in two files counts
+# once.
 #
 # Weighted cost = input x 1 + cache_creation x 1.25 + cache_read x 0.1 + output x 5.
 #
@@ -82,7 +88,7 @@ trap 'rm -rf "${WORK:?}"' EXIT
 # One log in, one object out: {role, pr, calls: [{id, ts, o, cost, rw}]}.
 # The input is read as text and parsed line by line with fromjson?, because the log of a
 # session still running ends on a half-written line, and one such line must not cost the
-# whole measurement. That is the one place where an error is swallowed on purpose.
+# whole measurement. That is the one place where an error is swallowed without a word, on purpose.
 # shellcheck disable=SC2016
 #   The program is jq's, not the shell's.
 PER_LOG='
@@ -96,7 +102,8 @@ PER_LOG='
   def tool_results: [.message.content | arrays | .[] | select(type == "object" and .type == "tool_result") | .content | result_text] | join("\n");
 
   [ inputs | fromjson? | select(type == "object") | . as $r
-    | if $r.type == "assistant" and ($r.message.usage | type) == "object" then
+    | if $r.type == "assistant" and ($r.message.usage | type) == "object"
+         and $r.message.model != "<synthetic>" and $r.isApiErrorMessage != true then
         $r.message.usage as $u
         | {k: "a", id: $r.requestId, ts: ($r.timestamp // ""),
            i: ($u.input_tokens // 0), cc: ($u.cache_creation_input_tokens // 0),
@@ -161,7 +168,10 @@ while IFS= read -r dir; do
       "$dir"/*/subagents/agent-*.jsonl)
         role=""
         meta=${f%.jsonl}.meta.json
-        [ -f "$meta" ] && role=$(jq -r '.agentType // empty' "$meta" 2>/dev/null)
+        if [ -f "$meta" ]; then
+          role=$(jq -r '.agentType // empty' "$meta" 2>/dev/null) \
+            || echo "${0##*/}: $meta is not readable, the role of $f is unknown" >&2
+        fi
         role=${role#ola-workflow:}
         [ -n "$role" ] || role=unknown
         main=false

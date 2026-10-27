@@ -38,6 +38,14 @@ uresult() { # a tool result whose content is a list of text blocks, as Claude Co
   jq -cn --arg t "$2" '{type: "user", message: {role: "user",
     content: [{type: "tool_result", tool_use_id: "x", content: [{type: "text", text: $t}]}]}}' >>"$1"
 }
+synthetic() { # synthetic <file> <timestamp> <mark> → an API error as Claude Code logs it: no requestId, usage at zero
+  # mark "model" flags it by message.model, "flag" by isApiErrorMessage, "both" by both
+  jq -cn --arg ts "$2" --arg f "$3" '
+    {type: "assistant", timestamp: $ts, message: {usage: {input_tokens: 0,
+      cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0}}}
+    | if $f != "flag" then .message.model = "<synthetic>" else . end
+    | if $f != "model" then .isApiErrorMessage = true else . end' >>"$1"
+}
 sub() { # sub <project> <name> <agentType|-> → the path of a subagent log (and its meta)
   local d=$1/session1/subagents
   mkdir -p "$d"
@@ -154,6 +162,18 @@ run "$P"
   && ok "the cost of the rewrites is the weighted cost of the calls that are one" \
   || ko "rewrite cost: $(totalline)"
 
+for mark in model flag both; do
+  fresh
+  call "$P/main.jsonl" r1 "$(T 01)" 0 0 1000000 1
+  synthetic "$P/main.jsonl" "$(T 02)" "$mark"
+  call "$P/main.jsonl" r3 "$(T 03)" 0 1000000 0 0
+  run "$P"
+  # the error is not a call: the third call is rewritten against the first one's 1 M, and costs 1.25 M
+  { [ "$(row coordinator 2)" = 2 ] && [ "$(totalline | grep -o '[0-9]* cache rewrites ([0-9.]* M)')" = "1 cache rewrites (1.25 M)" ]; } \
+    && ok "an API error record (marked by '$mark') is not a call and does not hide the rewrite after it" \
+    || ko "synthetic record marked by '$mark': $(row coordinator 2) call(s), $(totalline)"
+done
+
 # --- the role --------------------------------------------------------------------------
 fresh
 call "$P/main.jsonl" r1 "$(T 01)" 1000000 0 0 0
@@ -245,6 +265,16 @@ run --until 2026-10-10 "$P"
   && ok "--until leaves out a call that is later" \
   || ko "--until: $(row coordinator 2) call(s), $(row coordinator 3) M, expected 1 and 1.00"
 
+run --since=2026-10-10 "$P"
+[ "$STATUS" = 0 ] && [ "$(row coordinator 3)" = 2.00 ] \
+  && ok "--since=DATE is the same as --since DATE" \
+  || ko "--since=: exit $STATUS, '$(row coordinator 3)', expected 2.00"
+
+run --until=2026-10-10 "$P"
+[ "$STATUS" = 0 ] && [ "$(row coordinator 3)" = 1.00 ] \
+  && ok "--until=DATE is the same as --until DATE" \
+  || ko "--until=: exit $STATUS, '$(row coordinator 3)', expected 1.00"
+
 fresh
 call "$P/main.jsonl" r1 "$(T 01)" 0 100000 0 1
 call "$P/main.jsonl" r2 "$(T 20)" 0 0 10000 1
@@ -252,6 +282,52 @@ run --since 2026-10-10 "$P"
 [ "$(row coordinator 5)" = 1 ] \
   && ok "a rewrite is judged against the call before the window, not against nothing" \
   || ko "rewrite at the edge of the window: $(row coordinator 5), expected 1"
+
+# --- the PR table is capped ------------------------------------------------------------
+fresh
+for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+  f=$(sub "$P" "a$k" ola-workflow:developer)
+  umsg "$f" "PR #$((100 + k))"
+  call "$f" "r$k" "$(T 01)" "${k}000000" 0 0 0
+done
+run "$P"
+# PR #101 costs 1 M, #116 costs 16 M: the table keeps the 15 dearest and sums the rest
+{
+  [ "$(printf '%s\n' "$OUT" | grep -c '^#')" = 15 ] && [ "$(prrow '#116')" = 16.00 ] \
+    && [ "$(prrow '#102')" = 2.00 ] && [ -z "$(prrow '#101')" ] \
+    && [ "$(printf '%s\n' "$OUT" | grep '^(1 other PRs)' | awk '{print $4}')" = 1.00 ]
+} \
+  && ok "the PR table keeps the 15 dearest PRs and sums the others on one row" \
+  || ko "PR table of 16 PRs: $(printf '%s\n' "$OUT" | grep -E '^(#|\()' | tr '\n' '|')"
+
+fresh
+for k in 1 2 3; do
+  f=$(sub "$P" "a$k" ola-workflow:developer)
+  umsg "$f" "PR #$((100 + k))"
+  call "$f" "r$k" "$(T 01)" "${k}000000" 0 0 0
+done
+run "$P"
+[ "$(printf '%s\n' "$OUT" | grep -c 'other PRs')" = 0 ] \
+  && ok "no 'other PRs' row when the table is not cut" \
+  || ko "an 'other PRs' row for 3 PRs"
+
+# --- an unreadable meta.json -------------------------------------------------------------
+fresh
+f=$(sub "$P" a ola-workflow:developer)
+printf '{"agentTy' >"${f%.jsonl}.meta.json"
+call "$f" r1 "$(T 01)" 1000000 0 0 0
+run "$P"
+{ [ "$STATUS" = 0 ] && [ "$(row unknown 3)" = 1.00 ] && grep -q 'meta.json' "$WORK/stderr"; } \
+  && ok "an unreadable meta.json gives role unknown and is reported on stderr" \
+  || ko "broken meta.json: exit $STATUS, role unknown '$(row unknown 3)', stderr '$(cat "$WORK/stderr")'"
+
+fresh
+f=$(sub "$P" a -)
+call "$f" r1 "$(T 01)" 1000000 0 0 0
+run "$P"
+[ ! -s "$WORK/stderr" ] \
+  && ok "an absent meta.json is unknown without a word" \
+  || ko "an absent meta.json wrote on stderr: $(cat "$WORK/stderr")"
 
 # --- several directories and the errors ------------------------------------------------
 fresh
