@@ -1174,8 +1174,15 @@ for pair in "integrated:$integrated" "discreet:$discreet"; do
     *) ko "$mode: the brief does not bound the description" ;;
   esac
   case $section in
-    *'`Checked` line'*) ok "$mode: the description has a Checked line" ;;
-    *) ko "$mode: the brief asks for no Checked line" ;;
+    *'a line saying what was checked'*) ok "$mode: the description has a line saying what was checked" ;;
+    *) ko "$mode: the brief asks for no line saying what was checked" ;;
+  esac
+  # A label in backticks reads as the literal text to write, whatever the language of the
+  # artifacts: it is named in words and left to the language the brief prints.
+  case $section in
+    *'`Checked`'*) ko "$mode: the Checked label is literal, though labels follow the artifacts language" ;;
+    *'its label in the language of the artifacts'*) ok "$mode: the label of the checked line follows the artifacts language" ;;
+    *) ko "$mode: the brief does not say which language the checked label is in" ;;
   esac
   case $section in
     *'<details><summary>'*) ok "$mode: the rest of the description goes in a folded block" ;;
@@ -1189,6 +1196,12 @@ done
 case $(reviewable_of "$integrated") in
   *'- `Closes #<task>`'*) ok "integrated: the description closes the task" ;;
   *) ko "integrated: the description does not say what it closes" ;;
+esac
+# Not every request closes a task — a release closes none, and a reviewer must not block it
+# for the missing line — yet one made from a task must close it: both halves are stated.
+case $(reviewable_of "$integrated" | tr '\n' ' ') in
+  *'when the request closes a task'*'one made from a task closes it'*'closes none'*) ok "integrated: Closes is conditional, and a request made from a task closes it" ;;
+  *) ko "integrated: the brief makes Closes unconditional, or lets a task go unclosed" ;;
 esac
 case $(reviewable_of "$discreet") in
   *'- `Closes #<task>`'*) ko "discreet: the description must close a task that is not on the forge" ;;

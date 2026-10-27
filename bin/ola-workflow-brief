@@ -203,13 +203,15 @@ esac
 echo
 echo "Description: short, in this order —"
 if [ "$mode" = integrated ]; then
-  echo "- \`Closes #<task>\`, the task this request closes."
+  echo "- \`Closes #<task>\`, when the request closes a task: one made from a task closes it. A"
+  echo "  request that closes none (a release, say) has no such line."
 else
   echo "- \`Closes #<issue>\` only if the human named an issue to close: the task lives in the"
   echo "  local memory, not on the forge."
 fi
 echo "- 1 to 3 sentences: what changes, and why."
-echo "- a \`Checked\` line: the check command you ran, then one line per notable verification."
+echo "- a line saying what was checked, its label in the language of the artifacts (\"Checked\" in"
+echo "  English): the check command you ran, then one line per notable verification."
 echo "- \`Decision: … — Reason: …\`, only if there is one."
 echo "- \`<details><summary>…</summary> … </details>\`, only if needed: the rest goes there."
 echo "Headings and labels in the language of the artifacts: $(with_default language.artifacts en)."
