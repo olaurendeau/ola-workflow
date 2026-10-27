@@ -250,8 +250,8 @@ It writes a key only on a positive result, and that is the rule it is built arou
 omitted key reads as *not declared* in the brief, which an agent treats as a question for
 the human, while an invented one reads as this project's rule — a check command nobody runs,
 enforced by a reviewer against a developer. `slots`, `pr`, `merge`, `commands`,
-`db_hosts_allowed` and `verify_ui` are not detectable at all and are left out unless you
-state them.
+`db_hosts_allowed`, `verify_ui` and `preview` are not detectable at all and are left out unless
+you state them.
 
 The file is described by [`schema/profile.schema.json`](schema/profile.schema.json), which
 is also what validates it — point your editor at it:
@@ -271,6 +271,7 @@ is also what validates it — point your editor at it:
 | `db_hosts_allowed` | the databases an agent may connect to |
 | `context` | the documents the agents read: product, architecture, review checklist, security precedents, glossary; and `design`, where each design is documented (`docs/design` by default, integrated mode only) |
 | `verify_ui` | how a change is seen running |
+| `preview` | `up`, `url`, `down`: how a web app is started on a slot to be captured for a pull request — see [Captures](#captures) |
 | `escalation_extra` | what this project reserves for the human |
 
 Any string value may hold `{slot}`, which is replaced with the slot in use when one is
@@ -310,7 +311,28 @@ not rewritten under itself while it works. For an ordinary session, name another
 | Memory | GitHub issues, labels, a review commit status, review comments | local files under the profile directory |
 | Conventions | the profile, plus the project's own CONTRIBUTING | read from the project: CONTRIBUTING, PR template, commit language |
 | Writes to GitHub | allowed, per role | issues, labels, comments, statuses: **refused**. `git push` and `gh pr create`: **ask** (a human confirms) |
-| Merge | the coordinator, through the merge gate; the `RFR` label marks a pull request that passes it | nobody |
+| Merge | the coordinator, through the merge gate; the `RFR` label marks a pull request ready to merge, by the coordinator or by the human | nobody |
+
+### Captures
+
+A pull request that changes what a user sees can show it. The profile's `preview` says how
+to start the web app on a slot (`up`, which returns once the app answers at `url`), where to
+look (`url`) and how to stop it (`down`); `{slot}` applies to all three. It is not
+`verify_ui`, which is how a developer sees a change running and may aim at a simulator:
+`preview` is web only. Without it, no capture is expected, and the brief says so.
+
+Two scripts, on the PATH of every Bash call:
+
+- `ola-workflow-capture <url> <file.png>` takes a screenshot with a headless Chrome or
+  Chromium. One must be installed; `OLA_WORKFLOW_CHROME` names the one to use, and then only
+  that one.
+- `ola-workflow-pr-assets <pr> <file.png>...` pushes the files to the `pr-assets` branch,
+  at `<pr>/<name>.png`, and prints one markdown line per file for the description. The link
+  is a `blob/pr-assets/...?raw=true` one, which GitHub shows in the pull request of a
+  private repository to whoever can read it.
+
+`pr-assets` is as readable as the repository: capture development data only. Captures are
+written outside the worktree and are never committed.
 
 ### Globs
 

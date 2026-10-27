@@ -6,6 +6,8 @@
 #
 # Each file lands at <pr>/<name>.png on the branch, and one line is printed per file:
 #   ![<name>](https://<host>/<owner>/<repo>/blob/pr-assets/<pr>/<name>.png?raw=true)
+# <host> is the web host: for an SSH remote it is what `ssh -G` resolves the name to, and
+# github.com for ssh.github.com.
 #
 # The branch is built with plumbing, so HEAD, the index, the working tree and the local
 # branches of the clone are never touched: the commit is made from a temporary index, on
@@ -73,6 +75,32 @@ case $id in
   local/*) die "origin is a local path: there is no web address to link the captures to" 1 ;;
 esac
 
+# The host the remote names is where git connects, not always where the repository is read:
+# an SSH alias (`git@gh-work:o/r.git`) is a name from the user's ~/.ssh/config, and GitHub
+# takes SSH on `ssh.github.com` too, which serves no pages. Either would give a dead link
+# while the push succeeds. An http(s) or git remote already names the web host.
+host=${id%%/*}
+repo_path=${id#*/}
+case $url in
+  http://*|https://*|git://*) ;;
+  *)
+    # Nothing but a hostname is handed to ssh, and after `--`: a remote is project-controlled
+    # and a name starting with a dash would be read as an option.
+    case $host in
+      -*|*[!A-Za-z0-9._-]*) ;;
+      *)
+        resolved=$(ssh -G -- "$host" 2>/dev/null | awk '$1 == "hostname" { print $2; exit }')
+        case $resolved in
+          ''|-*|*[!A-Za-z0-9._-]*) ;;
+          *) host=$resolved ;;
+        esac
+        ;;
+    esac
+    [ "$host" != ssh.github.com ] || host=github.com
+    ;;
+esac
+web=$host/$repo_path
+
 ola_scratch pr-assets
 work=$OLA_SCRATCH
 trap 'rm -rf "${work:?}"' EXIT
@@ -136,5 +164,5 @@ done
 for file in "$@"; do
   name=${file##*/}
   name=${name%.png}
-  printf '![%s](https://%s/blob/pr-assets/%s/%s.png?raw=true)\n' "$name" "$id" "$pr" "$name"
+  printf '![%s](https://%s/blob/pr-assets/%s/%s.png?raw=true)\n' "$name" "$web" "$pr" "$name"
 done

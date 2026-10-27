@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016,SC2015
-#   Several arguments below are shell metacharacters on purpose: `$(id)` has to reach the
-#   script as text.
+#   SC2016: several arguments below are shell metacharacters on purpose: `$(id)` has to reach
+#   the script as text.
+#   SC2015: `A && ok || ko`: ok() only counts and prints, so ko() cannot run after a passing
+#   test.
 # Runs bin/ola-workflow-capture against a fake browser, and bin/ola-workflow-pr-assets
 # against a bare repository standing in for GitHub. No network, no real browser.
 set -uo pipefail
@@ -175,6 +177,7 @@ hungpid=$(cat "$WORK/fake.pid" 2>/dev/null)
 helperpid=$(cat "$WORK/fake.child" 2>/dev/null)
 kill -TERM "$scriptpid" 2>/dev/null
 wait "$scriptpid" 2>/dev/null
+termrc=$?
 if [ -n "$hungpid" ] && [ -n "$helperpid" ] && ! kill -0 "$hungpid" 2>/dev/null && ! kill -0 "$helperpid" 2>/dev/null; then
   ok "a TERM sent to the script takes the browser and its helper down with it"
 else
@@ -182,6 +185,11 @@ else
   [ -z "$hungpid" ] || kill -KILL "$hungpid" 2>/dev/null
   [ -z "$helperpid" ] || kill -KILL "$helperpid" 2>/dev/null
 fi
+
+# 128 + the signal, as a shell reports it: 143 for TERM. 130 is for INT, which a background
+# job cannot receive here, so only the former is exercised.
+[ "$termrc" = 143 ] && ok "a TERM sent to the script ends it with 143" ||
+  ko "a TERM sent to the script ends it with 143 (rc=$termrc)"
 
 msg=$(OLA_WORKFLOW_CAPTURE_TIMEOUT=abc OLA_WORKFLOW_CHROME=$FAKE "$CAPTURE" http://localhost:3002/ "$OUT" 2>&1)
 rc=$?
@@ -280,6 +288,42 @@ else
   ko "the markdown line, for a git@github.com:owner/repo.git remote (got: $msg)"
 fi
 
+# The host an SSH remote names is not always the web host. `ssh -G` says which machine an
+# alias reaches, and GitHub's SSH-over-443 host is not its web host: both would give a dead
+# link while the push succeeds. The ssh below stands in for the user's ~/.ssh/config.
+mkdir -p "$WORK/sshshim"
+cat >"$WORK/sshshim/ssh" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = -G ] || exit 1
+shift
+[ "$1" != -- ] || shift
+case $1 in
+  gh-work) echo "hostname ssh.github.com" ;;
+  gh-perso) echo "hostname github.com" ;;
+  *) echo "hostname $1" ;;
+esac
+EOF
+chmod +x "$WORK/sshshim/ssh"
+n=0
+while IFS='|' read -r remote want; do
+  n=$((n + 1))
+  C=$WORK/clone-alias-$n
+  mkclone "$C" "$remote"
+  msg=$(cd "$C" && PATH="$WORK/sshshim:$PATH" "$ASSETS" 40 "$WORK/other.png" 2>&1)
+  if [ "$msg" = "![other](https://$want/blob/pr-assets/40/other.png?raw=true)" ]; then
+    ok "the link names the web host, for $remote"
+  else
+    ko "the link names the web host, for $remote (got: $msg)"
+  fi
+done <<'REMOTES'
+git@gh-work:owner/repo.git|github.com/owner/repo
+git@gh-perso:owner/repo.git|github.com/owner/repo
+git@ssh.github.com:owner/repo.git|github.com/owner/repo
+ssh://git@ssh.github.com:443/owner/repo.git|github.com/owner/repo
+https://github.com/owner/repo.git|github.com/owner/repo
+git@git.example.org:owner/repo.git|git.example.org/owner/repo
+REMOTES
+
 # A second clone, behind, pushes for another PR: the first one's files are still there.
 B=$WORK/clone-b
 mkclone "$B" https://github.com/someone/x.git
@@ -295,7 +339,7 @@ fi
 (cd "$B" && "$ASSETS" 14 "$WORK/shot.png" "$WORK/other.png" >/dev/null 2>&1)
 rc=$?
 files=$(git -C "$BARE" ls-tree -r --name-only pr-assets 2>/dev/null | tr '\n' ' ')
-want="12/shot.png 13/other.png 14/other.png 14/shot.png 7/other.png "
+want="12/shot.png 13/other.png 14/other.png 14/shot.png 40/other.png 7/other.png "
 [ "$rc" = 0 ] && [ "$files" = "$want" ] &&
   ok "a clone that is behind builds on the remote head: earlier files are kept" ||
   ko "a clone that is behind builds on the remote head: earlier files are kept (rc=$rc: $files)"

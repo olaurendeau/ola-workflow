@@ -944,6 +944,9 @@ forbid_key db_hosts_allowed '(psql|mysql|mongosh|localhost:[0-9]|127\.0\.0\.1)' 
   'a database host'
 forbid_key verify_ui '(playwright|maestro|simctl|ios-simulator|--width [0-9])' \
   'a way of looking at the project'
+# What a prompt that hard-codes a preview would write: a dev server command or its address.
+forbid_key preview '(npm run dev|yarn dev|pnpm dev|rails server|https?://localhost)' \
+  'a way of starting a preview'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
 # The paths that get a security review, and the command that matches them, are the brief's:
 # a prompt that lists them has decided for every project which files are worth a look.
@@ -999,6 +1002,38 @@ desc_point=$(printf '%s\n' "$review_checklist" | awk '/^- \*\*Description\*\*/{o
 case $desc_point in
   *'suggestion'*) ok "pr-reviewer: a description that runs long is a suggestion" ;;
   *) ko "pr-reviewer: nothing says that a long description is only a suggestion" ;;
+esac
+
+# --- Captures, in the roles' steps -----------------------------------------------------
+# The roles say when to capture and how to judge, and cite the brief for the rest: neither
+# a script's address on the branch nor a preview value is theirs to write.
+forbid 'pr-assets/' 'the address of a capture on pr-assets'
+step_of() { awk -v n="$2" '$0 ~ "^" n "\\. "{on=1; next} /^[0-9]+\. |^## /{on=0} on' "$1"; }
+dev_step2=$(step_of "$ROOT/agents/developer.md" 2 | tr '\n' ' ')
+case $dev_step2 in
+  *'existing screen'*'"before"'*'before any change'*) ok "developer: step 2 captures \"before\" before any change, for an existing screen" ;;
+  *) ko "developer: step 2 does not capture \"before\" before any change" ;;
+esac
+dev_step4=$(step_of "$ROOT/agents/developer.md" 4 | tr '\n' ' ')
+case $dev_step4 in
+  *'"after"'*'Read'*'before'*'pushing'*) ok "developer: step 4 captures \"after\" and looks at each PNG before pushing it" ;;
+  *) ko "developer: step 4 does not make the developer look at each capture before pushing it" ;;
+esac
+case $(step_of "$ROOT/agents/developer.md" 5 | tr '\n' ' ') in
+  *'captures'*'number'*'description'*) ok "developer: step 5 pushes the captures under the request's number, into the description" ;;
+  *) ko "developer: step 5 does not push the captures under the number of the request" ;;
+esac
+case $(step_of "$ROOT/agents/architect.md" 3 | tr '\n' ' ') in
+  *'screens'*'states'*'capture'*) ok "architect: step 3 names the screens and states to capture" ;;
+  *) ko "architect: step 3 does not name the screens and states to capture" ;;
+esac
+case $(printf '%s\n' "$review_checklist" | awk '/^- \*\*Description\*\*/{on=1; print; next} on && /^- /{exit} on' | tr '\n' ' ') in
+  *'captures are expected'*'blocking'*) ok "pr-reviewer: a missing capture is blocking when the brief expects captures" ;;
+  *) ko "pr-reviewer: the Description point does not make a missing capture blocking" ;;
+esac
+case $(cat "$ROOT/skills/workflow-init/SKILL.md") in
+  *'`preview`'*'ask'*) ok "workflow-init: preview is asked for, not detected" ;;
+  *) ko "workflow-init: nothing says preview is asked for" ;;
 esac
 
 # --- Dispatch names are namespaced ----------------------------------------------------
@@ -1217,6 +1252,85 @@ case $(reviewable_of "$("$BRIEF" "$french")") in
   *'language of the artifacts: fr.'*) ok "the description's headings are in the artifacts language of the profile" ;;
   *) ko "the description's headings ignore language.artifacts" ;;
 esac
+
+# --- Captures --------------------------------------------------------------------------
+# The profile says how to start the app, the brief is the only reader of the profile, and
+# the roles cite the brief. Read in the section it lives in, so another section cannot
+# satisfy a presence, nor hide an absence.
+captures_of() { printf '%s\n' "$1" | awk '/^## Captures/{on=1; next} /^## /{on=0} on'; }
+PREVIEW='{"up":"make web-up PORT=300{slot}","url":"http://localhost:300{slot}/","down":"make web-down PORT=300{slot}"}'
+brief_preview() { # brief_preview <mode> [preview json] → the brief of a project with a preview
+  local mode=$1
+  local preview=${2:-$PREVIEW}
+  local repo=$WORK/preview-$mode-$RANDOM
+  mkdir -p "$repo/.claude"
+  git -C "$repo" -c init.defaultBranch=main init -q 2>/dev/null
+  printf '{"mode":"%s","preview":%s}\n' "$mode" "$preview" >"$repo/.claude/workflow.json"
+  "$BRIEF" "$repo"
+}
+with_preview=$(brief_preview integrated)
+with_preview_discreet=$(brief_preview discreet)
+for pair in "integrated:$with_preview" "discreet:$with_preview_discreet" "integrated:$integrated" "discreet:$discreet"; do
+  case $(captures_of "${pair#*:}") in
+    '') ko "${pair%%:*}: the brief has no '## Captures' section" ;;
+    *) ok "${pair%%:*}: the brief has a '## Captures' section" ;;
+  esac
+done
+for pair in "integrated:$with_preview" "discreet:$with_preview_discreet"; do
+  mode=${pair%%:*}
+  section=$(captures_of "${pair#*:}")
+  for want in 'make web-up PORT=300{slot}' 'http://localhost:300{slot}/' 'make web-down PORT=300{slot}' \
+              'ola-profile get preview.url --slot' 'ola-workflow-capture <url> <file.png>' \
+              'ola-workflow-pr-assets <pr> <file.png>'; do
+    case $section in
+      *"$want"*) ok "$mode, with a preview: the Captures section holds '$want'" ;;
+      *) ko "$mode, with a preview: the Captures section lacks '$want'" ;;
+    esac
+  done
+  case $section in
+    *'outside the worktree'*'never committed'*) ok "$mode, with a preview: captures stay outside the worktree and are never committed" ;;
+    *) ko "$mode, with a preview: nothing says captures are kept out of the worktree and the commits" ;;
+  esac
+  case $section in
+    *'whatever the result'*) ok "$mode, with a preview: down runs whatever the result" ;;
+    *) ko "$mode, with a preview: nothing says to run down whatever the result" ;;
+  esac
+  case $section in
+    *'readable by whoever can read the repository'*'development data'*) ok "$mode, with a preview: pr-assets is public to the repository's readers, so development data only" ;;
+    *) ko "$mode, with a preview: nothing warns who reads pr-assets" ;;
+  esac
+  case $(reviewable_of "${pair#*:}" | tr '\n' ' ') in
+    *'only if the request changes what a user sees'*'before'*'only when an existing screen changes'*)
+      ok "$mode, with a preview: the description has a Captures block, only for a visible change" ;;
+    *) ko "$mode, with a preview: the shape of the description has no Captures block" ;;
+  esac
+done
+case $(captures_of "$with_preview_discreet" | tr '\n' ' ') in
+  *'pushing `pr-assets`'*'the human confirms'*) ok "discreet, with a preview: pushing pr-assets waits for the human" ;;
+  *) ko "discreet, with a preview: nothing says pushing pr-assets needs the human" ;;
+esac
+case $(captures_of "$with_preview" | tr '\n' ' ') in
+  *'the human confirms'*) ko "integrated, with a preview: pushing pr-assets is made to wait for a human it does not need" ;;
+  *) ok "integrated, with a preview: pushing pr-assets does not wait for the human" ;;
+esac
+# Without a preview: no capture is expected, no script is named, the description asks for none.
+for pair in "integrated:$integrated" "discreet:$discreet" \
+            "partial:$(brief_preview integrated '{"up":"make web-up","url":"http://localhost:3000/"}')"; do
+  mode=${pair%%:*}
+  text=${pair#*:}
+  case $(captures_of "$text" | tr '\n' ' ') in
+    *'No capture is expected'*'in one line'*) ok "$mode, without a preview: no capture is expected, and a visible change says so in one line" ;;
+    *) ko "$mode, without a preview: the Captures section does not say that none is expected" ;;
+  esac
+  case $text in
+    *ola-workflow-capture*|*ola-workflow-pr-assets*) ko "$mode, without a preview: the brief names a capture script" ;;
+    *) ok "$mode, without a preview: the brief names no capture script" ;;
+  esac
+  case $(reviewable_of "$text") in
+    *aptures*) ko "$mode, without a preview: the shape of the description asks for captures" ;;
+    *) ok "$mode, without a preview: the shape of the description asks for no captures" ;;
+  esac
+done
 
 # Discreet mode: no instruction to write on the forge, and none to merge. These are
 # absences, and the witness above is what makes them mean something.

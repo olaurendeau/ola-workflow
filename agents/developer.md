@@ -37,6 +37,11 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
    request in a detached HEAD (`git checkout --detach origin/<branch>`), and push with
    `git push origin HEAD:<branch>`. Never delete or modify the worktree of another agent.
 
+   When the task names an existing screen that changes, and the brief's Captures section
+   gives a preview, capture "before" right after creating the branch, before any change: it
+   cannot be taken once you have edited the screen. Without a preview, say that you cannot
+   capture; nothing else changes.
+
 3. **Build test-first.** For each criterion: a failing test, then make it pass, then tidy.
    Run only the test you are writing, for red and for green. Done when every criterion has a test that fails without your change. A test written after
    the code proves the code runs; a test written before it proves the criterion.
@@ -45,11 +50,15 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
    if it has one, so the next agent finds its slot free. Run a full or end-to-end suite again
    only to check a fix to that suite. Keep the diff inside the task and under the line budget.
 
+   If the brief expects captures, capture "after" too, and `Read` each PNG before pushing it:
+   a page of errors is a valid PNG, and only looking tells it from the screen.
+
 5. **Open the pull request.** Commit with the title form the brief states, push the branch,
    open the request with the description in the form the brief states: short, the detail
    folded away. In **discreet mode** both of these need the human to confirm first: say
-   what you are about to push and what the request will contain, and wait. Done when it
-   exists and the checks have started.
+   what you are about to push and what the request will contain, and wait. With captures,
+   push them once the request is open, under its number, and put the lines the brief's
+   command prints in the description. Done when it exists and the checks have started.
 
 ## When the coordinator sends review findings
 

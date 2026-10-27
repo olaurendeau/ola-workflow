@@ -189,6 +189,13 @@ else
   echo "is the only security review)"
 fi
 echo
+# A preview is usable only whole: one that cannot be stopped keeps its slot, and without a
+# url there is nothing to capture. A partial one — the schema check above says so — is
+# treated as absent, rather than printed with a blank where a command should be.
+preview=
+if [ -n "$(get preview.up)" ] && [ -n "$(get preview.url)" ] && [ -n "$(get preview.down)" ]; then
+  preview=1
+fi
 echo "## A reviewable pull request"
 printf 'At most %s changed lines' "$(with_default pr.max_lines 1000)"
 excluded=$(get pr.exclude)
@@ -212,6 +219,10 @@ fi
 echo "- 1 to 3 sentences: what changes, and why."
 echo "- a line saying what was checked, its label in the language of the artifacts (\"Checked\" in"
 echo "  English): the check command you ran, then one line per notable verification."
+if [ -n "$preview" ]; then
+  echo "- a Captures block, only if the request changes what a user sees: a before/after table,"
+  echo "  \"before\" only when an existing screen changes, then the lines pr-assets printed."
+fi
 echo "- \`Decision: … — Reason: …\`, only if there is one."
 echo "- \`<details><summary>…</summary> … </details>\`, only if needed: the rest goes there."
 echo "Headings and labels in the language of the artifacts: $(with_default language.artifacts en)."
@@ -320,6 +331,32 @@ if [ -n "$ui_kind" ]; then
   echo "Run down whatever the result, and remember {slot} applies here too."
   echo
 fi
+# What a change looks like is shown by a capture, and whether one can be taken is the
+# profile's to say: the roles cite this section for when to capture and the brief says how.
+echo "## Captures"
+if [ -n "$preview" ]; then
+  echo "This project can be photographed: its app starts on a slot and a headless browser"
+  echo "captures a page of it. Read each value with the slot already substituted, e.g."
+  echo "ola-profile get preview.url --slot <n>; {slot} applies to all three:"
+  for step in up url down; do
+    printf '  %-5s %s\n' "$step" "$(get "preview.$step")"
+  done
+  echo "\`up\` hands the shell back once the app answers at \`url\`. Run \`down\` whatever the result,"
+  echo "or the slot stays taken."
+  echo
+  echo "- Capture a page: ola-workflow-capture <url> <file.png>"
+  echo "- Show captures in a request, once it is open: ola-workflow-pr-assets <pr> <file.png>..."
+  echo "  It pushes them to the pr-assets branch and prints one markdown line per file, which go"
+  echo "  in the description."
+  echo "- Write captures outside the worktree: they are never committed."
+  echo "- pr-assets is readable by whoever can read the repository, so capture development data"
+  echo "  only: nothing real, nothing private."
+  [ "$mode" = integrated ] || echo "- In this mode, pushing \`pr-assets\` is a push like any other: the human confirms it first."
+else
+  echo "No capture is expected: this project declares no preview. A request that changes what a"
+  echo "user sees says so in one line of its description."
+fi
+echo
 # Rules every role needs, so they are written here once rather than in each prompt. Static
 # on purpose: nothing in the profile changes them, and both modes print them.
 cat <<'CONTEXT_ECONOMY'
