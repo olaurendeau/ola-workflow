@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.8.0
+
+**A pull request that is short to read, captured when it changes what a user sees, and
+cheaper to produce.** The brief now states the form of a PR description once, for every role,
+and the agents spend less context on each task. The first measure of what a workflow costs in
+tokens ships with it.
+
+- A short description (#86): `Closes #<task>` when the request closes one (a release has no
+  such line), 1 to 3 sentences, a line saying what was checked, in the language of the
+  artifacts. The developer writes it, and the pr-reviewer judges it; a description that runs
+  long is a suggestion, never a blocking finding.
+- Captures (#88, #97): a new `preview` key in the profile (`up`, `url`, `down`) says how to
+  start the app on a slot. `ola-workflow-capture` photographs a page with headless Chrome, and
+  `ola-workflow-pr-assets` pushes the PNG files to a `pr-assets` branch and prints the
+  markdown to paste. A request that changes what a user sees carries a Captures block, a
+  before/after table when an existing screen changes. Without `preview`, the brief says no
+  capture is expected.
+- A link to the design (#101): in integrated mode, a request that follows a design links its
+  published artifact, or names the page's path when it was never published. A missing line is
+  a suggestion in review.
+- An `RFR` label (#92): in integrated mode, the coordinator puts it on a request whose merge
+  gate holds for the current head SHA, whether it merges it or hands it to the human, and
+  takes it off as soon as the request is no longer ready: new SHA, branch behind, blocking
+  review.
+- Context kept small (#85, #80, #81): the brief prints four rules for every role: no
+  busy-waiting on CI, reads by line range, noisy commands silenced or bounded, short reports.
+  The developer reads the passages it needs and runs the affected tests once, at the end. The
+  pr-reviewer publishes its verdict without waiting for CI, reports the CI state on its own
+  line, and reads the changed passages at the SHA instead of whole files.
+- Resuming agents (#80, #94): a developer can take over a request whose branch another agent
+  holds. The coordinator resumes an agent only if its last report is under five minutes old,
+  and otherwise starts a fresh one of the same role: review findings go to a fresh developer.
+  It reads a running CI again at the next report instead of waiting, asks for the Report block
+  only, and proposes a fresh session when an epic closes.
+- Measuring the cost (#87): `scripts/token-cost.sh` computes from the session logs the
+  weighted token cost by role and by PR, and the number of cache rewrites, so that an epic
+  aimed at the cost has a before and an after.
+
+Fixes:
+
+- The developer catches up with the base branch by merging it, never by rebasing, so a push
+  never has to be forced (#93).
+- The pr-reviewer writes line ranges as `sed -n '<a>,<b>p'`: `'a,bp'` read `a` as sed's
+  append command (#95).
+- The suite now holds that the architect cites the brief's "captures are expected" before
+  naming the screens to capture, as the developer and the pr-reviewer already did (#100).
+
 ## 0.7.0
 
 **A session opened with Chrome connected, under the coordinator, had no browser tool at
