@@ -978,6 +978,29 @@ for key in $FORBIDDEN_KEYS; do
   fi
 done
 
+# --- The shape of a pull request description ------------------------------------------
+# The brief states it once, the developer writes it and the pr-reviewer judges it. An agent
+# that restates the shape is the second copy this file exists to prevent, so the markup of
+# the folded block is not written in any agent file. Not a schema key, hence `forbid`.
+forbid '<details>|<summary>' 'the folded block of a description'
+# The step is read between its number and the next section, so that a sentence elsewhere in
+# the file cannot satisfy it.
+dev_step5=$(awk '/^5\. /{on=1} /^## /{on=0} on' "$ROOT/agents/developer.md")
+case $dev_step5 in
+  *'description'*'brief states'*) ok "developer: step 5 opens the request with the description the brief states" ;;
+  *) ko "developer: step 5 does not prescribe the description of the brief" ;;
+esac
+review_checklist=$(awk '/^## Checklist/{on=1} on' "$ROOT/agents/pr-reviewer.md")
+case $review_checklist in
+  *'- **Description**:'*) ok "pr-reviewer: the checklist has a Description point" ;;
+  *) ko "pr-reviewer: the checklist does not judge the description" ;;
+esac
+desc_point=$(printf '%s\n' "$review_checklist" | awk '/^- \*\*Description\*\*/{on=1; print; next} on && /^- /{exit} on')
+case $desc_point in
+  *'suggestion'*) ok "pr-reviewer: a description that runs long is a suggestion" ;;
+  *) ko "pr-reviewer: nothing says that a long description is only a suggestion" ;;
+esac
+
 # --- Dispatch names are namespaced ----------------------------------------------------
 # subagent_type is an exact match: a bare name does not resolve to a plugin agent, and the
 # spike in the README is where that was measured. A coordinator that writes `developer`
@@ -1139,6 +1162,48 @@ for pair in "integrated:$integrated" "discreet:$discreet"; do
     esac
   done
 done
+
+# The description's shape, stated by the brief for both modes. Read in the section it lives in
+# (from its heading to the next), so another section cannot satisfy it.
+reviewable_of() { printf '%s\n' "$1" | awk '/^## A reviewable pull request/{on=1; next} /^## /{on=0} on'; }
+for pair in "integrated:$integrated" "discreet:$discreet"; do
+  mode=${pair%%:*}
+  section=$(reviewable_of "${pair#*:}")
+  case $section in
+    *'1 to 3 sentences'*) ok "$mode: the description is 1 to 3 sentences" ;;
+    *) ko "$mode: the brief does not bound the description" ;;
+  esac
+  case $section in
+    *'`Checked` line'*) ok "$mode: the description has a Checked line" ;;
+    *) ko "$mode: the brief asks for no Checked line" ;;
+  esac
+  case $section in
+    *'<details><summary>'*) ok "$mode: the rest of the description goes in a folded block" ;;
+    *) ko "$mode: the brief names no folded block" ;;
+  esac
+  case $section in
+    *'never a blocking finding'*) ok "$mode: a long description is never blocking" ;;
+    *) ko "$mode: the brief does not say a long description is not blocking" ;;
+  esac
+done
+case $(reviewable_of "$integrated") in
+  *'- `Closes #<task>`'*) ok "integrated: the description closes the task" ;;
+  *) ko "integrated: the description does not say what it closes" ;;
+esac
+case $(reviewable_of "$discreet") in
+  *'- `Closes #<task>`'*) ko "discreet: the description must close a task that is not on the forge" ;;
+  *'only if the human named an issue'*) ok "discreet: the Closes line is conditional on an issue the human named" ;;
+  *) ko "discreet: the brief says nothing of the Closes line" ;;
+esac
+# The headings follow language.artifacts: a profile that sets it is read, not assumed.
+french=$WORK/french
+mkdir -p "$french/.claude"
+git -C "$french" -c init.defaultBranch=main init -q 2>/dev/null
+printf '{"mode":"integrated","language":{"artifacts":"fr"}}\n' >"$french/.claude/workflow.json"
+case $(reviewable_of "$("$BRIEF" "$french")") in
+  *'language of the artifacts: fr.'*) ok "the description's headings are in the artifacts language of the profile" ;;
+  *) ko "the description's headings ignore language.artifacts" ;;
+esac
 
 # Discreet mode: no instruction to write on the forge, and none to merge. These are
 # absences, and the witness above is what makes them mean something.
