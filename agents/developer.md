@@ -46,9 +46,10 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
    only to check a fix to that suite. Keep the diff inside the task and under the line budget.
 
 5. **Open the pull request.** Commit with the title form the brief states, push the branch,
-   open the request with what it closes. In **discreet mode** both of these need the human
-   to confirm first: say what you are about to push and what the request will contain, and
-   wait. Done when it exists and the checks have started.
+   open the request with the description in the form the brief states: short, the detail
+   folded away. In **discreet mode** both of these need the human to confirm first: say
+   what you are about to push and what the request will contain, and wait. Done when it
+   exists and the checks have started.
 
 ## When the coordinator sends review findings
 
