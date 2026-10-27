@@ -949,6 +949,9 @@ forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
 # a prompt that lists them has decided for every project which files are worth a look.
 forbid_key security '(security\.paths|:\(glob\)|security-precedents)' \
   'which paths get a security review'
+# Waiting on CI is the brief's rule: it says to read a check once. A prompt that loops or
+# watches contradicts it. `forbid`, not `forbid_key`: this is no profile key.
+forbid '--watch|sleep [0-9]|until .*sleep' 'a busy-wait on CI'
 forbid_key mode '(integrated|discreet) mode means' 'what a mode means'
 # Whether GitHub refuses is the one fact a prompt must never state, and for the sharpest
 # reason: an agent told it will be refused, that is not, reads the silence as sanction — and
@@ -1117,6 +1120,24 @@ for pair in "integrated:$integrated" "discreet:$discreet"; do
     *"just check"*) ok "$mode: the brief names the project's own check command" ;;
     *) ko "$mode: the brief does not name the check command from the profile" ;;
   esac
+done
+
+# Keeping context small: rules every role needs, written once here rather than in seven
+# prompts. Both modes print the section, with each of its four rules.
+for pair in "integrated:$integrated" "discreet:$discreet"; do
+  mode=${pair%%:*}
+  text=${pair#*:}
+  case $text in
+    *'## Keeping context small'*) ok "$mode: the brief has the context-economy section" ;;
+    *) ko "$mode: the brief has no '## Keeping context small' section" ;;
+  esac
+  for rule in 'No busy-waiting on CI' 'Read a file by line range' \
+              'Silence or bound noisy commands' 'Short reports'; do
+    case $text in
+      *"$rule"*) ok "$mode: the context rule '$rule' is in the brief" ;;
+      *) ko "$mode: the context rule '$rule' is missing from the brief" ;;
+    esac
+  done
 done
 
 # Discreet mode: no instruction to write on the forge, and none to merge. These are
