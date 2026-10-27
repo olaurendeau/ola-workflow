@@ -310,7 +310,7 @@ not rewritten under itself while it works. For an ordinary session, name another
 | Memory | GitHub issues, labels, a review commit status, review comments | local files under the profile directory |
 | Conventions | the profile, plus the project's own CONTRIBUTING | read from the project: CONTRIBUTING, PR template, commit language |
 | Writes to GitHub | allowed, per role | issues, labels, comments, statuses: **refused**. `git push` and `gh pr create`: **ask** (a human confirms) |
-| Merge | the coordinator, through the merge gate | nobody |
+| Merge | the coordinator, through the merge gate; the `RFR` label marks a pull request that passes it | nobody |
 
 ### Globs
 
