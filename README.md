@@ -427,6 +427,7 @@ make test      # the bash suites: tests/run.sh
 make validate  # claude plugin validate --strict .
 make spike     # replays the agent-identity spike
 make spike-artifact  # prints how to replay the artifact spike, by hand
+scripts/token-cost.sh [--since D] [--until D] <dir>...  # weighted token cost per role and per PR, from ~/.claude/projects/<slug>/
 ```
 
 ### One writing convention, enforced by the suite
