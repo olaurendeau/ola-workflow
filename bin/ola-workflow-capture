@@ -18,7 +18,7 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/scratch.sh
 . "$SELF_DIR/../scripts/scratch.sh"
 
-die() { echo "ola-workflow-capture: $*" >&2; exit "${2:-2}"; }
+die() { echo "ola-workflow-capture: $1" >&2; exit "${2:-2}"; } # die <message> [status]
 
 [ "$#" -eq 2 ] || die "usage: ola-workflow-capture <url> <out.png>"
 url=$1
@@ -94,6 +94,9 @@ set -m
   >"$profile/browser.log" 2>&1 &
 pid=$!
 set +m
+# The browser is in a group of its own, so a ^C or a TERM sent to this script's group no
+# longer reaches it: without this it would be left running after we are gone.
+trap 'kill -TERM -- "-$pid" 2>/dev/null; sleep 0.2; kill -KILL -- "-$pid" 2>/dev/null; exit 130' INT TERM
 
 # macOS has no timeout(1), and a page that never settles must not hold the developer.
 ticks=$((timeout * 10))

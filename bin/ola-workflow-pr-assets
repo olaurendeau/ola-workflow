@@ -21,7 +21,7 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/scratch.sh
 . "$SELF_DIR/../scripts/scratch.sh"
 
-die() { echo "ola-workflow-pr-assets: $*" >&2; exit "${2:-2}"; }
+die() { echo "ola-workflow-pr-assets: $1" >&2; exit "${2:-2}"; } # die <message> [status]
 
 [ "$#" -ge 2 ] || die "usage: ola-workflow-pr-assets <pr> <file.png>..."
 pr=$1
@@ -85,7 +85,7 @@ fi
 
 # build → prints the commit made on top of what origin holds now.
 build() {
-  local parent= file name blob tree commit rc
+  local parent='' file name blob tree commit rc
   git ls-remote --exit-code origin refs/heads/pr-assets >/dev/null 2>&1
   rc=$?
   case $rc in
@@ -119,8 +119,10 @@ build() {
 pushed=
 attempt=1
 while [ "$attempt" -le 3 ]; do
-  # Not in $(...) so the temporary index variable stays out of the rest of the script, and
-  # not under `local` so a failure is not hidden behind the status of the declaration.
+  # `build` runs in $(...) on purpose: its subshell is what keeps GIT_INDEX_FILE, exported
+  # there, away from the `git push` below and from everything after it. And $commit is
+  # assigned in the `if`, not under `local`, so a failure is not hidden behind the status
+  # of a declaration.
   if commit=$(build "$@"); then
     if git push --quiet origin "$commit:refs/heads/pr-assets" >&2; then
       pushed=1

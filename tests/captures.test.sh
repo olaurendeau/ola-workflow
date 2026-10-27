@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016
+# shellcheck disable=SC2016,SC2015
 #   Several arguments below are shell metacharacters on purpose: `$(id)` has to reach the
 #   script as text.
 # Runs bin/ola-workflow-capture against a fake browser, and bin/ola-workflow-pr-assets
@@ -47,7 +47,8 @@ case ${FAKE_MODE:-png} in
   nowrite) ;;
   text) echo "not a png at all" >"$out" ;;
   fail) exit 3 ;;
-  hang) echo $$ >"$FAKE_PIDFILE"; sleep 60 & wait ;;
+  # A helper process of its own, as Chrome has: killing the browser's PID alone leaves it.
+  hang) sleep 60 & echo $! >"$FAKE_CHILDPID"; echo $$ >"$FAKE_PIDFILE"; wait ;;
 esac
 EOF
 chmod +x "$FAKE"
@@ -136,8 +137,8 @@ cap fail http://localhost:3002/ "$OUT"
 
 # A browser that never comes back is killed, helpers included, inside the reduced delay.
 start=$SECONDS
-rm -f "$WORK/fake.pid"
-msg=$(FAKE_MODE=hang FAKE_LOG=$WORK/fake.log FAKE_PIDFILE=$WORK/fake.pid \
+rm -f "$WORK/fake.pid" "$WORK/fake.child"
+msg=$(FAKE_MODE=hang FAKE_LOG=$WORK/fake.log FAKE_PIDFILE=$WORK/fake.pid FAKE_CHILDPID=$WORK/fake.child \
   OLA_WORKFLOW_CHROME=$FAKE OLA_WORKFLOW_CAPTURE_TIMEOUT=1 "$CAPTURE" http://localhost:3002/ "$OUT" 2>&1)
 rc=$?
 elapsed=$((SECONDS - start))
@@ -147,11 +148,39 @@ else
   ko "a browser that never returns is killed and the script fails (rc=$rc, ${elapsed}s: $msg)"
 fi
 hungpid=$(cat "$WORK/fake.pid" 2>/dev/null)
+helperpid=$(cat "$WORK/fake.child" 2>/dev/null)
 if [ -n "$hungpid" ] && ! kill -0 "$hungpid" 2>/dev/null; then
   ok "the hung browser is no longer running"
 else
   ko "the hung browser is no longer running (pid '$hungpid')"
   [ -z "$hungpid" ] || kill -KILL "$hungpid" 2>/dev/null
+fi
+if [ -n "$helperpid" ] && ! kill -0 "$helperpid" 2>/dev/null; then
+  ok "the hung browser's helper process is no longer running either"
+else
+  ko "the hung browser's helper process is no longer running either (pid '$helperpid')"
+  [ -z "$helperpid" ] || kill -KILL "$helperpid" 2>/dev/null
+fi
+
+# A TERM sent to the script reaches the browser's group, which is no longer the script's.
+rm -f "$WORK/fake.pid" "$WORK/fake.child"
+FAKE_MODE=hang FAKE_LOG=$WORK/fake.log FAKE_PIDFILE=$WORK/fake.pid FAKE_CHILDPID=$WORK/fake.child \
+  OLA_WORKFLOW_CHROME=$FAKE "$CAPTURE" http://localhost:3002/ "$OUT" >/dev/null 2>&1 &
+scriptpid=$!
+for _ in $(seq 1 50); do
+  [ -s "$WORK/fake.pid" ] && [ -s "$WORK/fake.child" ] && break
+  sleep 0.1
+done
+hungpid=$(cat "$WORK/fake.pid" 2>/dev/null)
+helperpid=$(cat "$WORK/fake.child" 2>/dev/null)
+kill -TERM "$scriptpid" 2>/dev/null
+wait "$scriptpid" 2>/dev/null
+if [ -n "$hungpid" ] && [ -n "$helperpid" ] && ! kill -0 "$hungpid" 2>/dev/null && ! kill -0 "$helperpid" 2>/dev/null; then
+  ok "a TERM sent to the script takes the browser and its helper down with it"
+else
+  ko "a TERM sent to the script takes the browser and its helper down with it (pids '$hungpid' '$helperpid')"
+  [ -z "$hungpid" ] || kill -KILL "$hungpid" 2>/dev/null
+  [ -z "$helperpid" ] || kill -KILL "$helperpid" 2>/dev/null
 fi
 
 msg=$(OLA_WORKFLOW_CAPTURE_TIMEOUT=abc OLA_WORKFLOW_CHROME=$FAKE "$CAPTURE" http://localhost:3002/ "$OUT" 2>&1)
@@ -198,7 +227,9 @@ git init --quiet --bare "$BARE"
 # and which git rewrites to the bare repository, so that the script reads the former and
 # git pushes to the latter.
 mkclone() {
-  git init --quiet "$1"
+  # A real clone: it has the fetch refspec, so a fetch of pr-assets updates
+  # refs/remotes/origin/pr-assets and FETCH_HEAD in it, as it does for a developer.
+  git clone --quiet "$BARE" "$1" 2>/dev/null
   git -C "$1" config remote.origin.url "$2"
   git -C "$1" config "url.$BARE.insteadOf" "$2"
   echo base >"$1/README"
@@ -215,7 +246,7 @@ echo loose >"$A/untracked"
 state() {
   printf '%s\n' "$(git -C "$1" rev-parse HEAD)" "$(git -C "$1" ls-files -s)" \
     "$(git -C "$1" status --porcelain)" "$(git -C "$1" branch --list)" \
-    "$(git -C "$1" for-each-ref --format='%(refname)')"
+    "$(git -C "$1" for-each-ref --format='%(refname) %(objectname)' refs/heads refs/tags)"
 }
 before=$(state "$A")
 
@@ -253,7 +284,14 @@ fi
 B=$WORK/clone-b
 mkclone "$B" https://github.com/someone/x.git
 git -C "$B" fetch --quiet origin '+refs/heads/pr-assets:refs/remotes/origin/pr-assets'
+git -C "$A" fetch --quiet origin
+before=$(state "$A")
 (cd "$A" && "$ASSETS" 13 "$WORK/other.png" >/dev/null 2>&1)
+if [ "$before" = "$(state "$A")" ]; then
+  ok "a second push from a clone that has fetched leaves HEAD, the index, the status and the branches unchanged"
+else
+  ko "a second push from a clone that has fetched leaves HEAD, the index, the status and the branches unchanged"
+fi
 (cd "$B" && "$ASSETS" 14 "$WORK/shot.png" "$WORK/other.png" >/dev/null 2>&1)
 rc=$?
 files=$(git -C "$BARE" ls-tree -r --name-only pr-assets 2>/dev/null | tr '\n' ' ')
