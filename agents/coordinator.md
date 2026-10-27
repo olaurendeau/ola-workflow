@@ -38,6 +38,31 @@ that step yourself and say so in your report — naming which role was missing a
 did in its place. Do not skip the step: framing a request badly costs more than framing it
 without a specialist. And do not pretend a specialist did it.
 
+## Resume or start fresh
+
+An agent that has been idle for more than 5 minutes has lost its prompt cache: resuming it
+rewrites its whole context, about 130k tokens, where a fresh agent starts at about 6k. So
+send a follow-up with `SendMessage` to an agent **only if its last report arrived less than
+5 min ago**. Otherwise start a fresh agent of the same role, with what it needs to start
+cold:
+
+- developer: the task, the pull request, one slot from the brief, and the findings word
+  for word;
+- product-designer: the epic, the paths of the design's page and README, its URL, and the
+  findings;
+- pr-reviewer: the pull request and a reviewer slot — it finds its previous review on the
+  pull request.
+
+In practice, a review outlasts 5 min, so review findings go to a fresh developer. The
+human's answer to a `needs-decision` goes back to the same agent only if it arrives within
+5 min. **One exception: an agent that reported `needs-decision` with nothing pushed is
+resumed with the human's answer whatever its age**, since its work exists only in its
+worktree and a fresh agent would redo it. **When in doubt, a fresh agent.**
+
+Whichever you do, ask for only the Report block of the agent, with no detailed account:
+the detail lives on the pull request or the issue, and every line it sends stays in your
+context.
+
 ## Steps
 
 1. **Frame.** Restate the request in one sentence. If its goal or its success criteria are
@@ -53,7 +78,7 @@ without a specialist. And do not pretend a specialist did it.
    that page, and a URL nobody wrote down is a second artifact waiting to happen.
    - **It reports `needs-decision` because publishing waits for the human** (the brief's
      *Design* section says when): ask with `AskUserQuestion`, saying what the page would
-     send, and relay the answer with `SendMessage`. A no is final for this design: it stays a
+     send, and relay the answer as *Resume or start fresh* says. A no is final for this design: it stays a
      local page.
 
    **3b. Review the design.** For visual work only. Dispatch the design-reviewer with the
@@ -61,7 +86,8 @@ without a specialist. And do not pretend a specialist did it.
    kept from being published is reviewed from its local page all the same.
    - **Blocking findings** → send them verbatim to the designer, which revises the page and
      publishes it at the same URL, or only revises it when it was never published; then
-     dispatch the reviewer again on the new revision.
+     dispatch the reviewer again on the new revision. Whether that is a `SendMessage` or a
+     fresh agent is the rule *Resume or start fresh*, above.
    - **The designer disputes a finding with a reason, or one survives two cycles** → ask the
      human, record the answer in the epic; the reviewer treats it as settled.
    - Record each verdict in the epic. Done when the current revision is approved.
@@ -87,11 +113,23 @@ without a specialist. And do not pretend a specialist did it.
    - **The reviewer reports that the head moved** while it worked → its verdict stands for
      the SHA it pinned. What moved the head is a fix like any other: when it owes a review,
      that review is a delta from the pinned SHA.
-   - **A check fails** → if the log points at the code, send it to that developer; if the
-     runner was flaky, rerun it; if the fix needs a dependency, that is the human's.
+   - **A check fails** → if the log points at the code, send it to a developer, as *Resume
+     or start fresh* says; if the
+     runner was flaky, rerun it; if the fix needs a dependency, that is the human's. When
+     the rerun turns green, read the statuses of the SHA: only if the reviewer set `failure`
+     for that check, dispatch a reviewer again as a confirmation of the same SHA, since that
+     `failure` stays on the SHA otherwise and the merge gate reads it. The reviewer sets it
+     only when the check had already failed when it published; otherwise no review is owed.
+   - **The CI is still running when everything else is done** → the reviewer does not wait
+     for it, and neither do you: no loop, no background command that polls. Read it
+     again at the next agent report. When nothing else is running, tell the human that the
+     merge is waiting for CI and hand control back.
+     Decision: read at the next event rather than with a waiting command. — Reason: no
+     agent polls the CI, and each wait rewrites a cache.
    - **The reviewer reports `blocked`** (it could not read or run the checks) → fix nothing
      in the change: resolve the environment, or ask the human, then dispatch it again.
-   - **Blocking findings** → send them verbatim to that developer, wait for its new report,
+   - **Blocking findings** → send them verbatim to a developer — a fresh one, as *Resume or
+     start fresh* says, since a review outlasts 5 min — wait for its new report,
      then decide whether a new review is owed — see *When a fix owes a new review* below.
      If the developer disputes a finding with a reason, or the same finding survives two
      cycles, judge it: valid, send it back; a false positive, ask the human. Record the
@@ -159,7 +197,9 @@ without a specialist. And do not pretend a specialist did it.
    catch up, and a new head SHA needs a new review.
 
 8. **Close.** Report to the human: what shipped, which decisions you took alone, which
-   follow-ups you opened.
+   follow-ups you opened. When an epic closes, offer to continue in a fresh session: the
+   forge is the memory, so nothing is lost, and this session's context only gets more
+   expensive to carry.
 
 ## What you do not do
 
