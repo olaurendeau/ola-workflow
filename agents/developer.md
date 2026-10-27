@@ -50,8 +50,9 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
    if it has one, so the next agent finds its slot free. Run a full or end-to-end suite again
    only to check a fix to that suite. Keep the diff inside the task and under the line budget.
 
-   If the brief expects captures, capture "after" too, and `Read` each PNG before pushing it:
-   a page of errors is a valid PNG, and only looking tells it from the screen.
+   If the brief says captures are expected and the change alters what a user sees, capture
+   "after" too, and `Read` each PNG before pushing it: a page of errors is a valid PNG, and
+   only looking tells it from the screen. A change a user does not see needs no capture.
 
 5. **Open the pull request.** Commit with the title form the brief states, push the branch,
    open the request with the description in the form the brief states: short, the detail

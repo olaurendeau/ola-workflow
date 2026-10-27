@@ -1019,6 +1019,10 @@ case $dev_step4 in
   *'"after"'*'Read'*'before'*'pushing'*) ok "developer: step 4 captures \"after\" and looks at each PNG before pushing it" ;;
   *) ko "developer: step 4 does not make the developer look at each capture before pushing it" ;;
 esac
+case $dev_step4 in
+  *'captures are expected'*'what a user sees'*'"after"'*) ok "developer: step 4 captures \"after\" only for a change a user sees" ;;
+  *) ko "developer: step 4 captures \"after\" whether or not the change is visible to a user" ;;
+esac
 case $(step_of "$ROOT/agents/developer.md" 5 | tr '\n' ' ') in
   *'captures'*'number'*'description'*) ok "developer: step 5 pushes the captures under the request's number, into the description" ;;
   *) ko "developer: step 5 does not push the captures under the number of the request" ;;
@@ -1287,6 +1291,13 @@ for pair in "integrated:$with_preview" "discreet:$with_preview_discreet"; do
       *) ko "$mode, with a preview: the Captures section lacks '$want'" ;;
     esac
   done
+  # The wording the roles cite: the pr-reviewer's blocking rule rests on it, so it is stated
+  # rather than inferred from the description's shape.
+  case $section in
+    *'Captures are expected of a request that changes what a user sees, and only of one.'*)
+      ok "$mode, with a preview: the Captures section says when captures are expected" ;;
+    *) ko "$mode, with a preview: the Captures section does not say when captures are expected" ;;
+  esac
   case $section in
     *'outside the worktree'*'never committed'*) ok "$mode, with a preview: captures stay outside the worktree and are never committed" ;;
     *) ko "$mode, with a preview: nothing says captures are kept out of the worktree and the commits" ;;

@@ -300,7 +300,11 @@ shift
 case $1 in
   gh-work) echo "hostname ssh.github.com" ;;
   gh-perso) echo "hostname github.com" ;;
-  *) echo "hostname $1" ;;
+  ssh.github.com) echo "hostname ssh.github.com" ;;
+  git.example.org) echo "hostname git.example.org" ;;
+  # Anything else, an http(s) host included, resolves elsewhere: a link that went through
+  # ssh -G for an https remote would not name the host the remote does.
+  *) echo "hostname 192.0.2.1" ;;
 esac
 EOF
 chmod +x "$WORK/sshshim/ssh"
