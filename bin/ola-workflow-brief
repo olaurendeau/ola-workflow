@@ -219,6 +219,10 @@ fi
 echo "- 1 to 3 sentences: what changes, and why."
 echo "- a line saying what was checked, its label in the language of the artifacts (\"Checked\" in"
 echo "  English): the check command you ran, then one line per notable verification."
+if [ "$mode" = integrated ]; then
+  echo "- a Design line, only if the task points at a design: its artifact URL from the design's"
+  echo "  README, or the path of its page when it was never published."
+fi
 if [ -n "$preview" ]; then
   echo "- a Captures block, only if the request changes what a user sees: a before/after table,"
   echo "  \"before\" only when an existing screen changes, then the lines pr-assets printed."
