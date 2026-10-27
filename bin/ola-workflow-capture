@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# ola-workflow-capture — takes a screenshot of a page with a headless Chrome or Chromium.
+#
+#   ola-workflow-capture <url> <out.png>
+#
+# A plugin's bin/ is on the PATH of every Bash call, so a developer can run this from its
+# own session. Both arguments are checked before anything is launched: the URL may come
+# from the profile (`preview`, written by the project), and what reaches a browser's
+# command line must not be readable by it as an option or as another scheme.
+#
+# Exit status: 0 captured · 1 the capture could not be taken · 2 a usage error.
+#
+# OLA_WORKFLOW_CHROME           the browser to use, and then only that one
+# OLA_WORKFLOW_CAPTURE_TIMEOUT  seconds before the browser is killed (default 30)
+set -uo pipefail
+
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/scratch.sh
+. "$SELF_DIR/../scripts/scratch.sh"
+
+die() { echo "ola-workflow-capture: $1" >&2; exit "${2:-2}"; } # die <message> [status]
+
+[ "$#" -eq 2 ] || die "usage: ola-workflow-capture <url> <out.png>"
+url=$1
+out=$2
+
+# Byte-wise, so that a locale cannot widen what [:space:] and [:cntrl:] mean.
+export LC_ALL=C
+
+# http(s) and nothing else, which excludes file:, javascript: and anything that starts
+# with a dash — Chrome reads such an argument as one of its options.
+case $url in
+  http://?*|https://?*) ;;
+  *) die "refusing '$url': only http:// and https:// URLs are captured" ;;
+esac
+case $url in
+  *[[:space:][:cntrl:]]*) die "refusing a URL that holds a blank or a control character" ;;
+esac
+
+case $out in
+  -*) die "refusing '$out': an output path must not start with a dash" ;;
+  *.png) ;;
+  *) die "refusing '$out': the output must end in .png" ;;
+esac
+case $out in
+  */*) outdir=${out%/*}; [ -n "$outdir" ] || outdir=/ ;;
+  *) outdir=. ;;
+esac
+[ -d "$outdir" ] || die "refusing '$out': the directory $outdir does not exist"
+[ ! -d "$out" ] || die "refusing '$out': it is a directory"
+
+timeout=${OLA_WORKFLOW_CAPTURE_TIMEOUT:-30}
+case $timeout in
+  [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]) ;;
+  *) die "OLA_WORKFLOW_CAPTURE_TIMEOUT must be a number of seconds, 1 to 9999" ;;
+esac
+
+# The browser. A variable that is set is the only candidate: falling back to another one
+# when it is wrong would capture with something the caller did not choose.
+chrome=
+if [ -n "${OLA_WORKFLOW_CHROME:-}" ]; then
+  [ -f "$OLA_WORKFLOW_CHROME" ] && [ -x "$OLA_WORKFLOW_CHROME" ] ||
+    die "OLA_WORKFLOW_CHROME ('$OLA_WORKFLOW_CHROME') is not an executable file: no capture is possible" 1
+  chrome=$OLA_WORKFLOW_CHROME
+else
+  for name in google-chrome google-chrome-stable chromium chromium-browser; do
+    if found=$(command -v "$name"); then chrome=$found; break; fi
+  done
+  if [ -z "$chrome" ]; then
+    for app in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+               "/Applications/Chromium.app/Contents/MacOS/Chromium"; do
+      if [ -x "$app" ]; then chrome=$app; break; fi
+    done
+  fi
+  [ -n "$chrome" ] ||
+    die "no Chrome or Chromium found: no capture is possible. Install one, or set OLA_WORKFLOW_CHROME to its path" 1
+fi
+
+ola_scratch capture
+profile=$OLA_SCRATCH
+trap 'rm -rf "${profile:?}"' EXIT
+
+# An old capture must never pass for the new one.
+rm -f -- "$out"
+
+# A fresh profile for each run is what lets two developers capture at the same time: a
+# browser started on a profile already in use hands the page to the running instance and
+# exits.
+# Its own process group (set -m), so the kill below reaches the helper processes too.
+set -m
+"$chrome" --headless --disable-gpu --no-first-run --hide-scrollbars \
+  "--user-data-dir=$profile/chrome" --window-size=1280,800 \
+  --virtual-time-budget=5000 "--screenshot=$out" "$url" \
+  >"$profile/browser.log" 2>&1 &
+pid=$!
+set +m
+# The browser is in a group of its own, so a ^C or a TERM sent to this script's group no
+# longer reaches it: without this it would be left running after we are gone.
+trap 'kill -TERM -- "-$pid" 2>/dev/null; sleep 0.2; kill -KILL -- "-$pid" 2>/dev/null; exit 130' INT TERM
+
+# macOS has no timeout(1), and a page that never settles must not hold the developer.
+ticks=$((timeout * 10))
+while kill -0 "$pid" 2>/dev/null && [ "$ticks" -gt 0 ]; do
+  sleep 0.1
+  ticks=$((ticks - 1))
+done
+if kill -0 "$pid" 2>/dev/null; then
+  kill -TERM -- "-$pid" 2>/dev/null
+  sleep 0.5
+  kill -KILL -- "-$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  rm -f -- "$out"
+  die "the browser did not finish within ${timeout}s and was killed" 1
+fi
+wait "$pid"
+status=$?
+if [ "$status" -ne 0 ]; then
+  tail -n 5 "$profile/browser.log" >&2
+  rm -f -- "$out"
+  die "the browser exited with status $status" 1
+fi
+
+[ -s "$out" ] || { tail -n 5 "$profile/browser.log" >&2; die "the browser wrote no capture to $out" 1; }
+signature=$(head -c 8 "$out" | od -An -tx1 | tr -d ' \n')
+if [ "$signature" != 89504e470d0a1a0a ]; then
+  rm -f -- "$out"
+  die "$out is not a PNG file" 1
+fi
+echo "$out"

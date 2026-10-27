@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# ola-workflow-pr-assets — pushes PNG captures to the orphan branch `pr-assets` of origin
+# and prints the markdown that shows them in a pull request.
+#
+#   ola-workflow-pr-assets <pr> <file.png>...
+#
+# Each file lands at <pr>/<name>.png on the branch, and one line is printed per file:
+#   ![<name>](https://<host>/<owner>/<repo>/blob/pr-assets/<pr>/<name>.png?raw=true)
+#
+# The branch is built with plumbing, so HEAD, the index, the working tree and the local
+# branches of the clone are never touched: the commit is made from a temporary index, on
+# top of what origin holds *now*, and pushed without force. When someone else pushed in the
+# meantime the push is refused, and the whole build starts again on the new head.
+#
+# Exit status: 0 pushed · 1 it could not be pushed · 2 a usage error, before any push.
+set -uo pipefail
+
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=hooks/lib/profile.sh
+. "$SELF_DIR/../hooks/lib/profile.sh"
+# shellcheck source=scripts/scratch.sh
+. "$SELF_DIR/../scripts/scratch.sh"
+
+die() { echo "ola-workflow-pr-assets: $1" >&2; exit "${2:-2}"; } # die <message> [status]
+
+[ "$#" -ge 2 ] || die "usage: ola-workflow-pr-assets <pr> <file.png>..."
+pr=$1
+shift
+
+# Byte-wise, so that a locale cannot widen the ranges in the patterns below.
+export LC_ALL=C
+
+# The number ends up in a path on the branch and in a URL.
+case $pr in
+  [1-9]|[1-9][0-9]*) ;;
+  *) die "refusing '$pr': the pull request must be a positive integer" ;;
+esac
+case $pr in
+  *[!0-9]*) die "refusing '$pr': the pull request must be a positive integer" ;;
+esac
+
+# Every refusal comes before the first push: a bad third file must not leave two pushed.
+seen=
+for file in "$@"; do
+  name=${file##*/}
+  case $name in
+    [A-Za-z0-9]*.png) ;;
+    *) die "refusing '$file': a capture is named with letters, digits, . _ - and ends in .png" ;;
+  esac
+  case $name in
+    *[!A-Za-z0-9._-]*) die "refusing '$file': a capture is named with letters, digits, . _ - and ends in .png" ;;
+  esac
+  [ -f "$file" ] && [ -r "$file" ] || die "refusing '$file': not a readable regular file"
+  [ "$(head -c 8 "$file" | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ] ||
+    die "refusing '$file': it does not start with the PNG signature"
+  case "
+$seen" in
+    *"
+$name
+"*) die "refusing '$file': a second file is named $name" ;;
+  esac
+  seen="$seen$name
+"
+done
+
+git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository" 1
+
+# origin, the remote one pushes to: `ola-profile id` prefers upstream, and on a fork the
+# link would name a repository where the image is not.
+url=$(git config --get remote.origin.url) && [ -n "$url" ] || die "this repository has no remote named origin" 1
+id=$(ola_profile_url_id "$url") || die "cannot read a host, an owner and a repository from the origin URL" 1
+case $id in
+  local/*) die "origin is a local path: there is no web address to link the captures to" 1 ;;
+esac
+
+ola_scratch pr-assets
+work=$OLA_SCRATCH
+trap 'rm -rf "${work:?}"' EXIT
+
+# A commit needs an identity, and a clean CI or container checkout has none.
+if ! git var GIT_AUTHOR_IDENT >/dev/null 2>&1 || ! git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then
+  export GIT_AUTHOR_NAME=ola-workflow GIT_AUTHOR_EMAIL=ola-workflow@users.noreply.github.com
+  export GIT_COMMITTER_NAME=ola-workflow GIT_COMMITTER_EMAIL=ola-workflow@users.noreply.github.com
+fi
+
+# build → prints the commit made on top of what origin holds now.
+build() {
+  local parent='' file name blob tree commit rc
+  git ls-remote --exit-code origin refs/heads/pr-assets >/dev/null 2>&1
+  rc=$?
+  case $rc in
+    0)
+      git fetch --quiet origin refs/heads/pr-assets >&2 || return 1
+      parent=$(git rev-parse --verify --quiet 'FETCH_HEAD^{commit}') || return 1
+      ;;
+    2) ;; # no such branch yet: the first commit has no parent
+    *) return 1 ;;
+  esac
+
+  rm -f "$work/index"
+  export GIT_INDEX_FILE=$work/index
+  if [ -n "$parent" ]; then
+    git read-tree "$parent" || return 1
+  fi
+  for file in "$@"; do
+    name=${file##*/}
+    blob=$(git hash-object -w --no-filters -- "$file") || return 1
+    git update-index --add --cacheinfo "100644,$blob,$pr/$name" || return 1
+  done
+  tree=$(git write-tree) || return 1
+  if [ -n "$parent" ]; then
+    commit=$(git -c commit.gpgsign=false commit-tree "$tree" -p "$parent" -m "captures de la PR #$pr") || return 1
+  else
+    commit=$(git -c commit.gpgsign=false commit-tree "$tree" -m "captures de la PR #$pr") || return 1
+  fi
+  printf '%s\n' "$commit"
+}
+
+pushed=
+attempt=1
+while [ "$attempt" -le 3 ]; do
+  # `build` runs in $(...) on purpose: its subshell is what keeps GIT_INDEX_FILE, exported
+  # there, away from the `git push` below and from everything after it. And $commit is
+  # assigned in the `if`, not under `local`, so a failure is not hidden behind the status
+  # of a declaration.
+  if commit=$(build "$@"); then
+    if git push --quiet origin "$commit:refs/heads/pr-assets" >&2; then
+      pushed=1
+      break
+    fi
+  fi
+  attempt=$((attempt + 1))
+done
+[ -n "$pushed" ] || die "could not push to refs/heads/pr-assets of origin after 3 attempts" 1
+
+for file in "$@"; do
+  name=${file##*/}
+  name=${name%.png}
+  printf '![%s](https://%s/blob/pr-assets/%s/%s.png?raw=true)\n' "$name" "$id" "$pr" "$name"
+done
