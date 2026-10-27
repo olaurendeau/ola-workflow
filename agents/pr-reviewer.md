@@ -57,7 +57,7 @@ nothing you do disturbs the author. Never push, never merge, never edit.
 
 4. **Read the whole diff**, and around it the changed passages and their neighbourhood at
    that SHA: the callers, found with `git grep -n <pattern> <SHA>` and read by range with
-   `git show <SHA>:<file> | sed -n 'a,bp'`, and what the changed code calls. Never read a
+   `git show <SHA>:<file> | sed -n '<a>,<b>p'`, and what the changed code calls. Never read a
    whole file that way: on a large request that is thousands of calls and megabytes, for a
    few passages that matter.
    A diff read alone shows what changed, not what it breaks.
