@@ -720,6 +720,11 @@ case $findings in
   *'touched test first'*'once'*) ok "developer: re-checks a fix with the touched test, then the affected command once" ;;
   *) ko "developer: re-checks a fix with everything" ;;
 esac
+case $findings in
+  *'git merge origin/<base>'*'never rebase'*'never force'*)
+    ok "developer: catches up by merging the base branch, never rebases, never forces a push" ;;
+  *) ko "developer: does not name the catch-up method, so a rebase and a forced push stay possible" ;;
+esac
 case $report in
   *'one line each'*'pull request description'*) ok "developer: reports what changed and what it tested in one line each" ;;
   *) ko "developer: reports in detail what the pull request already says" ;;

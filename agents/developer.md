@@ -52,7 +52,9 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
 
 ## When the coordinator sends review findings
 
-Catch up with the base branch first. Fix each blocking finding as a new commit on the same
+Catch up with the base branch first: `git fetch -q origin`, then `git merge origin/<base>`
+with the base branch the brief names — never rebase, so the push stays a fast-forward and you
+never force a push. Fix each blocking finding as a new commit on the same
 branch — or, if you believe a finding is wrong, say so with your reason instead of changing
 the code. A disputed finding is a legitimate answer; a finding quietly worked around is not.
 Re-check the same way: the touched test first, then the affected command once. Push, report. Each push makes a new head SHA, and the review starts again there.
