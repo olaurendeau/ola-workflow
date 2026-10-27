@@ -779,6 +779,33 @@ if grep -q 'Security review of' "$ROOT/agents/pr-reviewer.md" &&
 else
   ko "pr-reviewer: may take a security comment for its own previous review"
 fi
+# The checks take minutes and the review takes as long: a reviewer that waits for them to
+# end serialises the two. It reads them once and publishes; the merge gate reads the CI
+# again on its own, and the report's CI line tells the coordinator to.
+prr=$(tr '\n' ' ' < "$ROOT/agents/pr-reviewer.md" | tr -s ' ')
+# The witness: the paragraph that carried the old sentence is still there to be looked at.
+case $prr in
+  *'Do not run the full check yourself'*) ok "witness: pr-reviewer step 5 is readable" ;;
+  *) ko "witness: pr-reviewer step 5 is not where the absence below looks" ;;
+esac
+if printf '%s' "$prr" | grep -qiE 'wait(s|ing)? (for|until) (them|the checks?|CI)'; then
+  ko "pr-reviewer: waits for the checks to finish before it publishes"
+else
+  ok "pr-reviewer: does not wait for the checks to finish"
+fi
+case $prr in
+  *'CI: green | running | failed: <check>'*)
+    ok "pr-reviewer: reports where the CI stands, so the coordinator reads it again before merging" ;;
+  *) ko "pr-reviewer: reports no CI line, so a status given while the checks ran looks final" ;;
+esac
+case $prr in
+  *'git grep -n'*) ok "pr-reviewer: reads the neighbourhood of a change at the SHA by range" ;;
+  *) ko "pr-reviewer: nothing narrows its reading around the diff" ;;
+esac
+case $prr in
+  *'Do not read whole files'*) ok "pr-reviewer: does not read whole files at the SHA" ;;
+  *) ko "pr-reviewer: may read whole files with git show, thousands of calls on a large request" ;;
+esac
 
 # --- One source, cited by all ---------------------------------------------------------
 # The pair that matters: the brief is stated once and needed by every agent. Each agent
