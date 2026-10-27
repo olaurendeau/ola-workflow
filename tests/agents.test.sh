@@ -1006,12 +1006,12 @@ case $resume in
   *) ko "coordinator: nothing limits SendMessage to an agent that reported less than 5 min ago" ;;
 esac
 case $resume in
-  *'developer'*'the task'*'the pull request'*'findings word for word'*)
-    ok "coordinator: a fresh developer gets the task, the pull request and the findings" ;;
+  *'developer: the task'*'the pull request'*'one slot from the brief'*'findings word for word'*)
+    ok "coordinator: a fresh developer gets the task, the pull request, a slot and the findings" ;;
   *) ko "coordinator: a fresh developer is not given what it needs to start cold" ;;
 esac
 case $resume in
-  *'product-designer'*'the epic'*'paths'*'URL'*'findings'*)
+  *'product-designer: the epic'*'paths'*'URL, and the findings'*)
     ok "coordinator: a fresh product-designer gets the epic, the paths, the URL and the findings" ;;
   *) ko "coordinator: a fresh product-designer is not given what it needs to start cold" ;;
 esac
@@ -1019,6 +1019,21 @@ case $resume in
   *'pr-reviewer'*'the pull request'*'a reviewer slot'*'previous review'*)
     ok "coordinator: a fresh pr-reviewer gets the pull request and a slot, and finds its previous review" ;;
   *) ko "coordinator: a fresh pr-reviewer is not given what it needs to start cold" ;;
+esac
+case $resume in
+  *'needs-decision'*'nothing pushed'*'whatever its age'*'only in its worktree'*)
+    ok "coordinator: an agent that reported needs-decision with nothing pushed is resumed whatever its age" ;;
+  *) ko "coordinator: a needs-decision answered after 5 min with nothing pushed sends a fresh agent to redo the work" ;;
+esac
+case $step6 in
+  *'log points at the code, send it to a developer'*'Resume or start fresh'*'flaky'*)
+    ok "coordinator: a failing check goes to a developer chosen by Resume or start fresh" ;;
+  *) ko "coordinator: a failing check still names the original developer" ;;
+esac
+case $step6 in
+  *'rerun turns green'*'only if'*'set `failure`'*'confirmation of the same SHA'*)
+    ok "coordinator: the confirming review is owed only when the reviewer had set failure" ;;
+  *) ko "coordinator: the confirming review is dispatched after every green rerun" ;;
 esac
 case $resume in
   *'130k'*'6k'*) ok "coordinator: the rule carries its reason, a cold resume against a fresh start" ;;

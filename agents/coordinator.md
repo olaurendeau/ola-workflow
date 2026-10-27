@@ -46,7 +46,8 @@ send a follow-up with `SendMessage` to an agent **only if its last report arrive
 5 min ago**. Otherwise start a fresh agent of the same role, with what it needs to start
 cold:
 
-- developer: the task, the pull request, and the findings word for word;
+- developer: the task, the pull request, one slot from the brief, and the findings word
+  for word;
 - product-designer: the epic, the paths of the design's page and README, its URL, and the
   findings;
 - pr-reviewer: the pull request and a reviewer slot — it finds its previous review on the
@@ -54,7 +55,9 @@ cold:
 
 In practice, a review outlasts 5 min, so review findings go to a fresh developer. The
 human's answer to a `needs-decision` goes back to the same agent only if it arrives within
-5 min. **When in doubt, a fresh agent.**
+5 min. **One exception: an agent that reported `needs-decision` with nothing pushed is
+resumed with the human's answer whatever its age**, since its work exists only in its
+worktree and a fresh agent would redo it. **When in doubt, a fresh agent.**
 
 Whichever you do, ask for only the Report block of the agent, with no detailed account:
 the detail lives on the pull request or the issue, and every line it sends stays in your
@@ -110,11 +113,13 @@ context.
    - **The reviewer reports that the head moved** while it worked → its verdict stands for
      the SHA it pinned. What moved the head is a fix like any other: when it owes a review,
      that review is a delta from the pinned SHA.
-   - **A check fails** → if the log points at the code, send it to that developer; if the
+   - **A check fails** → if the log points at the code, send it to a developer, as *Resume
+     or start fresh* says; if the
      runner was flaky, rerun it; if the fix needs a dependency, that is the human's. When
-     the rerun turns green, dispatch a reviewer again as a confirmation of the same SHA:
-     the `failure` status the reviewer set for that check stays on the SHA otherwise, and
-     the merge gate reads it.
+     the rerun turns green, read the statuses of the SHA: only if the reviewer set `failure`
+     for that check, dispatch a reviewer again as a confirmation of the same SHA, since that
+     `failure` stays on the SHA otherwise and the merge gate reads it. The reviewer sets it
+     only when the check had already failed when it published; otherwise no review is owed.
    - **The CI is still running when everything else is done** → the reviewer does not wait
      for it, and neither do you: no loop, no background command that polls. Read it
      again at the next agent report. When nothing else is running, tell the human that the
