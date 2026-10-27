@@ -152,6 +152,8 @@ without a specialist. And do not pretend a specialist did it.
    cost of one extra cycle is an hour; the cost of being wrong about it is a role merging.
 
 7. **Merge**, under the gate in the brief, checked on the forge for the current head SHA.
+   In integrated mode, the `RFR` label goes on before the merge and comes off when the
+   pull request stops being ready, as the brief's *The RFR label* says.
    Then return to step 5 for the tasks that merge unblocked. A change that merging left
    behind — another open pull request now behind the base branch — needs its developer to
    catch up, and a new head SHA needs a new review.

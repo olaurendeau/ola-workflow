@@ -415,6 +415,30 @@ Then, in exactly this form, with the full SHA you checked:
 
 A file in a sensitive path, or a sensitive pattern in the patch, means the human merges.
 Say so and stop; do not look for a way around it.
+
+### The RFR label
+
+\`RFR\` — ready for review, by the human — is how the human sees at a glance which pull
+requests they can merge. The coordinator owns it. A pull request is ready when the gate
+above holds for its current head SHA, the sensitive paths and patterns aside — they only
+decide who merges — and what the coordinator already waits for as well: the security
+review in, its findings verified, the suggestions sorted.
+
+- Ready: add it, then merge, or tell the human the merge is theirs. It goes on a pull
+  request that returns to the human as much as on one the coordinator merges next.
+
+      gh pr edit <N> --add-label RFR
+
+  If the repository has no such label, create it first, once:
+
+      gh label create RFR
+
+- No longer ready: remove it at once — a new head SHA, a branch behind $base, a review that
+  blocks. A label left on an old SHA would have the human merge code nobody read.
+
+      gh pr edit <N> --remove-label RFR
+
+The name is fixed; the profile has no key for it.
 INTEGRATED
 else
   profile_dir=$(ola_profile_dir "$dir")
