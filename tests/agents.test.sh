@@ -859,7 +859,7 @@ case $prr in
   *) ko "pr-reviewer: a cancelled check has no value on the CI line" ;;
 esac
 case $prr in
-  *'git grep -n'*"sed -n 'a,bp'"*) ok "pr-reviewer: says how to read a range at the SHA" ;;
+  *'git grep -n'*"sed -n '<a>,<b>p'"*) ok "pr-reviewer: says how to read a range at the SHA" ;;
   *) ko "pr-reviewer: names no way to read a range at the SHA, so every git show looks banned" ;;
 esac
 case $prr in
