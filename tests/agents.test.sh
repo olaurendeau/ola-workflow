@@ -669,6 +669,56 @@ if grep -qi 'verbatim' "$ROOT/agents/developer.md"; then
 else
   ko "developer: nothing stops it rewording what the designer decided"
 fi
+# What the developer reads, runs and reports is a cost paid on every task, so each rule is a
+# sentence it must keep. Each is looked for in the step that carries it, as one line: where
+# prose wraps is not what it says, and a file-wide grep stays green with the step rewritten.
+dev=$ROOT/agents/developer.md
+dev_step() { # dev_step <n> — the text of step <n>, as one line
+  awk -v n="$1" '$0 ~ "^" n "\\. \\*\\*" {on=1; print; next} on && /^([0-9]+\. \*\*|## )/{exit} on' "$dev" \
+    | tr -s ' \n' '  '
+}
+dev_section() { # dev_section <heading> — the text under "## <heading>", as one line
+  awk -v h="## $1" 'index($0, h) == 1 {on=1; next} on && /^## /{exit} on' "$dev" | tr -s ' \n' '  '
+}
+step1=$(dev_step 1); step2=$(dev_step 2); step3=$(dev_step 3); step4=$(dev_step 4)
+findings=$(dev_section "When the coordinator sends review findings")
+report=$(dev_section "Report")
+for s in "$step1" "$step2" "$step3" "$step4" "$findings" "$report"; do
+  [ -n "$s" ] || ko "developer: a step the cost rules live in cannot be read"
+done
+case $step1 in
+  *'line range'*'grep -n'*) ok "developer: reads the passages it needs, by range or grep -n" ;;
+  *) ko "developer: step 1 reads every named file whole" ;;
+esac
+case $step2 in
+  *'git fetch -q'*) ok "developer: fetches the head of a pull request it takes over" ;;
+  *) ko "developer: takes over a pull request without fetching its head" ;;
+esac
+case $step2 in
+  *'detached HEAD'*'git push origin HEAD:<branch>'*'another agent'*)
+    ok "developer: takes over a pull request in a detached HEAD, pushes to its branch, leaves other worktrees alone" ;;
+  *) ko "developer: nothing says how to take over a branch checked out in another worktree" ;;
+esac
+case $step3 in
+  *'only the test you are writing'*) ok "developer: runs only the test it writes, for red and green" ;;
+  *) ko "developer: runs more than the test it writes while building" ;;
+esac
+case $step4 in
+  *'once, at the end'*) ok "developer: runs the affected command once, at the end" ;;
+  *) ko "developer: nothing limits how often the affected command runs" ;;
+esac
+case $step4 in
+  *'only to check a fix to that suite'*) ok "developer: reruns a full or end-to-end suite only to check a fix to it" ;;
+  *) ko "developer: reruns a full suite without a reason" ;;
+esac
+case $findings in
+  *'touched test first'*'once'*) ok "developer: re-checks a fix with the touched test, then the affected command once" ;;
+  *) ko "developer: re-checks a fix with everything" ;;
+esac
+case $report in
+  *'one line each'*'pull request description'*) ok "developer: reports what changed and what it tested in one line each" ;;
+  *) ko "developer: reports in detail what the pull request already says" ;;
+esac
 # The coordinator carries the artifact's URL into the epic: the next request on the same
 # screen starts from it rather than publishing a second page. (That it dispatches the
 # design-reviewer is checked with every other role, from WORKFLOW_ROLES.)
