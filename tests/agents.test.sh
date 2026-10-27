@@ -1127,9 +1127,10 @@ case $(step_of "$ROOT/agents/developer.md" 5 | tr '\n' ' ') in
   *'captures'*'number'*'description'*) ok "developer: step 5 pushes the captures under the request's number, into the description" ;;
   *) ko "developer: step 5 does not push the captures under the number of the request" ;;
 esac
-case $(step_of "$ROOT/agents/architect.md" 3 | tr '\n' ' ') in
-  *'screens'*'states'*'capture'*) ok "architect: step 3 names the screens and states to capture" ;;
-  *) ko "architect: step 3 does not name the screens and states to capture" ;;
+# Squeezed: the sentence wraps in the role, and a line break is a run of spaces once joined.
+case $(step_of "$ROOT/agents/architect.md" 3 | tr -s '\n ' ' ') in
+  *'captures are expected'*'screens'*'states'*'capture'*) ok "architect: step 3 cites the brief's \"captures are expected\" and names the screens and states to capture" ;;
+  *) ko "architect: step 3 does not cite the brief's \"captures are expected\" with the screens and states to capture" ;;
 esac
 case $(printf '%s\n' "$review_checklist" | awk '/^- \*\*Description\*\*/{on=1; print; next} on && /^- /{exit} on' | tr '\n' ' ') in
   *'captures are expected'*'blocking'*) ok "pr-reviewer: a missing capture is blocking when the brief expects captures" ;;
