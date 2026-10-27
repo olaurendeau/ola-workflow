@@ -983,6 +983,29 @@ for key in $FORBIDDEN_KEYS; do
   fi
 done
 
+# --- The shape of a pull request description ------------------------------------------
+# The brief states it once, the developer writes it and the pr-reviewer judges it. An agent
+# that restates the shape is the second copy this file exists to prevent, so the markup of
+# the folded block is not written in any agent file. Not a schema key, hence `forbid`.
+forbid '<details>|<summary>' 'the folded block of a description'
+# The step is read between its number and the next section, so that a sentence elsewhere in
+# the file cannot satisfy it.
+dev_step5=$(awk '/^5\. /{on=1} /^## /{on=0} on' "$ROOT/agents/developer.md")
+case $dev_step5 in
+  *'description'*'brief states'*) ok "developer: step 5 opens the request with the description the brief states" ;;
+  *) ko "developer: step 5 does not prescribe the description of the brief" ;;
+esac
+review_checklist=$(awk '/^## Checklist/{on=1} on' "$ROOT/agents/pr-reviewer.md")
+case $review_checklist in
+  *'- **Description**:'*) ok "pr-reviewer: the checklist has a Description point" ;;
+  *) ko "pr-reviewer: the checklist does not judge the description" ;;
+esac
+desc_point=$(printf '%s\n' "$review_checklist" | awk '/^- \*\*Description\*\*/{on=1; print; next} on && /^- /{exit} on')
+case $desc_point in
+  *'suggestion'*) ok "pr-reviewer: a description that runs long is a suggestion" ;;
+  *) ko "pr-reviewer: nothing says that a long description is only a suggestion" ;;
+esac
+
 # --- Dispatch names are namespaced ----------------------------------------------------
 # subagent_type is an exact match: a bare name does not resolve to a plugin agent, and the
 # spike in the README is where that was measured. A coordinator that writes `developer`
@@ -1145,6 +1168,61 @@ for pair in "integrated:$integrated" "discreet:$discreet"; do
   done
 done
 
+# The description's shape, stated by the brief for both modes. Read in the section it lives in
+# (from its heading to the next), so another section cannot satisfy it.
+reviewable_of() { printf '%s\n' "$1" | awk '/^## A reviewable pull request/{on=1; next} /^## /{on=0} on'; }
+for pair in "integrated:$integrated" "discreet:$discreet"; do
+  mode=${pair%%:*}
+  section=$(reviewable_of "${pair#*:}")
+  case $section in
+    *'1 to 3 sentences'*) ok "$mode: the description is 1 to 3 sentences" ;;
+    *) ko "$mode: the brief does not bound the description" ;;
+  esac
+  case $section in
+    *'a line saying what was checked'*) ok "$mode: the description has a line saying what was checked" ;;
+    *) ko "$mode: the brief asks for no line saying what was checked" ;;
+  esac
+  # A label in backticks reads as the literal text to write, whatever the language of the
+  # artifacts: it is named in words and left to the language the brief prints.
+  case $section in
+    *'`Checked`'*) ko "$mode: the Checked label is literal, though labels follow the artifacts language" ;;
+    *'its label in the language of the artifacts'*) ok "$mode: the label of the checked line follows the artifacts language" ;;
+    *) ko "$mode: the brief does not say which language the checked label is in" ;;
+  esac
+  case $section in
+    *'<details><summary>'*) ok "$mode: the rest of the description goes in a folded block" ;;
+    *) ko "$mode: the brief names no folded block" ;;
+  esac
+  case $section in
+    *'never a blocking finding'*) ok "$mode: a long description is never blocking" ;;
+    *) ko "$mode: the brief does not say a long description is not blocking" ;;
+  esac
+done
+case $(reviewable_of "$integrated") in
+  *'- `Closes #<task>`'*) ok "integrated: the description closes the task" ;;
+  *) ko "integrated: the description does not say what it closes" ;;
+esac
+# Not every request closes a task — a release closes none, and a reviewer must not block it
+# for the missing line — yet one made from a task must close it: both halves are stated.
+case $(reviewable_of "$integrated" | tr '\n' ' ') in
+  *'when the request closes a task'*'one made from a task closes it'*'closes none'*) ok "integrated: Closes is conditional, and a request made from a task closes it" ;;
+  *) ko "integrated: the brief makes Closes unconditional, or lets a task go unclosed" ;;
+esac
+case $(reviewable_of "$discreet") in
+  *'- `Closes #<task>`'*) ko "discreet: the description must close a task that is not on the forge" ;;
+  *'only if the human named an issue'*) ok "discreet: the Closes line is conditional on an issue the human named" ;;
+  *) ko "discreet: the brief says nothing of the Closes line" ;;
+esac
+# The headings follow language.artifacts: a profile that sets it is read, not assumed.
+french=$WORK/french
+mkdir -p "$french/.claude"
+git -C "$french" -c init.defaultBranch=main init -q 2>/dev/null
+printf '{"mode":"integrated","language":{"artifacts":"fr"}}\n' >"$french/.claude/workflow.json"
+case $(reviewable_of "$("$BRIEF" "$french")") in
+  *'language of the artifacts: fr.'*) ok "the description's headings are in the artifacts language of the profile" ;;
+  *) ko "the description's headings ignore language.artifacts" ;;
+esac
+
 # Discreet mode: no instruction to write on the forge, and none to merge. These are
 # absences, and the witness above is what makes them mean something.
 for forbidden in 'gh pr merge' 'gh issue create' 'gh label' 'gh pr comment' 'gh api'; do
@@ -1160,6 +1238,43 @@ esac
 case $discreet in
   *runs/*) ok "the discreet brief names the local memory directory" ;;
   *) ko "the discreet brief does not say where the memory goes" ;;
+esac
+
+# The RFR label: the human sees which pull requests they can merge. The coordinator adds it
+# once the gate holds and removes it when it stops being true, in integrated mode only: the
+# workflow leaves no trace in a discreet project.
+case $integrated in
+  *'gh pr edit <N> --add-label RFR'*) ok "integrated: the brief tells the coordinator to add RFR" ;;
+  *) ko "integrated: the brief never says how to add the RFR label" ;;
+esac
+case $integrated in
+  *'gh pr edit <N> --remove-label RFR'*) ok "integrated: the brief tells the coordinator to remove RFR" ;;
+  *) ko "integrated: the brief never says how to remove the RFR label, so one stays on an old SHA" ;;
+esac
+# A pull request that returns to the human fails the gate on a sensitive path or pattern, and
+# it is exactly one the human needs to see: the label ignores those two conditions.
+case $integrated in
+  *'the sensitive paths and patterns aside'*'only'*'decide who merges'*)
+    ok "integrated: RFR goes on a pull request the human merges too" ;;
+  *) ko "integrated: RFR reads as never on a sensitive-path pull request, the very ones the human merges" ;;
+esac
+case $integrated in
+  *'gh label create RFR'*) ok "integrated: the brief says how to create the RFR label" ;;
+  *) ko "integrated: the brief gives no command to create the RFR label" ;;
+esac
+case $discreet in
+  *RFR*) ko "discreet: the brief mentions the RFR label, and the workflow leaves no trace there" ;;
+  *) ok "discreet: the brief says nothing of the RFR label" ;;
+esac
+# One source, cited by all: step 7 points at the brief and does not repeat the commands.
+step7=$(awk '/^7\. \*\*Merge\*\*/{on=1} on && /^8\. /{exit} on' "$ROOT/agents/coordinator.md" | tr -s ' \n' '  ')
+case $step7 in
+  *'The RFR label'*) ok "coordinator: step 7 cites the brief on the RFR label" ;;
+  *) ko "coordinator: step 7 does not cite what the brief says about the RFR label" ;;
+esac
+case $step7 in
+  *'--add-label'*|*'--remove-label'*) ko "coordinator: step 7 repeats the label commands the brief owns" ;;
+  *) ok "coordinator: step 7 does not repeat the label commands" ;;
 esac
 
 # Design: where it is documented, where it is staged, and whether it may leave the machine.

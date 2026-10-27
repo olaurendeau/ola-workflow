@@ -198,6 +198,24 @@ case $(with_default pr.title conventional) in
   conventional) echo "Title in Conventional Commits form: it becomes the commit message on $base." ;;
   *) echo "Title: no imposed form." ;;
 esac
+# The shape of the description is a fact two roles use — the developer writes it, the
+# pr-reviewer judges it — so it is stated here once, like the title, and both cite it.
+echo
+echo "Description: short, in this order —"
+if [ "$mode" = integrated ]; then
+  echo "- \`Closes #<task>\`, when the request closes a task: one made from a task closes it. A"
+  echo "  request that closes none (a release, say) has no such line."
+else
+  echo "- \`Closes #<issue>\` only if the human named an issue to close: the task lives in the"
+  echo "  local memory, not on the forge."
+fi
+echo "- 1 to 3 sentences: what changes, and why."
+echo "- a line saying what was checked, its label in the language of the artifacts (\"Checked\" in"
+echo "  English): the check command you ran, then one line per notable verification."
+echo "- \`Decision: … — Reason: …\`, only if there is one."
+echo "- \`<details><summary>…</summary> … </details>\`, only if needed: the rest goes there."
+echo "Headings and labels in the language of the artifacts: $(with_default language.artifacts en)."
+echo "A longer description is a suggestion in review, never a blocking finding."
 echo
 echo "## Escalation — what belongs to the human"
 cat <<'BASE'
@@ -397,6 +415,30 @@ Then, in exactly this form, with the full SHA you checked:
 
 A file in a sensitive path, or a sensitive pattern in the patch, means the human merges.
 Say so and stop; do not look for a way around it.
+
+### The RFR label
+
+\`RFR\` — ready for review, by the human — is how the human sees at a glance which pull
+requests they can merge. The coordinator owns it. A pull request is ready when the gate
+above holds for its current head SHA, the sensitive paths and patterns aside — they only
+decide who merges — and what the coordinator already waits for as well: the security
+review in, its findings verified, the suggestions sorted.
+
+- Ready: add it, then merge, or tell the human the merge is theirs. It goes on a pull
+  request that returns to the human as much as on one the coordinator merges next.
+
+      gh pr edit <N> --add-label RFR
+
+  If the repository has no such label, create it first, once:
+
+      gh label create RFR
+
+- No longer ready: remove it at once — a new head SHA, a branch behind $base, a review that
+  blocks. A label left on an old SHA would have the human merge code nobody read.
+
+      gh pr edit <N> --remove-label RFR
+
+The name is fixed; the profile has no key for it.
 INTEGRATED
 else
   profile_dir=$(ola_profile_dir "$dir")
