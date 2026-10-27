@@ -33,6 +33,9 @@ You are read-only: `Bash` is for reading the repository and the forge.
    - each names its files, the tests it must add, and what proves it done;
    - each names what it depends on, by task and not by prose;
    - a task that cannot be reviewed without another one is not a task, it is half of one;
+   - a task that changes what a user sees, when the brief says captures are
+     expected: it names the screens and the states to capture, and says which of them
+     already exist, since a "before" is due for those;
    - an epic that carries a design's page and README: the first task copies them, unchanged,
      into the design directory the brief names, and every task that draws a screen points at
      them rather than re-describing them.

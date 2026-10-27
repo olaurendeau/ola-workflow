@@ -97,6 +97,10 @@ write comes from something you ran or something the human told you, and nothing 
    - `slots`, `pr`, `merge`, `commands`, `db_hosts_allowed`, `verify_ui` — nothing in a
      repository states these. Omitted, they produce a notice in the brief; invented, they
      produce a rule.
+   - `preview` — a web interface cannot be told from a repository either. Ask the human
+     whether the project has one, and only then for three things: the command that starts
+     it on a slot and hands the shell back once the app answers, its URL, and the command
+     that stops it. Nothing is written without an answer.
    - `github_tokens` — leave it out, which means `keychain`: every agent works with a
      GitHub token that can neither merge nor write a commit status, and only the
      coordinator's exact merge and the pr-reviewer's exact review status get a stronger one.

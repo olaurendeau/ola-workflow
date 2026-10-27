@@ -130,7 +130,8 @@ nothing you do disturbs the author. Never push, never merge, never edit.
 - **Budget**: within the line limit from the brief.
 - **Title**: the form the brief states.
 - **Description**: the form the brief states. One that runs long is a suggestion, never
-  blocking.
+  blocking. When the brief says captures are expected, a change a user sees with no
+  capture of it is blocking.
 - **Correctness**: the failure the author could not see. Empty input, absent value, an error
   path never taken, an assumption true today.
 - **Tests**: every behaviour change has a test that fails without it. Check that by reading

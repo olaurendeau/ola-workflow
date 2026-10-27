@@ -84,6 +84,7 @@ FULL_PROFILE='{
   "context": {"product": "docs/agents/product.md", "security_precedents": "docs/agents/security-precedents.md"},
   "security": {"paths": ["back/auth/**", "Dockerfile*"]},
   "verify_ui": {"kind": "ios-simulator", "up": "make sim-up"},
+  "preview": {"up": "make web-up PORT=300{slot}", "url": "http://localhost:300{slot}/", "down": "make web-down PORT=300{slot}"},
   "escalation_extra": ["données de production"]
 }'
 
@@ -486,6 +487,14 @@ expect_problem '{"mode": "discreet", "slots": {"developers": [{"a": 1}]}}' \
   'developers[0]: expected' 'slot items are scalars'
 expect_problem '{"mode": "discreet", "slots": {"reviewer": [{"a": 1}]}}' \
   'reviewer[0]: expected' 'reviewer slot items are scalars'
+expect_problem '{"mode": "discreet", "preview": {"up": "x", "down": "y"}}' \
+  'preview/url: required key is missing' 'a preview needs a url to capture'
+expect_problem '{"mode": "discreet", "preview": {"url": "http://x/", "down": "y"}}' \
+  'preview/up: required key is missing' 'a preview needs a command that starts it'
+expect_problem '{"mode": "discreet", "preview": {"up": "x", "url": "http://x/"}}' \
+  'preview/down: required key is missing' 'a preview that cannot be stopped keeps the slot'
+expect_problem '{"mode": "discreet", "preview": {"up": "x", "url": "u", "down": "y", "shot": "z"}}' \
+  'preview/shot: unknown key' 'a key unknown to preview is caught'
 expect_problem '{"mode": "discreet", "slots": {"reviewer": []}}' \
   'at least 1 required' 'a list of reviewer slots is not empty'
 expect_problem '{"mode": "discreet", "slots": {"reviewer": true}}' \

@@ -8,7 +8,8 @@
 # from the profile (`preview`, written by the project), and what reaches a browser's
 # command line must not be readable by it as an option or as another scheme.
 #
-# Exit status: 0 captured · 1 the capture could not be taken · 2 a usage error.
+# Exit status: 0 captured · 1 the capture could not be taken · 2 a usage error ·
+# 130 interrupted (INT) · 143 terminated (TERM): the browser is stopped first in both.
 #
 # OLA_WORKFLOW_CHROME           the browser to use, and then only that one
 # OLA_WORKFLOW_CAPTURE_TIMEOUT  seconds before the browser is killed (default 30)
@@ -83,6 +84,20 @@ trap 'rm -rf "${profile:?}"' EXIT
 # An old capture must never pass for the new one.
 rm -f -- "$out"
 
+# The browser is in a group of its own (below), so a ^C or a TERM sent to this script's
+# group no longer reaches it: without this it would be left running after we are gone. Set
+# before the browser is launched, so that no signal falls between the two; `pid` is empty
+# until there is something to stop.
+pid=
+stop_browser() {
+  [ -n "${pid:-}" ] || return 0
+  kill -TERM -- "-$pid" 2>/dev/null
+  sleep 0.2
+  kill -KILL -- "-$pid" 2>/dev/null
+}
+trap 'stop_browser; exit 130' INT
+trap 'stop_browser; exit 143' TERM
+
 # A fresh profile for each run is what lets two developers capture at the same time: a
 # browser started on a profile already in use hands the page to the running instance and
 # exits.
@@ -94,9 +109,6 @@ set -m
   >"$profile/browser.log" 2>&1 &
 pid=$!
 set +m
-# The browser is in a group of its own, so a ^C or a TERM sent to this script's group no
-# longer reaches it: without this it would be left running after we are gone.
-trap 'kill -TERM -- "-$pid" 2>/dev/null; sleep 0.2; kill -KILL -- "-$pid" 2>/dev/null; exit 130' INT TERM
 
 # macOS has no timeout(1), and a page that never settles must not hold the developer.
 ticks=$((timeout * 10))

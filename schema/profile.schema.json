@@ -166,6 +166,17 @@
         "down": { "type": "string" }
       }
     },
+    "preview": {
+      "description": "How a web app is started to be photographed for a pull request: a URL that a headless browser captures. Not verify_ui, which is how a change is seen running by whoever develops it and may aim at a simulator; preview is web-only. `up` hands the shell back once the app answers at `url`: it does not stay in the foreground. `down` stops it, and a preview that cannot be stopped keeps its slot, so all three are required. {slot} applies to all three.",
+      "type": "object",
+      "required": ["up", "url", "down"],
+      "additionalProperties": false,
+      "properties": {
+        "up": { "description": "Starts the app and returns once it answers at `url`.", "type": "string" },
+        "url": { "description": "The address the app answers at, which `ola-workflow-capture` captures.", "type": "string" },
+        "down": { "description": "Stops the app and frees its slot.", "type": "string" }
+      }
+    },
     "escalation_extra": {
       "description": "Subjects this project reserves for the human, on top of product, dependencies, process/security and release.",
       "type": "array",
