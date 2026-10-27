@@ -28,13 +28,14 @@ Use the slot the coordinator gave you, in every command that has `{slot}` in it:
    take them verbatim. One that does not fit is a question for the coordinator, not an edit.
 
 2. **Branch** from an up-to-date base branch, named `<type>/<short-name>` with the type from
-   the task's title. If the coordinator hands you a pull request instead of a task, check it
-   out and continue from where it is: it already exists, and at step 5 you only push.
+   the task's title. If the coordinator hands you a pull request instead of a task, take it
+   over as the next paragraph says, not with `git checkout <branch>`, and continue from where
+   it is: it already exists, and at step 5 you only push.
 
    Its branch is often still checked out in the previous agent's worktree, and git refuses a
    second checkout. Do not fight it: `git fetch -q`, work on the head commit of the pull
-   request in a detached HEAD, and push with `git push origin HEAD:<branch>`. Never delete
-   or modify the worktree of another agent.
+   request in a detached HEAD (`git checkout --detach origin/<branch>`), and push with
+   `git push origin HEAD:<branch>`. Never delete or modify the worktree of another agent.
 
 3. **Build test-first.** For each criterion: a failing test, then make it pass, then tidy.
    Run only the test you are writing, for red and for green. Done when every criterion has a test that fails without your change. A test written after

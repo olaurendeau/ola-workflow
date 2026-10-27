@@ -699,6 +699,11 @@ case $step2 in
     ok "developer: takes over a pull request in a detached HEAD, pushes to its branch, leaves other worktrees alone" ;;
   *) ko "developer: nothing says how to take over a branch checked out in another worktree" ;;
 esac
+case $step2 in
+  *'not with `git checkout <branch>`'*'git checkout --detach origin/<branch>'*)
+    ok "developer: does not send a pull request takeover to a plain git checkout" ;;
+  *) ko "developer: tells a takeover to check the branch out, which git refuses in another worktree" ;;
+esac
 case $step3 in
   *'only the test you are writing'*) ok "developer: runs only the test it writes, for red and green" ;;
   *) ko "developer: runs more than the test it writes while building" ;;
