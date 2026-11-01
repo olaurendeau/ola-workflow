@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0
+
+**The coordinator never runs as a sub-agent.** A coordinator dispatched as a sub-agent loses
+its prompt cache after 5 minutes and never compacts its context, which is ruinous for a role
+that spends its time waiting. Measured with `scripts/token-cost.sh` on one project: an average
+context of 442k tokens, up to 966k, and about 59 M weighted tokens over 3 days, 40% of that
+project's cost, 29 M of it cache rewrites.
+
+- No coordinator in a sub-agent (#105): the coordinator runs as the session's main agent and
+  never dispatches `ola-workflow:coordinator`, in the background or not. A request that
+  arrives while an epic is running is its own to handle, in parallel, with the slots from the
+  brief.
+
 ## 0.8.0
 
 **A pull request that is short to read, captured when it changes what a user sees, and
