@@ -244,9 +244,12 @@ No profile means no effect: the hook exits 0 and the agents offer to run
 It establishes the identity, asks the one thing it must not guess — whose project this is,
 which decides both the mode and the scope the file is written in — detects what the
 repository can tell it, shows the file before writing it, and reads the result back as an
-agent will receive it.
+agent will receive it. In `integrated` mode it also writes the session settings beside it, in
+`.claude/settings.json`: `"agent": "ola-workflow:coordinator"` and `"autoCompactWindow": 250000`,
+keeping the file's other keys and asking before replacing a value of yours. In `discreet`
+mode it writes nothing in the repository and gives you those two keys instead.
 
-It writes a key only on a positive result, and that is the rule it is built around: an
+It writes a profile key only on a positive result, and that is the rule it is built around: an
 omitted key reads as *not declared* in the brief, which an agent treats as a question for
 the human, while an invented one reads as this project's rule — a check command nobody runs,
 enforced by a reviewer against a developer. `slots`, `pr`, `merge`, `commands`,

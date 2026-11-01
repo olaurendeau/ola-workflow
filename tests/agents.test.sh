@@ -1176,12 +1176,20 @@ case $passage in
   *) ko "workflow-init: the integrated passage does not write \"autoCompactWindow\": 250000" ;;
 esac
 case $passage in
-  *'`integrated`'*'other keys'*) ok "workflow-init: the integrated passage keeps the other keys of an existing file" ;;
+  *'read it and keep its other keys'*) ok "workflow-init: the integrated passage keeps the other keys of an existing file" ;;
   *) ko "workflow-init: the integrated passage does not say it keeps the other keys" ;;
 esac
 case $passage in
-  *'another value'*'ask'*) ok "workflow-init: a different existing agent is asked about before it is replaced" ;;
-  *) ko "workflow-init: nothing says a different existing agent is asked about" ;;
+  *'`agent` is already there with another value'*'ask the human before replacing'*) ok "workflow-init: a different existing agent is asked about before it is replaced" ;;
+  *) ko "workflow-init: nothing says a different existing agent is asked about before it is replaced" ;;
+esac
+case $passage in
+  *'`autoCompactWindow` is already there with another value'*'ask the human'*) ok "workflow-init: a different existing auto-compact window is shown and asked about" ;;
+  *) ko "workflow-init: nothing says a different existing auto-compact window is asked about" ;;
+esac
+case $passage in
+  *'keeps another `agent`'*'`autoCompactWindow` is still written'*) ok "workflow-init: the auto-compact window is still written when the human keeps another agent" ;;
+  *) ko "workflow-init: nothing says the auto-compact window is still written when the human keeps another agent" ;;
 esac
 discreet_says() {
   case $1 in
@@ -1200,6 +1208,21 @@ if discreet_says 'In `discreet` mode this setting is written in the repository, 
 else
   ok "workflow-init: the discreet matcher refuses the opposite sentence"
 fi
+case $init_skill in
+  *'`.claude/settings.local.json`'*'by hand'*'check-ignore'*) ok "workflow-init: a settings.local.json made by hand is checked for being git-ignored" ;;
+  *) ko "workflow-init: nothing says to check that a hand-made settings.local.json is git-ignored" ;;
+esac
+step7=$(awk '/^7\. \*\*Report/{on=1} on && /^## /{exit} on' "$ROOT/skills/workflow-init/SKILL.md" | tr -s '\n ' ' ')
+case $step7 in
+  *'three things'*) ko "workflow-init: step 7 still says it names three things, and lists more" ;;
+  *'settings file'*) ok "workflow-init: step 7 does not count what it lists" ;;
+  *) ko "workflow-init: step 7 does not name the settings file" ;;
+esac
+readme_first=$(awk '/^### Writing the first one/{on=1; next} on && /^### /{exit} on' "$ROOT/README.md" | tr -s '\n ' ' ')
+case $readme_first in
+  *'.claude/settings.json'*'autoCompactWindow'*) ok "README: \"Writing the first one\" says the skill also writes the session settings" ;;
+  *) ko "README: \"Writing the first one\" describes a skill that writes only the profile" ;;
+esac
 case $init_skill in
   *'settings file too'*'commit'*) ok "workflow-init: the report says the settings file is the human's to commit" ;;
   *) ko "workflow-init: the report does not say the settings file is the human's to commit" ;;

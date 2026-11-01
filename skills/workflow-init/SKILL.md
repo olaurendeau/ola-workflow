@@ -136,13 +136,21 @@ write comes from something you ran or something the human told you, and nothing 
    every call rereads the whole context, and a coordinator's is the one that grows. Both
    values are the plugin's own, not detected: say that as their origin. If the file exists, read it
    and keep its other keys; print the whole file as it will be, with each of these two values
-   next to its origin, as for the profile, and write it after the human agrees. If `agent` is
-   already there with another value, ask the human before replacing it: it is a choice they
-   made. If it already holds both values, say so and write nothing.
+   next to its origin, as for the profile, and write it after the human agrees. Each of the two
+   is decided on its own. If `agent` is already there with another value, show it and ask the
+   human before replacing it: it is a choice they made. If `autoCompactWindow` is already there
+   with another value, show it and ask the human the same way. A value the human keeps stays as
+   it is, and the other is still written: when the human keeps another `agent`,
+   `autoCompactWindow` is still written. If it already holds both values, say so and write
+   nothing.
 
    In `discreet` mode this setting is not written in the repository: it is not yours to add
    a file to. Give the human the two keys instead, and tell them they can put them
-   themselves in `.claude/settings.local.json`, which is theirs alone.
+   themselves in `.claude/settings.local.json`, which is theirs alone. Claude Code git-ignores
+   that file only when it creates it itself: if they make it by hand, tell them to check that
+   it is ignored with `git check-ignore .claude/settings.local.json` — it prints the path when
+   it is, nothing when it is not — and to add it to `.gitignore` if not, so it is not
+   committed by mistake.
 
 6. **Validate the file you wrote, then read back what will actually apply.**
 
@@ -163,7 +171,7 @@ write comes from something you ran or something the human told you, and nothing 
    Read the brief yourself before showing it. If it announces a value the human did not
    choose and you did not detect, a key is wrong — fix the profile, not the brief.
 
-7. **Report**, naming three things: the file you wrote and its scope, every key you left
+7. **Report**, naming the file you wrote and its scope, every key you left
    out with what the brief will say instead, and — in `integrated` mode — that the file is
    a change to the repository and needs committing, and so does the settings file too if you
    wrote it. Do not commit either yourself: it is the profile that decides what the agents
