@@ -1659,7 +1659,7 @@ for mode in integrated discreet; do
     ko "$mode: the brief does not give the command matching security.paths: $(head -c 200 "$WORK/secured-$mode.out" | tr '\n' ' ')"
   fi
   # Whether a fix owes a security review is a question about the fix, not the request.
-  if grep -qF "<reviewed SHA>...<SHA> -- ':(glob)back/auth/**'" "$WORK/secured-$mode.out"; then
+  if grep -qF "diff <(git diff origin/main...<reviewed SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim) <(git diff origin/main...<SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim)" "$WORK/secured-$mode.out"; then
     ok "$mode: the brief gives the command for a fix since the last review"
   else
     ko "$mode: the brief matches the security paths only against the whole request"
@@ -1682,6 +1682,84 @@ for forbidden in 'gh pr comment' 'gh api'; do
     ok "discreet: the security section gives no way to run $forbidden"
   fi
 done
+
+# The command for a fix, run for real. A catch-up brings main's files into the diff between
+# two SHAs, and none of them is the pull request's: only what the PR changes against main may
+# make a fix owe a new security review. Built on a real repository with a bare origin.
+fixrepo=$WORK/fix-origin-work
+gitq() { git -C "$fixrepo" -c user.email=t@e -c user.name=t "$@"; }
+git init -q --bare -b main "$WORK/fix-origin.git" 2>/dev/null
+git clone -q "$WORK/fix-origin.git" "$fixrepo" 2>/dev/null
+mkdir -p "$fixrepo/back/auth" "$fixrepo/docs" "$fixrepo/.claude"
+printf '{"mode":"integrated","base_branch":"main","security":{"paths":["back/auth/**"]}}\n' \
+  >"$fixrepo/.claude/workflow.json"
+seq 1 40 >"$fixrepo/back/auth/a"
+echo b >"$fixrepo/back/auth/b"
+echo doc >"$fixrepo/docs/d"
+gitq checkout -q -b main 2>/dev/null
+gitq add -A && gitq commit -q -m base && gitq push -q origin main 2>/dev/null
+# The pull request changes the top of a; main then changes b and the bottom of a; the PR
+# catches up by a merge that conflicts with nothing.
+gitq checkout -q -b pr
+sed -i.bak '2s/.*/pr/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+gitq commit -q -am "pr change"
+reviewed=$(gitq rev-parse HEAD)
+gitq checkout -q main
+echo b2 >>"$fixrepo/back/auth/b"
+sed -i.bak '39s/.*/main/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+gitq commit -q -am "main moves"
+gitq push -q origin main 2>/dev/null
+gitq checkout -q pr
+gitq merge -q --no-edit main >/dev/null 2>&1
+caught_up=$(gitq rev-parse HEAD)
+fixcmd=$("$BRIEF" "$fixrepo" | awk '/^    diff </{sub(/^    /,""); print; exit}')
+fix_run() { # fix_run <new SHA> — what the brief's command prints for a fix at that SHA
+  local cmd=${fixcmd//<reviewed SHA>/$reviewed}
+  cmd=${cmd//<SHA>/$1}
+  (cd "$fixrepo" && bash -c "$cmd" 2>&1)
+}
+if [ -n "$fixcmd" ]; then
+  ok "behaviour: the brief prints a comparison command to run"
+else
+  ko "behaviour: the brief prints no comparison command"
+fi
+if [ -z "$(fix_run "$caught_up")" ]; then
+  ok "behaviour: a catch-up of main owes no new security review"
+else
+  ko "behaviour: a catch-up of main prints $(fix_run "$caught_up" | head -c 200)"
+fi
+sed -i.bak '10s/.*/fix/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+gitq commit -q -am "fix in a"
+fix_a=$(gitq rev-parse HEAD)
+if [ -n "$(fix_run "$fix_a")" ]; then
+  ok "behaviour: a fix changing a security path owes a new security review"
+else
+  ko "behaviour: a fix changing back/auth/a prints nothing"
+fi
+gitq checkout -q -b outside "$caught_up"
+echo more >>"$fixrepo/docs/d"
+gitq commit -q -am "fix outside"
+if [ -z "$(fix_run "$(gitq rev-parse HEAD)")" ]; then
+  ok "behaviour: a fix outside the security paths owes nothing"
+else
+  ko "behaviour: a fix outside the security paths prints something"
+fi
+gitq checkout -q -b spaces "$caught_up"
+sed -i.bak '2s/$/ /' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+gitq commit -q -am "whitespace only"
+if [ -n "$(fix_run "$(gitq rev-parse HEAD)")" ]; then
+  ok "behaviour: a fix changing only whitespace in a security path owes a new security review"
+else
+  ko "behaviour: a whitespace-only fix prints nothing, so --verbatim is not doing its work"
+fi
+case $step6 in
+  *'prints anything'*) ok "coordinator: a fix owes a security review when the comparison prints anything" ;;
+  *) ko "coordinator: step 6 does not say a fix owes a security review when the comparison prints anything" ;;
+esac
+case $step6 in
+  *'command for a fix, from the SHA last reviewed, prints a file'*) ko "coordinator: step 6 still reads the fix command as a diff between the two SHAs printing a file" ;;
+  *) ok "coordinator: step 6 no longer reads the fix command as a file list between the two SHAs" ;;
+esac
 # No paths: said, so that a quiet result is not read as a clean one.
 case $integrated in
   *'## Security review'*'not dispatched'*) ok "no security paths: the brief says the security-reviewer is not dispatched" ;;

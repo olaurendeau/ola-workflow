@@ -187,7 +187,8 @@ context.
    | only prose — a comment, a README, a commit message | no new cycle; report it and merge |
 
    A fix that owes a review owes a security review on the same terms, and only when the
-   brief's *Security review* command for a fix, from the SHA last reviewed, prints a file.
+   brief's *Security review* comparison for a fix — what the request changes in those paths,
+   at the SHA last reviewed against the new one — prints anything.
 
    Two things keep this honest. A prose fix still goes to the reviewer, so a false claim in
    it is caught on the next change rather than never. And a claim that must be *true* rather
