@@ -173,10 +173,13 @@ if [ -n "$security_paths" ]; then
 ' "$base" "$pathspec"
   echo
   echo "A fix owes a new one only when this prints something: it compares what the pull"
-  echo "request changes against main, in those paths, at the SHA last reviewed and at the new"
-  echo "one, both read against the current main — so what a catch-up brought in does not count:"
+  echo "request changes against $base, in those paths, at the SHA last reviewed and at the new"
+  echo "one, each read against its own merge base with origin/$base — so what a catch-up"
+  echo "brought in does not count, nor does where a change sits in its file. The limit: a fix"
+  echo "that moves an identical change between two places with identical context is not seen"
+  echo "by this command; the pr-reviewer's diff of diffs still sees it:"
   echo
-  printf '    diff <(git diff origin/%s...<reviewed SHA> --%s | git patch-id --verbatim) <(git diff origin/%s...<SHA> --%s | git patch-id --verbatim)
+  printf '    diff <(git diff --no-color --no-ext-diff origin/%s...<reviewed SHA> --%s | git patch-id --verbatim) <(git diff --no-color --no-ext-diff origin/%s...<SHA> --%s | git patch-id --verbatim)
 ' \
     "$base" "$pathspec" "$base" "$pathspec"
   echo

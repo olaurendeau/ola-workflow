@@ -1659,7 +1659,7 @@ for mode in integrated discreet; do
     ko "$mode: the brief does not give the command matching security.paths: $(head -c 200 "$WORK/secured-$mode.out" | tr '\n' ' ')"
   fi
   # Whether a fix owes a security review is a question about the fix, not the request.
-  if grep -qF "diff <(git diff origin/main...<reviewed SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim) <(git diff origin/main...<SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim)" "$WORK/secured-$mode.out"; then
+  if grep -qF "diff <(git diff --no-color --no-ext-diff origin/main...<reviewed SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim) <(git diff --no-color --no-ext-diff origin/main...<SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim)" "$WORK/secured-$mode.out"; then
     ok "$mode: the brief gives the command for a fix since the last review"
   else
     ko "$mode: the brief matches the security paths only against the whole request"
@@ -1695,18 +1695,22 @@ printf '{"mode":"integrated","base_branch":"main","security":{"paths":["back/aut
   >"$fixrepo/.claude/workflow.json"
 seq 1 40 >"$fixrepo/back/auth/a"
 echo b >"$fixrepo/back/auth/b"
+seq 1 40 >"$fixrepo/back/auth/c"
 echo doc >"$fixrepo/docs/d"
 gitq checkout -q -b main 2>/dev/null
 gitq add -A && gitq commit -q -m base && gitq push -q origin main 2>/dev/null
-# The pull request changes the top of a; main then changes b and the bottom of a; the PR
+# The pull request changes the top of a and the middle of c; main then changes b, the bottom
+# of a and inserts lines above the whole of c, which moves the PR's hunk in c; the PR
 # catches up by a merge that conflicts with nothing.
 gitq checkout -q -b pr
 sed -i.bak '2s/.*/pr/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+sed -i.bak '20s/.*/pr/' "$fixrepo/back/auth/c" && rm "$fixrepo/back/auth/c.bak"
 gitq commit -q -am "pr change"
 reviewed=$(gitq rev-parse HEAD)
 gitq checkout -q main
 echo b2 >>"$fixrepo/back/auth/b"
 sed -i.bak '39s/.*/main/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+seq 101 105 | cat - "$fixrepo/back/auth/c" >"$fixrepo/back/auth/c.new" && mv "$fixrepo/back/auth/c.new" "$fixrepo/back/auth/c"
 gitq commit -q -am "main moves"
 gitq push -q origin main 2>/dev/null
 gitq checkout -q pr
@@ -1752,6 +1756,34 @@ if [ -n "$(fix_run "$(gitq rev-parse HEAD)")" ]; then
 else
   ko "behaviour: a whitespace-only fix prints nothing, so --verbatim is not doing its work"
 fi
+# A host's git config must not blind the comparison: with colour forced or an external diff
+# tool, git diff writes nothing git patch-id can read, and two empty sides print nothing.
+for setting in "color.diff always" "color.ui always" "diff.external true"; do
+  # shellcheck disable=SC2086 # the setting is a name and a value
+  gitq config $setting
+  if [ -n "$(fix_run "$fix_a")" ]; then
+    ok "behaviour: a fix changing a security path owes a review under $setting"
+  else
+    ko "behaviour: under $setting a fix changing back/auth/a prints nothing"
+  fi
+  gitq config --unset "${setting%% *}"
+done
+# The sentence around the command names the base branch of the project, not a fixed one.
+basedir=$WORK/fix-base-develop
+mkdir -p "$basedir/.claude"
+git -C "$basedir" init -q 2>/dev/null
+printf '{"mode":"integrated","base_branch":"develop","security":{"paths":["back/auth/**"]}}\n' \
+  >"$basedir/.claude/workflow.json"
+basetext=$("$BRIEF" "$basedir" | sed -n '/^A fix owes a new one/,/^$/p')
+case $basetext in
+  *main*) ko "behaviour: the fix paragraph says main on a project whose base branch is develop" ;;
+  *'against develop'*'origin/develop'*) ok "behaviour: the fix paragraph names the project's base branch" ;;
+  *) ko "behaviour: the fix paragraph does not name develop: $(printf '%s' "$basetext" | head -c 200)" ;;
+esac
+case $("$BRIEF" "$basedir") in
+  *'identical change between two places'*) ok "behaviour: the brief states the limit of the comparison" ;;
+  *) ko "behaviour: the brief does not state that moving an identical change goes unseen" ;;
+esac
 case $step6 in
   *'prints anything'*) ok "coordinator: a fix owes a security review when the comparison prints anything" ;;
   *) ko "coordinator: step 6 does not say a fix owes a security review when the comparison prints anything" ;;
