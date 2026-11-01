@@ -1100,6 +1100,67 @@ case $coord_all in
   *) ko "coordinator: asks for a detailed account that stays in its context" ;;
 esac
 
+# --- The coordinator takes its state back from the forge ------------------------------
+# A summary or a /clear erases what the coordinator held; the forge is the memory, so the
+# coordinator reads it again, one line per item and bounded. The section is read between
+# its heading and the next, and the commands out of it, so a mention elsewhere in the file
+# cannot satisfy these.
+resume_state=$(coord_part '^## Resume the state' '^## ')
+resume_state_raw=$(awk '/^## Resume the state/{on=1; next} on && /^## /{exit} on' "$coord")
+step4=$(coord_part '^4\\. \\*\\*Design and split' '^5\\. \\*\\*')
+for part in resume_state step4; do
+  if [ -n "${!part}" ]; then
+    ok "witness: coordinator $part is readable"
+  else
+    ko "witness: coordinator $part is not where the assertions below look"
+  fi
+done
+case $coord_all in
+  *'ola-workflow-brief'*'## Resume the state'*'## The team'*)
+    ok "coordinator: resumes the state right after the brief, before the team" ;;
+  *) ko "coordinator: the state is not resumed between the brief and the team" ;;
+esac
+case $resume_state in
+  *'At startup'*'/clear'*'summarised'*'forge'*)
+    ok "coordinator: reads the forge again at startup, after /clear and after a summary" ;;
+  *) ko "coordinator: does not say to read the forge again at startup, after /clear and a summary" ;;
+esac
+case $resume_state in
+  *'open epics'*'open tasks'*'epic'*'open pull request'*'head SHA'*'RFR'*'task it closes'*)
+    ok "coordinator: reads open epics, tasks with their epic, and pull requests with head SHA, RFR and task" ;;
+  *) ko "coordinator: the state it resumes lacks epics, tasks, or pull requests with head SHA and RFR" ;;
+esac
+case $resume_state in
+  *'epic.md'*'tasks/'*'gh pr list'*'only reads'*)
+    ok "coordinator: in discreet mode, reads the memory directory and the open pull requests" ;;
+  *) ko "coordinator: says nothing of resuming the state in discreet mode" ;;
+esac
+resume_cmds=$(printf '%s\n' "$resume_state_raw" | grep -E '^ +gh ' || true)
+case $(printf '%s\n' "$resume_cmds" | grep -c 'gh ') in
+  3) ok "coordinator: resumes the state with three commands" ;;
+  *) ko "coordinator: the state is not three commands: epics, tasks, pull requests" ;;
+esac
+for sub in 'issue list --label epic' 'issue list --label task' 'pr list'; do
+  line=$(printf '%s\n' "$resume_cmds" | grep -F "gh $sub" || true)
+  case $line in
+    *'--jq'*) ok "coordinator: '$sub' prints one line per item, through --jq" ;;
+    *) ko "coordinator: '$sub' is not reduced to one line per item by --jq" ;;
+  esac
+done
+case $resume_cmds in
+  *body*|*comments*) ko "coordinator: the state it resumes reads a body or comments, not one line per item" ;;
+  *) ok "coordinator: the state it resumes reads no body and no comments" ;;
+esac
+case $resume_cmds in
+  *'--limit'*'parent'*'headRefOid'*'closingIssuesReferences'*)
+    ok "coordinator: bounds the task list, and asks the parent, head SHA and closed tasks" ;;
+  *) ko "coordinator: the commands lack --limit, parent, headRefOid or closingIssuesReferences" ;;
+esac
+case $step4 in
+  *'sub-issue of the epic'*'--parent <epic>'*) ok "coordinator: step 4 creates each task as a sub-issue of its epic" ;;
+  *) ko "coordinator: step 4 does not create tasks with --parent, so the task list has no epic to show" ;;
+esac
+
 # --- The shape of a pull request description ------------------------------------------
 # The brief states it once, the developer writes it and the pr-reviewer judges it. An agent
 # that restates the shape is the second copy this file exists to prevent, so the markup of
