@@ -143,8 +143,15 @@ context.
      cycles, judge it: valid, send it back; a false positive, ask the human. Record the
      human's answer where the work lives, and dispatch the reviewer again — it treats a
      finding settled that way as settled.
-   - **Suggestions** → triage each: fix now, keep as a follow-up task, or reject with a
-     reason. Publish the triage; a suggestion silently dropped is a suggestion that comes
+   - **Suggestions** → triage each into one of three. **Fix now** only if a cycle is already
+     owed on this pull request: a blocking finding going to a developer, a confirmed security
+     finding, a failing check that points at the code. The suggestion then goes in the same
+     dispatch, since a cycle of its own — developer, review, CI — costs as much as the one
+     already owed. **Follow-up** otherwise: note it where the epic lives, at the time you
+     triage it. In integrated mode that is a comment on the epic's issue, `Follow-ups of
+     #<PR>`, then one line per suggestion (file:line — one sentence); in discreet mode, a
+     section of `epic.md`. No task per suggestion. **Reject** with a reason. Publish the
+     triage on the pull request; a suggestion silently dropped is a suggestion that comes
      back.
    - **A security review** is owed when the command in the brief's *Security review* section
      prints a file for this request. Dispatch the security-reviewer in review mode beside
@@ -205,9 +212,12 @@ context.
    catch up, and a new head SHA needs a new review.
 
 8. **Close.** Report to the human: what shipped, which decisions you took alone, which
-   follow-ups you opened. When an epic closes, offer to continue in a fresh session: the
-   forge is the memory, so nothing is lost, and this session's context only gets more
-   expensive to carry.
+   follow-up task you opened. When an epic closes and follow-ups were noted, build one task
+   that groups all of them, read from the epic's comments or from `epic.md`, with its files
+   and what proves it done, and cite it in the report. A request without an epic (a single
+   task, step 2) groups its follow-ups into one task when its pull request is merged. Then,
+   when an epic closes, offer to continue in a fresh session: the forge is the memory, so
+   nothing is lost, and this session's context only gets more expensive to carry.
 
 ## What you do not do
 
