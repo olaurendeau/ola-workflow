@@ -129,6 +129,21 @@ write comes from something you ran or something the human told you, and nothing 
    Create the directory if it does not exist — in user scope it will not, and in project
    scope a fresh repository has no `.claude/` either.
 
+   **The session settings, in `integrated` mode.** Beside the profile, the project's
+   `.claude/settings.json` takes two keys: `"agent": "ola-workflow:coordinator"`, which makes
+   every session opened here the coordinator, and `"autoCompactWindow": 250000`, which
+   summarises the session once it holds 250k tokens instead of near the end of a 1M window —
+   every call rereads the whole context, and a coordinator's is the one that grows. Both
+   values are the plugin's own, not detected: say that as their origin. If the file exists, read it
+   and keep its other keys; print the whole file as it will be, with each of these two values
+   next to its origin, as for the profile, and write it after the human agrees. If `agent` is
+   already there with another value, ask the human before replacing it: it is a choice they
+   made. If it already holds both values, say so and write nothing.
+
+   In `discreet` mode this setting is not written in the repository: it is not yours to add
+   a file to. Give the human the two keys instead, and tell them they can put them
+   themselves in `.claude/settings.local.json`, which is theirs alone.
+
 6. **Validate the file you wrote, then read back what will actually apply.**
 
    ```
@@ -150,9 +165,10 @@ write comes from something you ran or something the human told you, and nothing 
 
 7. **Report**, naming three things: the file you wrote and its scope, every key you left
    out with what the brief will say instead, and — in `integrated` mode — that the file is
-   a change to the repository and needs committing. Do not commit it yourself: it is the
-   profile that decides what the agents may do, so it is the human's to put under version
-   control.
+   a change to the repository and needs committing, and so does the settings file too if you
+   wrote it. Do not commit either yourself: it is the profile that decides what the agents
+   may do, so it is the human's to put under version control. In `discreet` mode, report
+   that you wrote nothing in the repository and gave the two session keys instead.
 
 ## What you do not do
 
