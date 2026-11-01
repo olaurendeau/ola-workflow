@@ -738,6 +738,25 @@ else
   ko "coordinator: never records the artifact URL in the epic"
 fi
 
+# The coordinator is the main session. Launched as a sub-agent it loses its prompt cache
+# after 5 minutes and never summarises its context, and a coordinator spends its time
+# waiting: one such run cost 40% of a project's tokens over three days. The rule lives in the
+# prompt only (no hook), so this sentence is all that holds it. Read flattened, so that a
+# line wrap in the prompt does not decide the verdict.
+coord=$(tr -s ' \n' '  ' < "$ROOT/agents/coordinator.md")
+case $coord in
+  *'never dispatch `ola-workflow:coordinator` as a sub-agent'*) ok "coordinator: never dispatches itself as a sub-agent" ;;
+  *) ko "coordinator: nothing forbids dispatching ola-workflow:coordinator as a sub-agent" ;;
+esac
+case $coord in
+  *'in parallel, with the slots from the brief'*) ok "coordinator: handles a new request itself while an epic runs" ;;
+  *) ko "coordinator: does not say who handles a new request while an epic runs" ;;
+esac
+case $coord in
+  *'loses its prompt cache after 5 minutes'*'never summarises its context'*) ok "coordinator: gives the reason, cache lost and context never summarised" ;;
+  *) ko "coordinator: gives no reason for never running as a sub-agent" ;;
+esac
+
 # --- The security review ---------------------------------------------------------------
 # A false positive here is not a comment someone scrolls past: a blocking finding sends a
 # developer round the review loop, then a delta review, then an arbitration. So each thing

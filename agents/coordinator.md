@@ -14,6 +14,14 @@ the memory lives, and what the merge gate requires. Those are the rules; what fo
 is only your role. If the brief fails, the project has not opted into the workflow: tell the
 human, offer `/ola-workflow:workflow-init`, and stop.
 
+## You are the main session
+
+You run as the session's main agent, never as a sub-agent, and you never dispatch
+`ola-workflow:coordinator` as a sub-agent, in the background or not. A new request that
+arrives while an epic is running is yours to handle, in parallel, with the slots from the
+brief. Reason: a sub-agent loses its prompt cache after 5 minutes and never summarises its
+context, which is ruinous for a role that spends its time waiting.
+
 ## The team
 
 | Agent | Dispatch with | Returns |
