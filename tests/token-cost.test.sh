@@ -27,10 +27,13 @@ fresh() { # fresh → a new project directory, answered in $P
   mkdir -p "$P"
 }
 T() { printf '2026-10-%sT10:00:00.000Z' "$1"; } # T <day>
-call() { # call <file> <requestId|-> <timestamp> <input> <cache_creation> <cache_read> <output>
-  jq -cn --arg id "$2" --arg ts "$3" --argjson i "$4" --argjson cc "$5" --argjson cr "$6" --argjson o "$7" '
+call() { # call <file> <requestId|-> <timestamp> <input> <cache_creation> <cache_read> <output> [model|-]
+  # the model is a priced one by default (claude-sonnet-5-5); "-" leaves message.model out
+  jq -cn --arg id "$2" --arg ts "$3" --argjson i "$4" --argjson cc "$5" --argjson cr "$6" --argjson o "$7" \
+    --arg m "${8-claude-sonnet-5-5}" '
     {type: "assistant", timestamp: $ts, message: {usage: {input_tokens: $i,
       cache_creation_input_tokens: $cc, cache_read_input_tokens: $cr, output_tokens: $o}}}
+    | if $m != "-" then .message.model = $m else . end
     | if $id != "-" then . + {requestId: $id} else . end' >>"$1"
 }
 umsg() { jq -cn --arg t "$2" '{type: "user", message: {role: "user", content: $t}}' >>"$1"; }
@@ -57,11 +60,16 @@ run() { # run [args...] → OUT, STATUS
   OUT=$("$SCRIPT" "$@" 2>"$WORK/stderr")
   STATUS=$?
 }
-row() { # row <role> <column> → a field of the role table (1 = role, 2 = calls, 3 = cost, 5 = rewrites)
+row() { # row <role> <column> → a field of the role table (1 = role, 2 = calls, 3 = cost, 5 = rewrites, 7 = cost in $, 8 = share in $)
   printf '%s\n' "$OUT" | awk -v r="$1" -v c="$2" '$1 == r { print $c; exit }'
 }
 prrow() { printf '%s\n' "$OUT" | awk -v r="$1" '$1 == r { print $2; exit }'; } # the cost of a PR row
 totalline() { printf '%s\n' "$OUT" | grep '^total:'; }
+price() { # price <prefix> → its price in the table of the script (the lines of the PRICES block)
+  sed -n "/^PRICES='/,/^'/p" "$SCRIPT" | awk -v p="$1" '$1 == p { print $2; exit }'
+}
+modrow() { printf '%s\n' "$OUT" | awk -v r="$1" -v c="$2" '$1 == r { print $c; exit }'; } # a field of the model table (2 = calls, 3 = raw, 4 = $)
+unpriced() { printf '%s\n' "$OUT" | grep '^unpriced:'; }
 
 # --- the weighted cost -----------------------------------------------------------------
 fresh
@@ -71,6 +79,106 @@ run "$P"
 [ "$STATUS" = 0 ] && [ "$(row coordinator 3)" = 9.50 ] \
   && ok "the weighted cost is input + 1.25 creation + 0.1 read + 5 output (9.50 M)" \
   || ko "the weighted cost was '$(row coordinator 3)' (exit $STATUS), expected 9.50"
+
+# --- the cost in $ ----------------------------------------------------------------------
+fresh
+call "$P/main.jsonl" r1 "$(T 01)" 1000000 0 0 0 claude-opus-5-5
+call "$P/main.jsonl" r2 "$(T 01)" 1000000 0 0 0 claude-sonnet-5-5
+run "$P"
+po=$(price claude-opus-5-5)
+ps=$(price claude-sonnet-5-5)
+# the same raw cost (1.00 M each): the cost in $ differs by the ratio of the prices of the table
+{
+  [ -n "$po" ] && [ -n "$ps" ] && [ "$po" != "$ps" ] \
+    && [ "$(modrow claude-opus-5-5 3)" = 1.00 ] && [ "$(modrow claude-sonnet-5-5 3)" = 1.00 ] \
+    && awk -v a="$(modrow claude-opus-5-5 4)" -v b="$(modrow claude-sonnet-5-5 4)" -v po="$po" -v ps="$ps" \
+      'BEGIN { exit !(b > 0 && a / b == po / ps && a == po) }'
+} \
+  && ok "two calls of the same raw cost, an opus and a sonnet, cost in \$ as their prices ($po and $ps per M)" \
+  || ko "opus $(modrow claude-opus-5-5 4) \$ and sonnet $(modrow claude-sonnet-5-5 4) \$ for 1.00 M raw each, table $po and $ps"
+
+{ [ "$(row coordinator 3)" = 2.00 ] && awk -v c="$(row coordinator 7)" -v po="$po" -v ps="$ps" 'BEGIN { exit !(c == po + ps) }'; } \
+  && ok "the role table keeps its raw cost and adds the cost in \$ at the end" \
+  || ko "role row: raw '$(row coordinator 3)', \$ '$(row coordinator 7)', expected 2.00 and $((po + ps))"
+
+[ "$(printf '%s\n' "$OUT" | grep -c -E '^claude-(opus|sonnet)-5-5 ')" = 2 ] \
+  && ok "the model table has one row per model" \
+  || ko "model rows: $(printf '%s\n' "$OUT" | grep -E '^claude-' | tr '\n' '|')"
+
+fresh
+call "$P/main.jsonl" r1 "$(T 01)" 1000000 0 0 0 claude-opus-5-5
+call "$P/main.jsonl" r2 "$(T 01)" 2000000 0 0 0 claude-opus-5-5
+call "$P/main.jsonl" r3 "$(T 01)" 4000000 0 0 0 claude-haiku-5-5
+run "$P"
+{ [ "$(modrow claude-opus-5-5 2)" = 2 ] && [ "$(modrow claude-opus-5-5 3)" = 3.00 ] \
+    && [ "$(modrow claude-haiku-5-5 2)" = 1 ] && [ "$(modrow claude-haiku-5-5 3)" = 4.00 ]; } \
+  && ok "a model row carries its number of calls and its raw cost" \
+  || ko "model rows: $(printf '%s\n' "$OUT" | grep -E '^claude-' | tr '\n' '|')"
+
+# the longest prefix wins: claude-opus-5 is a prefix of claude-opus-5-5, with another price
+fresh
+call "$P/main.jsonl" r1 "$(T 01)" 1000000 0 0 0 claude-opus-5-5
+call "$P/main.jsonl" r2 "$(T 01)" 1000000 0 0 0 claude-opus-5-1
+run "$P"
+short=$(price claude-opus-5)
+{
+  [ -n "$short" ] && [ "$short" != "$po" ] \
+    && awk -v a="$(modrow claude-opus-5-5 4)" -v b="$(modrow claude-opus-5-1 4)" -v po="$po" -v s="$short" 'BEGIN { exit !(a == po && b == s) }'
+} \
+  && ok "the longest prefix wins: claude-opus-5-5 at $po, claude-opus-5-1 at the shorter prefix, $short" \
+  || ko "opus-5-5 '$(modrow claude-opus-5-5 4)', opus-5-1 '$(modrow claude-opus-5-1 4)', table $po and $short"
+
+# a model that is not in the table, and a call without model: in the raw cost, not in $, and named
+fresh
+call "$P/main.jsonl" r1 "$(T 01)" 1000000 0 0 0 claude-opus-5-5
+call "$P/main.jsonl" r2 "$(T 01)" 3000000 0 0 0 claude-future-9
+call "$P/main.jsonl" r3 "$(T 01)" 5000000 0 0 0 -
+call "$P/main.jsonl" r4 "$(T 01)" 5000000 0 0 0 -
+run "$P"
+{
+  [ "$(row coordinator 3)" = 14.00 ] && [ "$(row coordinator 2)" = 4 ] \
+    && awk -v c="$(row coordinator 7)" -v po="$po" 'BEGIN { exit !(c == po) }' \
+    && [ "$(unpriced | grep -c .)" = 2 ] \
+    && printf '%s\n' "$OUT" | grep -qxF 'unpriced: claude-future-9 (1 calls, 3.00 M raw)' \
+    && printf '%s\n' "$OUT" | grep -qxF 'unpriced: (no model) (2 calls, 10.00 M raw)' \
+    && [ "$(modrow claude-future-9 4)" = - ]
+} \
+  && ok "an unknown model and a call without model count in the raw cost, not in \$, and are named on 'unpriced:' lines" \
+  || ko "unpriced: raw '$(row coordinator 3)' \$ '$(row coordinator 7)' / $(unpriced | tr '\n' '|')"
+
+fresh
+call "$P/main.jsonl" r1 "$(T 01)" 1000000 0 0 0 claude-opus-5-5
+run "$P"
+[ -z "$(unpriced)" ] \
+  && ok "no 'unpriced:' line when every call is priced" \
+  || ko "an unpriced line with only priced calls: $(unpriced)"
+
+# the total line keeps its start and ends with the total in $
+[ "$(totalline)" = "total: 1.00 M weighted over 1 calls, 0 distinct PRs, 0 cache rewrites (0.00 M), $(awk -v p="$po" 'BEGIN { printf "%.2f", p }') \$ priced" ] \
+  && ok "the total line is unchanged and ends with the total in \$" \
+  || ko "total line: $(totalline)"
+
+# share ($) is computed on the total in $, not on the raw: the unpriced calls are out of both
+fresh
+call "$P/main.jsonl" r1 "$(T 01)" 1000000 0 0 0 claude-opus-5-5
+call "$(sub "$P" a ola-workflow:developer)" r2 "$(T 01)" 1000000 0 0 0 claude-sonnet-5-5
+call "$(sub "$P" b ola-workflow:pr-reviewer)" r3 "$(T 01)" 20000000 0 0 0 claude-future-9
+run "$P"
+exp_c=$(awk -v a="$po" -v b="$ps" 'BEGIN { printf "%.1f%%", a * 100 / (a + b) }')
+exp_d=$(awk -v a="$po" -v b="$ps" 'BEGIN { printf "%.1f%%", b * 100 / (a + b) }')
+{ [ "$(row coordinator 8)" = "$exp_c" ] && [ "$(row developer 8)" = "$exp_d" ] && [ "$(row pr-reviewer 8)" = "0.0%" ]; } \
+  && ok "share (\$) of a role is its part of the total in \$ ($exp_c and $exp_d), the unpriced calls out of it" \
+  || ko "share (\$): coordinator '$(row coordinator 8)', developer '$(row developer 8)', reviewer '$(row pr-reviewer 8)', expected $exp_c, $exp_d and 0.0%"
+
+# the PR table ends with the cost in $
+fresh
+f=$(sub "$P" a ola-workflow:developer)
+umsg "$f" "PR #12"
+call "$f" r1 "$(T 01)" 1000000 0 0 0 claude-opus-5-5
+run "$P"
+awk -v c="$(printf '%s\n' "$OUT" | awk '$1 == "#12" { print $4 }')" -v po="$po" 'BEGIN { exit !(c == po) }' \
+  && ok "the PR table ends with the cost in \$" \
+  || ko "PR row: $(printf '%s\n' "$OUT" | grep '^#12')"
 
 # --- deduplication ---------------------------------------------------------------------
 fresh
