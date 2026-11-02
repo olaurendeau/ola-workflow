@@ -138,7 +138,9 @@ context.
    slot, never more at once than the brief lists reviewer slots — and building the next
    tasks does not wait for any of them.
    - **A review owed again** is a delta review: the reviewer finds its previous one and
-     judges what changed since. You decide *whether* one is owed, below; it decides how.
+     judges what changed since. After a mere catch-up of the base branch it may be a
+     lighter confirmation instead. You decide *whether* one is owed, below; the reviewer
+     decides how.
    - **The reviewer reports that the head moved** while it worked → its verdict stands for
      the SHA it pinned. What moved the head is a fix like any other: when it owes a review,
      that review is a delta from the pinned SHA.
@@ -231,7 +233,8 @@ context.
    pull request stops being ready, as the brief's *The RFR label* says.
    Then return to step 5 for the tasks that merge unblocked. A change that merging left
    behind — another open pull request now behind the base branch — needs its developer to
-   catch up, and a new head SHA needs a new review.
+   catch up, and a new head SHA needs a new review — a confirmation, when the catch-up left
+   the request's change intact.
 
 8. **Close.** Report to the human: what shipped, which decisions you took alone, which
    follow-up task you opened. When an epic closes and follow-ups were noted, build one task

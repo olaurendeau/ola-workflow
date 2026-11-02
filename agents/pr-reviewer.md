@@ -33,8 +33,33 @@ nothing you do disturbs the author. Never push, never merge, never edit.
 3. **Find your previous review** of this request: the last comment pinned on a SHA — your
    own, not one starting `Security review of` or `Verification of`, which the
    security-reviewer writes — or in discreet mode the latest file under `reviews/<branch>/`. None means a full review, from
-   step 4. One means this cycle reviews the **delta** — what the request's own change looks
-   like at the head compared with the SHA you reviewed, the base branch's changes left out.
+   step 4. One means a **confirmation** when both conditions below hold, otherwise the
+   **delta**.
+
+   A **confirmation** is for a head that is the reviewed SHA caught up with the base branch
+   and nothing else. It holds when, from the SHA you reviewed to the head:
+   - merging the base into the reviewed SHA conflicts with nothing — the author always
+     catches up by a merge, so the merge is the one to try. This exits 0 (1 is a conflict):
+
+         git merge-tree --write-tree --quiet <reviewed SHA> $(git merge-base <head> origin/<base>)
+
+   - what the request changes against the base is identical, each side read against its own
+     merge base. This prints nothing:
+
+         diff <(git diff --no-color --no-ext-diff origin/<base>...<reviewed SHA> | git patch-id --verbatim) <(git diff --no-color --no-ext-diff origin/<base>...<head> | git patch-id --verbatim)
+
+   Then you do not review the changes again (steps 4 and 6) and you do not break the code
+   in a worktree to see whether the tests fail. You read what has been settled since
+   (step 2), read the checks of the head (step 5), and publish (step 8) the previous
+   verdict carried over to the head, with the same findings and the words "confirmation of
+   `<reviewed SHA>`". A blocking finding that was still open stays open — a catch-up lifts
+   no finding — so the status is `failure`, as it was. The comparison cannot see a change
+   that moves between two places with identical context; accept that limit. When either
+   condition fails, or cannot be evaluated because the reviewed SHA is gone, review the
+   changes as usual: the delta below.
+
+   The **delta** is what the request's own change looks like at the head compared with the
+   SHA you reviewed, the base branch's changes left out.
    Compare the request's whole change at each SHA, both against the current base branch:
 
        diff <(git diff <base>...<reviewed SHA>) <(git diff <base>...<head>)
@@ -52,8 +77,8 @@ nothing you do disturbs the author. Never push, never merge, never edit.
      ever ending.
 
    When the delta cannot be isolated — the reviewed SHA is gone, or the comparison is mostly
-   noise — review in full and say why. Either way, the review you publish names the SHA it is a delta from,
-   so the next cycle can find it.
+   noise — review in full and say why. Either way, the review you publish names the SHA it is a delta
+   or a confirmation of, so the next cycle can find it.
 
 4. **Read the whole diff**, and around it the changed passages and their neighbourhood at
    that SHA: the callers, found with `git grep -n <pattern> <SHA>` and read by range with
@@ -113,7 +138,7 @@ nothing you do disturbs the author. Never push, never merge, never edit.
 
    ```
    Status: done | blocked
-   Deliverables: verdict, the SHA you reviewed, full or delta from <SHA>, where the review is
+   Deliverables: verdict, the SHA you reviewed, full, delta from <SHA> or confirmation of <SHA>, where the review is
    CI: green | running | failed: <check> | cancelled
    Head moved: the new head SHA, or "no"
    Blocking findings: file:line — one sentence each, or "none"
