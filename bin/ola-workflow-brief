@@ -172,10 +172,16 @@ if [ -n "$security_paths" ]; then
   printf '    git diff --name-only origin/%s...<SHA> --%s
 ' "$base" "$pathspec"
   echo
-  echo "A fix owes a new one only when this prints a file, from the SHA last reviewed:"
+  echo "A fix owes a new one only when this prints something: it compares what the pull"
+  echo "request changes against $base, in those paths, at the SHA last reviewed and at the new"
+  echo "one, each read against its own merge base with origin/$base — so what a catch-up"
+  echo "brought in does not count, nor does where a change sits in its file. The limit: a fix"
+  echo "that moves an identical change between two places with identical context is not seen"
+  echo "by this command; the pr-reviewer's diff of diffs still sees it:"
   echo
-  printf '    git diff --name-only <reviewed SHA>...<SHA> --%s
-' "$pathspec"
+  printf '    diff <(git diff --no-color --no-ext-diff origin/%s...<reviewed SHA> --%s | git patch-id --verbatim) <(git diff --no-color --no-ext-diff origin/%s...<SHA> --%s | git patch-id --verbatim)
+' \
+    "$base" "$pathspec" "$base" "$pathspec"
   echo
   cat <<'SECURITY'
 It reads at the SHA and runs nothing, so it takes no slot, nor does a verifier. Each blocking
