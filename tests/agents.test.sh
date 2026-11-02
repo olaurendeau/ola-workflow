@@ -1354,10 +1354,10 @@ case $step7 in
   *'settings file'*) ok "workflow-init: step 7 does not count what it lists" ;;
   *) ko "workflow-init: step 7 does not name the settings file" ;;
 esac
-readme_first=$(awk '/^### Writing the first one/{on=1; next} on && /^### /{exit} on' "$ROOT/README.md" | tr -s '\n ' ' ')
+readme_first=$(awk '/^### Writing the first one/{on=1; next} on && /^### /{exit} on' "$ROOT/docs/configuration.md" | tr -s '\n ' ' ')
 case $readme_first in
-  *'.claude/settings.json'*'autoCompactWindow'*) ok "README: \"Writing the first one\" says the skill also writes the session settings" ;;
-  *) ko "README: \"Writing the first one\" describes a skill that writes only the profile" ;;
+  *'.claude/settings.json'*'autoCompactWindow'*) ok "docs/configuration.md: \"Writing the first one\" says the skill also writes the session settings" ;;
+  *) ko "docs/configuration.md: \"Writing the first one\" describes a skill that writes only the profile" ;;
 esac
 case $init_skill in
   *'settings file too'*'commit'*) ok "workflow-init: the report says the settings file is the human's to commit" ;;
