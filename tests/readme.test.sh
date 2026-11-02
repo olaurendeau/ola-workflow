@@ -11,9 +11,10 @@
 #
 # Whether a stranger understands it after reading is judged by a person, in the final README.
 #
-# Each check is proved first on a throwaway file, where it can fail. On the real README a
-# clean verdict is also what a check that reads nothing prints, so a witness says each scan
-# read something.
+# The helpers that read the README (section, steps, nodes) are proved first on a throwaway
+# fixture, where they can fail; so are the length limit and the diagram's boxes. The other
+# checks read the real README, where a clean verdict is also what a scan that reads nothing
+# prints: a witness says each scan read something.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -52,9 +53,11 @@ diagram() {
   section "$1" | awk '/^```mermaid/ { on = 1; next } on && /^```/ { exit } on { print }'
 }
 
-# nodes <file> → the role named by each `id[role]` of the diagram, one per line, sorted.
+# nodes <file> → the label of each node of the diagram, one per line, sorted. A node is an id
+# followed by a shape: id[label], id(label), id((label)) or id{label}.
 nodes() {
-  diagram "$1" | grep -oE '[A-Za-z0-9_]+\[[^]]*\]' | sed -E 's/^[^[]*\[(.*)\]$/\1/' | sort -u
+  diagram "$1" | grep -oE '[A-Za-z0-9_]+(\[[^]]*\]|\(+[^)]*\)+|\{+[^}]*\}+)' |
+    sed -E 's/^[A-Za-z0-9_]+[[({]+//; s/[])}]+$//' | sort -u
 }
 
 # Fixture: a section that is right, then one fault at a time.
@@ -88,6 +91,12 @@ sed 's/^  co\[coordinator\]/  co[coordinator] --> hu[the human]\n  co[coordinato
 nodes "$WORK/human.md" | grep -qx 'the human' &&
   ok "a box for the human would be read as a node, so the comparison with agents/ refuses it" ||
   ko "a box for the human is not read as a node"
+for shape in 'hu((you))' 'hu(you)' 'hu{you}' 'hu([you])'; do
+  sed "s/^  co\[coordinator\]/  co[coordinator] --> $shape\n  co[coordinator]/" "$good" >"$WORK/shape.md"
+  nodes "$WORK/shape.md" | grep -qx 'you' &&
+    ok "a human box written $shape is read as a node too" ||
+    ko "a human box written $shape escapes the comparison with agents/"
+done
 
 # --- The real README ---------------------------------------------------------------------
 SEC=$(section "$README")
@@ -158,6 +167,13 @@ printf '%s\n' "$SEC" | grep -q '^###' && ko "the section has a subsection" || ok
 [ "$(section "$WORK/long.md" | wc -l | tr -d ' ')" -gt "$MAX_SECTION" ] &&
   ok "fixture: a section of more than $MAX_SECTION lines is measured as over" ||
   ko "fixture: the length is not measured"
+
+# The two things a stranger would get wrong: who merges, and the steps a change may skip.
+printf '%s\n' "$SEC" | grep -qi 'sensitive' && printf '%s\n' "$SEC" | grep -qi 'nobody' &&
+  ok "the section says who else merges (sensitive paths) and when nobody does" ||
+  ko "the section does not say who merges on sensitive paths, or when nobody does"
+printf '%s\n' "$SEC" | grep -qiE 'skips steps? [0-9]' &&
+  ok "the section says which steps a change may skip" || ko "the section does not say which steps may be skipped"
 
 # C0.8: the example stays in the walkthrough: linked, not copied.
 printf '%s\n' "$SEC" | grep -qE '\]\(docs/walkthrough\.md[^)]*\)' &&

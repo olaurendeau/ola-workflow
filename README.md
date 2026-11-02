@@ -11,33 +11,31 @@ same plugin drives a project you own and a repository you contribute to twice a 
 
 ## How it works
 
-You talk to one agent, the **coordinator**. It reads the project's *profile*, one file that
-holds its rules (base branch, check commands, *slots*: numbers that keep parallel work apart),
-and hands the work on, in this order. Each step starts from what the last one left on GitHub.
+You talk to one agent, the **coordinator**. It hands the work from role to role, in the steps
+below. Each reads **role** — what it does — what it produces. A change that no user sees and that
+fits one pull request skips steps 2 to 4.
 
-1. **coordinator** — frames your request — a framing. It asks you only if the goal is unclear.
-2. **product-designer** — writes what "done" means and the words users read — the epic, an issue. You decide what a user sees.
-3. **design-reviewer** — judges the design, for visual work only — a verdict. The designer revises.
-4. **architect** — splits the epic — ordered tasks, as issues. Anything new in dependencies is yours.
+1. **coordinator** — asks you only if your goal is unclear — a request in one sentence.
+2. **product-designer** — says what "done" means, and the words users read — a spec.
+3. **design-reviewer** — checks the design, for visual work only — a verdict. You settle a dispute.
+4. **architect** — splits the spec into small tasks — one issue per task.
 5. **developer** — builds one task, test first, in its own worktree — a pull request.
-6. **pr-reviewer** — reviews what it did not write — a verdict and the `agent-review` status.
-7. **security-reviewer** — reads changes to declared `security.paths` — findings, each checked twice.
-8. **coordinator** — merges once the checks are green and the review is clean — a merged pull request.
+6. **pr-reviewer** — reviews what it did not write — a verdict and an `agent-review` status.
+7. **security-reviewer** — also reads changes to paths the project lists as sensitive — findings, each blocking one read again.
+8. **coordinator** — merges once the checks, the review status and any security review are green.
+   You merge instead when a change touches a sensitive path; in a repository that is not yours, nobody does.
 
 ```mermaid
 flowchart TD
-  co[coordinator] -->|"you: what is done"| pd[product-designer]
-  pd -->|"visual work"| dr[design-reviewer]
-  dr -->|"verdict"| pd
-  pd -->|"epic"| ar[architect]
+  co[coordinator] -->|"request, framed with you"| pd[product-designer]
+  pd <-->|"visual work: design, verdict"| dr[design-reviewer]
+  pd -->|"spec"| ar[architect]
   ar -->|"tasks"| co
-  co -->|"one task, one slot"| dv[developer]
+  co -->|"a task; findings to fix"| dv[developer]
   dv -->|"pull request"| pr[pr-reviewer]
-  pr -->|"blocking findings"| dv
-  pr -->|"clean review"| co
-  co -.->|"declared paths"| sr[security-reviewer]
-  sr -.->|"confirmed findings"| dv
-  co -->|"merge; sensitive paths: you"| co
+  pr -->|"verdict, status"| co
+  co -.->|"sensitive paths"| sr[security-reviewer]
+  sr -.->|"findings"| co
 ```
 
 The agents decide the rest alone, taking the option closest to existing code. Yours to decide:
@@ -47,12 +45,14 @@ The agents decide the rest alone, taking the option closest to existing code. Yo
 - Process and security: CI, rulesets, quality thresholds, hooks, agent definitions.
 - Release: whether to release, and the version. The release is your act.
 
-The memory is GitHub itself (issues, labels, the review status) in *integrated* mode, your
-own project; in *discreet* mode, for a repository that is not yours, local files. See
-[Configuration](docs/configuration.md).
-GitHub refuses two acts to every role but its owner: merging, kept by the coordinator, and the
-review status, kept by the pr-reviewer. Pushing to the base branch, tags and releases rest on
-the agents' rules alone: see [GitHub tokens](docs/github-tokens.md#what-it-does-not-stop).
+Each role writes down what the next needs: on GitHub (issues, labels, the `agent-review` status) in
+your own project, in local files in a repository that is not yours. A project opts in with a profile
+file; without one, nothing happens. See [Configuration](docs/configuration.md).
+
+Each role works with its own GitHub token. GitHub refuses two acts to the others: merging, kept by
+the coordinator, and setting the review status, kept by the pr-reviewer. Pushing to the base
+branch, tags and releases rest on the agents' rules alone: see [GitHub tokens](docs/github-tokens.md#what-it-does-not-stop).
+
 A whole request, step by step, is in the [walkthrough](docs/walkthrough.md).
 
 ## Install
