@@ -39,12 +39,11 @@ trap 'rm -rf "${WORK:?}"' EXIT
 cat >"$WORK/links.pl" <<'PERL'
 use strict; use warnings; use utf8;
 use File::Basename qw(dirname);
-use Encode qw(decode encode);
+use Encode qw(decode);
 binmode(STDOUT, ':utf8');
-# Paths are characters here and bytes only at the filesystem: argv is decoded once, and `fs()`
-# encodes at each open and each test, so a non-ASCII checkout path is not double-encoded.
+# Paths are characters here: argv is decoded once, so a non-ASCII checkout path is not
+# double-encoded when it is printed.
 my ($root, @files) = map { decode('UTF-8', $_) } @ARGV;
-sub fs { encode('UTF-8', shift) }
 # %XX is a byte; a run of them is UTF-8 and decodes to characters, not to one char per byte.
 sub unescape { my $x = shift; $x =~ s/((?:%[0-9A-Fa-f]{2})+)/decode('UTF-8', pack('H*', join '', $1 =~ m{%(..)}g))/ge; $x }
 my %cache;
@@ -74,7 +73,7 @@ sub scan {
   my $f = shift;
   return @{$cache{$f}} if $cache{$f};
   my (%anchors, @links, %seen);
-  open(my $fh, '<:encoding(UTF-8)', fs($f)) or return ({}, []);
+  open(my $fh, '<:encoding(UTF-8)', $f) or return ({}, []);
   my ($fence, $n) = ('', 0);
   while (my $line = <$fh>) {
     $n++;
@@ -117,8 +116,8 @@ for my $file (@files) {
         $p eq ''         ? $file
       : $p =~ m{^/}      ? "$root$p"
       :                    dirname($file) . "/$p";
-    unless (-e fs($target)) { print "ERR $rel:$n: $t points at a file that does not exist\n"; next; }
-    next unless defined $a && length $a && -f fs($target) && $target =~ /\.md$/;
+    unless (-e $target) { print "ERR $rel:$n: $t points at a file that does not exist\n"; next; }
+    next unless defined $a && length $a && -f $target && $target =~ /\.md$/;
     $a = unescape($a);
     my ($anchors) = scan($target);
     print "ANCHOR $rel:$n $t\n";
@@ -164,13 +163,13 @@ fi
 # characters alike would double-encode it and every link would be reported missing.
 ux=$WORK/répertoire
 mkdir -p "$ux/docs"
-printf '%s\n' '# U' '' '## Run `gh pr merge <n>`' '' '## _emph_ word' '' '## a snake_case word' '' \
-  '## Café déjà' '' '[a](#run-gh-pr-merge-n), [b](#emph-word), [c](#a-snake_case-word),' \
+printf '%s\n' '# U' '' '## Run `gh pr merge <n>`' '' '## _emph_ word' '' '## __init__ method' '' '## a snake_case word' '' \
+  '## Café déjà' '' '[a](#run-gh-pr-merge-n), [b](#emph-word), [h](#init-method), [c](#a-snake_case-word),' \
   '[d](#caf%C3%A9-d%C3%A9j%C3%A0), [e](fichi%C3%A9.md), [f](fichi%C3%A9.md#fichi%C3%A9), [g](fichié.md)' >"$ux/docs/u.md"
 printf '# fichié\n' >"$ux/docs/fichié.md"
 unicode=$(check_links "$ux" "$ux/docs/u.md")
-if [ "$(printf '%s\n' "$unicode" | grep -c '^LINK ')" = 7 ] && ! printf '%s\n' "$unicode" | grep -q '^ERR '; then
-  ok "links: <n> in a code span, an emphasised word, a snake_case word and %XX as UTF-8 resolve, under a non-ASCII path"
+if [ "$(printf '%s\n' "$unicode" | grep -c '^LINK ')" = 8 ] && ! printf '%s\n' "$unicode" | grep -q '^ERR '; then
+  ok "links: <n> in a code span, an emphasised word (_x_ and __x__), a snake_case word and %XX as UTF-8 resolve, under a non-ASCII path"
 else
   ko "links: GitHub's anchors or a non-ASCII path are refused: $(printf '%s' "$unicode" | grep -E '^ERR' | head -5 | tr '\n' '|')"
 fi
