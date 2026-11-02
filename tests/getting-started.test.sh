@@ -63,6 +63,11 @@ EOF
   awk '/^## 2\. / { exit 1 } /macOS/ { found = 1 } END { exit !found }' "$page" ||
     echo "macOS is not named before the install step"
   grep -qF '"github_tokens": "off"' "$page" || echo "the page does not give the \"github_tokens\": \"off\" line"
+  # The plugin's bin/ is on the PATH of a session's Bash calls only: a terminal needs the
+  # line that puts it there, and it comes before the first command the page runs from one.
+  grep -qF 'claude plugin list --json' "$page" || echo "the page does not put the plugin's bin/ on the PATH of a terminal"
+  awk '/ola-workflow-tokens setup$/ { exit !found } /claude plugin list --json/ { found = 1 }' "$page" ||
+    echo "the page runs ola-workflow-tokens setup before it puts bin/ on the PATH"
   # perl is for tests/run.sh alone
   ! grep -qiw 'perl' "$page" || echo "the page lists perl, which no user needs"
 }
@@ -95,8 +100,11 @@ if [ -s "$REAL" ]; then
   expect_defect "steps out of order" swapped "step 3 should start with"
   mutate nomac 's/macOS/the platform/g'
   expect_defect "macOS missing before the install" nomac "macOS is not named"
+  # shellcheck disable=SC2016
   mutate perl 's/^- `git`,$/- `git`, `perl`,/'
   expect_defect "perl listed as a prerequisite" perl "lists perl"
+  mutate nopath 's/claude plugin list --json/true/'
+  expect_defect "no PATH line for a terminal" nopath "on the PATH of a terminal"
   mutate five 's/^## 6\. /## /'
   expect_defect "a step lacking its number" five "six numbered steps"
   : >"$fx/empty.md"

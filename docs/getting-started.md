@@ -40,10 +40,22 @@ User scope is the default, which is what you want: install once, use everywhere.
 
 *If it fails:* run `claude plugin install --help` and compare with the line above.
 
+The plugin's commands (`ola-workflow-tokens`, `ola-profile`, and the others) are on the
+`PATH` of a Claude Code session's Bash calls, and nowhere else. In a terminal they are
+`command not found` until you add them. The install directory carries the plugin's version, so
+ask Claude Code where it is instead of typing it:
+
+```bash
+export PATH="$(claude plugin list --json | jq -r '.[] | select(.id == "ola-workflow@ola-workflow") | .installPath')/bin:$PATH"
+```
+
+This lasts for that terminal only. Run the line again in each new terminal where steps 3 and 5
+ask for a command, and after the plugin has been updated.
+
 ## 3. Create the tokens
 
-In a terminal, not in a Claude Code session: the command reads the tokens from your
-keyboard.
+In the terminal of step 2, not in a Claude Code session: the command reads the tokens from
+your keyboard, and refuses to run without one.
 
 ```bash
 ola-workflow-tokens setup
@@ -95,6 +107,8 @@ error, it is the plugin staying out of the way until `workflow-init` has run.
 
 ## 5. Check it
 
+In the project's directory, in the terminal of step 2:
+
 ```bash
 ola-profile validate
 ola-profile path
@@ -108,8 +122,10 @@ the one you just wrote, and nothing you configured is in effect.
 
 | you see | what it means |
 |---|---|
+| `command not found` | the plugin's `bin/` is not on this terminal's `PATH`. Run the `export` line of step 2 in it. |
 | `no profile found` | no profile applies to this directory. `ola-profile path` prints nothing and exits 1. Run step 4 in the project, not above it. |
-| `not valid JSON` | the file is not JSON, or not an object. It is named in the message. |
+| `not valid JSON` | the file is not JSON. It is named in the message. |
+| `profile: expected object, got array` | the file is JSON, but not an object: the message names the type it found. |
 | `profile/mode: "bogus" is not one of integrated, discreet` | a value the schema refuses, with its path in the profile. One line per problem. |
 
 Where a profile may live and which one wins: [How a project is configured](configuration.md#how-a-project-is-configured).
