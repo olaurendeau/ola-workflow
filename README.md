@@ -1,9 +1,9 @@
 # ola-workflow
 
 A team of Claude Code agents — a coordinator, a product designer and an independent design
-reviewer, an architect, developers working in isolated worktrees, and an independent PR
-reviewer — whose two irreversible acts, merging and setting the review status, GitHub itself
-keeps with the role that owns them.
+reviewer, an architect, developers working in isolated worktrees, an independent PR
+reviewer and, on the paths a project declares, a security reviewer — whose two irreversible
+acts, merging and setting the review status, GitHub itself keeps with the role that owns them.
 
 The workflow is **generic**: everything project-specific lives in a profile file, so the
 same plugin drives a project you own and a repository you contribute to twice a year
@@ -40,7 +40,8 @@ the prompts carry and nothing applies, which is a different thing from a rule. S
 In place: the manifests, the CI,
 the test harness, the answer to how a plugin agent is identified (see
 [Agent identity](#agent-identity)), the project profile with its schema and its
-`ola-profile` CLI, the **seven agents** — a coordinator that frames and dispatches, a product
+`ola-profile` CLI, the **seven roles** (`agents/` also ships `probe`, a measuring tool that
+is no part of the flow) — a coordinator that frames and dispatches, a product
 designer that turns a request into criteria a test can prove and the words a user reads, and
 for visual work publishes the design as a claude.ai artifact it keeps at one URL, a design
 reviewer that judges that page against the epic, an architect that splits an
@@ -57,7 +58,7 @@ exit before doing anything, and its sessions keep your own GitHub login.
 | step | content |
 |---|---|
 | A3 | pushing to the base branch, tags, releases, repository settings |
-| A4 | declarative `commands[]` rules, discreet mode's prohibitions, the conditional merge gate |
+| A4 | declarative `commands[]` rules, discreet mode's prohibitions on the forge and on pushing (a merge and a review status are refused there too, by the tokens), the conditional merge gate |
 | A6 | the `verify-ui` skill, then 1.0.0 |
 
 Until the merge gate exists, the coordinator checks it by hand against the forge: GitHub
@@ -228,9 +229,10 @@ what is read.
 Two details of that identity, both deliberate. An IPv6 host keeps its address and loses its
 brackets (`ssh://git@[fd00::1]/srv/app.git` → `fd00::1/srv/app`), so two spellings of one
 address give two profile directories — a split, never a collision. And `ola-profile id`
-prints the host it parsed: a remote URL carrying credentials will have part of that URL
-read back, which ends up in agent transcripts. Credentials belong in a credential helper,
-not in a remote URL.
+prints `<host>/<owner>/<repo>`, but it does not guarantee that the credentials of a remote
+URL are removed: such a remote can appear in its output (see
+[#137](https://github.com/olaurendeau/ola-workflow/issues/137)). They do not belong in a
+remote URL anyway, which any `git remote -v` shows: use a credential helper.
 
 No profile means no effect: the hook exits 0 and the agents offer to run
 `/ola-workflow:workflow-init`, the skill that writes one.
@@ -331,8 +333,7 @@ Two scripts, on the PATH of every Bash call:
   that one.
 - `ola-workflow-pr-assets <pr> <file.png>...` pushes the files to the `pr-assets` branch,
   at `<pr>/<name>.png`, and prints one markdown line per file for the description. The link
-  is a `blob/pr-assets/...?raw=true` one, which GitHub shows in the pull request of a
-  private repository to whoever can read it.
+  is a `blob/pr-assets/...?raw=true` one.
 
 `pr-assets` is as readable as the repository: capture development data only. Captures are
 written outside the worktree and are never committed.
@@ -388,7 +389,7 @@ What this means:
   `.claude/settings.json`, which is how a project pins its default agent:
   `"agent": "ola-workflow:coordinator"`. `--agent` additionally accepts the bare name
   (resolved by `:`-suffix), and a missing `--agent` is fatal while a missing settings `agent`
-  only warns.
+  does not stop the session.
 - **The Agent tool is different: `subagent_type` is an exact match.** A bare name does not
   resolve to a plugin agent:
 
@@ -447,7 +448,7 @@ whoever runs it.
 
 ```bash
 make check     # everything the CI runs: lint, test, validate
-make lint      # shellcheck, in its own container (nothing to install)
+make lint      # shellcheck, in its own container (needs Docker, nothing else to install)
 make test      # the bash suites: tests/run.sh
 make validate  # claude plugin validate --strict .
 make spike     # replays the agent-identity spike
@@ -458,10 +459,10 @@ scripts/token-cost.sh [--since D] [--until D] <dir>...  # weighted token cost pe
 ### One writing convention, enforced by the suite
 
 `tests/agents.test.sh` checks that every `ola-workflow:<name>` written in an agent prompt,
-in `ola-workflow-brief` or in this README resolves to something shipped, and that a command
-this plugin provides is never written as a bare `/name`. Both catch the same defect: a
-prompt that offers a human a command which does not exist, found only at the one moment the
-plugin had to explain itself.
+in a skill, in `ola-workflow-brief` or in this README resolves to something shipped, and
+that a command this plugin provides is never written as a bare `/name`. Both catch the
+same defect: a prompt that offers a human a command which does not exist, found only at
+the one moment the plugin had to explain itself.
 
 The convention that follows, and the reason it exists: **do not write this plugin's
 namespace followed by something that is not one of its commands, and do not write a role or
@@ -479,7 +480,8 @@ more path follows it — and the question is asked the safe way round: an offer 
 the start of a line, a blank or a tab, a quote (single, double or back), or an opening paren
 or bracket. Eight positions in all; everything else is a path. Five earlier versions listed
 what precedes a *path* instead, and each was one character short of refusing a true sentence;
-the last one refused `$profile_dir/runs/<slug>/developer`, a path the brief itself writes.
+the last one refused `$profile_dir/runs/<slug>/developer`, a path whose last segment happens
+to be a role name.
 
 Those eight are pinned in `tests/agents.test.sh` by **measurement**: every printable character
 is put in front of a role name and the set that makes an offer is compared with the set this
@@ -497,6 +499,7 @@ for three cycles and failed on ordinary sentences about image tags, log lines an
 time it was narrowed.
 
 The test suites fake `PreToolUse` payloads and never execute the commands they contain.
-They need `bash`, `jq`, `perl` and `git` only — the suites build throwaway repositories —
-and run identically on macOS (bash 3.2) and on CI. `tests/run.sh` refuses up front when one
-is missing, rather than failing a hundred assertions that name the wrong cause.
+They need `bash`, `jq` 1.5 or later, `perl` and `git` only — the suites build throwaway
+repositories — and run identically on macOS (bash 3.2) and on CI. `tests/run.sh` refuses up
+front when one is missing, rather than failing a hundred assertions that name the wrong
+cause.
