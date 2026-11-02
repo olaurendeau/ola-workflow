@@ -1095,6 +1095,48 @@ case $step8 in
   *'fresh session'*'forge'*'memory'*) ok "coordinator: offers a fresh session when an epic closes" ;;
   *) ko "coordinator: does not offer a fresh session when an epic closes" ;;
 esac
+# Suggestions: a suggestion costs a whole cycle (developer, review, CI) when it is fixed on
+# its own, so "fix now" is tied to a cycle already owed, and the rest are noted, not opened as
+# tasks. The bullet is read on its own: the same words elsewhere in step 6 prove nothing.
+sugg=$(printf '%s' "$step6" | sed 's/.*\*\*Suggestions\*\*/**Suggestions**/; s/- \*\*A security review\*\*.*//')
+case $sugg in
+  '**Suggestions**'*) ok "witness: coordinator step 6 has a Suggestions bullet" ;;
+  *) ko "witness: coordinator step 6 has no Suggestions bullet to read" ;;
+esac
+case $sugg in
+  *'Fix now'*'only if a cycle is already owed'*'blocking finding'*'confirmed security finding'*'failing check'*'same dispatch'*)
+    ok "coordinator: a suggestion is fixed now only when a cycle is already owed, and travels with it" ;;
+  *) ko "coordinator: a suggestion can cost a cycle of its own" ;;
+esac
+case $sugg in
+  *'Follow-up'*'otherwise'*'where the epic lives'*'integrated mode'*'comment'*'Follow-ups of #'*'discreet mode'*'epic.md'*'No task per suggestion'*)
+    ok "coordinator: other suggestions are noted where the epic lives, with no task per suggestion" ;;
+  *) ko "coordinator: nothing says where a suggestion triaged as a follow-up is noted" ;;
+esac
+case $sugg in
+  *'Reject'*'reason'*'Publish the triage'*) ok "coordinator: a rejected suggestion carries a reason, and the triage is published" ;;
+  *) ko "coordinator: a rejected suggestion can be dropped without a reason or a publication" ;;
+esac
+case $coord_all in
+  *'keep as a follow-up task'*) ko "coordinator: still opens a follow-up task per suggestion" ;;
+  *) ok "coordinator: opens no follow-up task per suggestion" ;;
+esac
+case $step8 in
+  *'epic closes'*'follow-ups'*'noted'*'one task'*'all of them'*'files'*'proves'*'report'*)
+    ok "coordinator: closing an epic builds one task from its noted follow-ups, and reports it" ;;
+  *) ko "coordinator: closing an epic does not group its follow-ups into one task" ;;
+esac
+case $step8 in
+  *'without an epic'*'single task'*'one task when its pull request is merged'*)
+    ok "coordinator: a request without an epic groups its follow-ups when its pull request merges" ;;
+  *) ko "coordinator: a single-task request leaves its follow-ups ungrouped" ;;
+esac
+case $coord_all in
+  *'The human rules a security finding a false positive'*'open a task that adds it'*)
+    ok "coordinator: the security precedent task is kept, it is no suggestion" ;;
+  *) ko "coordinator: the security precedent task is gone" ;;
+esac
+
 case $coord_all in
   *'only the Report block'*) ok "coordinator: asks an agent for its Report block only" ;;
   *) ko "coordinator: asks for a detailed account that stays in its context" ;;
