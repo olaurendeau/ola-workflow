@@ -11,9 +11,11 @@
 # block is invented — a block opens with a line saying "Example", or each of its lines is
 # found in agents/, bin/ or skills/.
 #
-# Every check is a function proved first on a throwaway file, where it can fail. On the real
-# page a clean verdict is also what a check that reads nothing prints, so each scan reports
-# what it read, and a witness beside the real run says it read something.
+# The checks on the page's content (roles, sections, code blocks) are functions proved first
+# on a throwaway file, where they can fail; the probe, link and agents/ file checks are inline
+# and have no fixture. On the real page a clean verdict is also what a check that reads
+# nothing prints, so each scan reports what it read, and a witness beside the real run says
+# it read something.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

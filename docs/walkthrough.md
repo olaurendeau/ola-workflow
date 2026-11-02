@@ -37,7 +37,8 @@ coordinator records the result as the *epic*, an issue labelled `epic`.
 - **Produces:** the epic, and for visual work a design page, written outside the repository
   and published as an artifact: its URL goes into the epic, so that the next request on the
   same screen starts from that page. A developer's task later copies the page into
-  `docs/design/<slug>/` with its README.
+  the project's design directory (`docs/design/<slug>/` by default, set by `context.design`)
+  with its README.
 - **You decide:** whether the design is published when the project's rules wait for your
   answer. A no is final for this design: it stays a local page.
 
