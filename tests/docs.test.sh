@@ -294,6 +294,32 @@ EOF
   ;;
 esac
 
+# --- The page of the GitHub tokens ---------------------------------------------------------
+# The section moved out of the README (#126), and a page that lost a part of it in the move
+# would still pass the link check. Each part is named by what the reader looks it up for.
+TOKENS_PAGE=$ROOT/docs/github-tokens.md
+tokens_need() { # tokens_need <label> <fixed string>
+  if [ -f "$TOKENS_PAGE" ] && grep -qF -- "$2" "$TOKENS_PAGE"; then
+    ok "tokens page: $1"
+  else
+    ko "tokens page: $1 is missing from docs/github-tokens.md (looked for '$2')"
+  fi
+}
+tokens_need "the table of the three tokens, merge row" '| coordinator | `gh pr merge <N> --squash --match-head-commit <SHA>` | merge |'
+tokens_need "the table of the three tokens, review row" '| pr-reviewer | `gh api repos/{owner}/{repo}/statuses/<SHA>'
+tokens_need "the table of the three tokens, base row" '| everyone | anything else | base |'
+tokens_need "the setting up" '## Setting them up'
+tokens_need "the command that creates the tokens" 'ola-workflow-tokens setup'
+tokens_need "what it does not stop" '## What it does not stop'
+tokens_need "the wiring of the session hook" '[`hooks/session.sh`](../hooks/session.sh)'
+tokens_need "the wiring of the elevating hook" '[`hooks/elevate.sh`](../hooks/elevate.sh)'
+tokens_need "the way out when the tokens are off" '"github_tokens": "off"'
+if grep -qE '^#{1,3} (GitHub tokens|Setting them up|What it does not stop)$' "$ROOT/README.md"; then
+  ko "tokens page: the README still holds a section that moved to docs/github-tokens.md"
+else
+  ok "tokens page: the README no longer holds the sections that moved"
+fi
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total docs test(s) failed"
   exit 1
