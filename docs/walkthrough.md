@@ -8,23 +8,25 @@ Example
 Add a filter to the list of orders, so I can see only the ones that are late.
 ```
 
-The project is yours (mode *integrated*: the issues, labels and review status live on GitHub),
-it has a *profile* (the file that tells the plugin its base branch, its check commands, its
-slots), and the filter changes what a user sees. Each step starts from what the previous one
-left on GitHub, which is the workflow's memory. Anything marked Example below is made up for
-this page; nothing else on it is.
+The project is yours (mode *integrated*: the issues, labels and review status live on GitHub)
+and it has a *profile* (the file that tells the plugin its base branch, its check commands,
+its slots). Each step starts from what the previous one left on GitHub, which is the
+workflow's memory. What is made up on this page is the request above and each line that
+starts with "Example:"; nothing else is.
+
+Example: the filter changes what a user sees.
 
 ## 1. coordinator — frames the request
 
 You talk to the coordinator, the main session, and only to it. It runs `ola-workflow-brief`
 to read the project's rules, restates your request in one sentence and, if the goal or the
 success criteria are ambiguous, asks you with two to four options and a recommendation.
-Because the filter changes what a user sees, it goes through the design steps; a fix or a
-test that nobody sees would skip them and go straight to the tasks.
+A request that changes what a user sees goes through the design steps; a fix or a test that
+nobody sees would skip them and go straight to the tasks.
 
 - **Produces:** a framing, nothing on GitHub yet.
-- **You decide:** what "finished" means, when your sentence leaves it open: late since when?
-  Which orders?
+- **You decide:** what "finished" means, when your sentence leaves it open.
+  Example: late since when? Which orders?
 
 ## 2. product-designer — writes down what "done" means
 
@@ -32,7 +34,10 @@ The product-designer turns the request into a problem, user stories, acceptance 
 the exact words a user will read. For visual work it also builds the page of the design. The
 coordinator records the result as the *epic*, an issue labelled `epic`.
 
-- **Produces:** the epic, and for visual work a design page under `docs/design/<slug>/`.
+- **Produces:** the epic, and for visual work a design page, written outside the repository
+  and published as an artifact: its URL goes into the epic, so that the next request on the
+  same screen starts from that page. A developer's task later copies the page into
+  `docs/design/<slug>/` with its README.
 - **You decide:** whether the design is published when the project's rules wait for your
   answer. A no is final for this design: it stays a local page.
 
@@ -52,8 +57,8 @@ The architect turns the epic into a design and an ordered list of tasks, each wi
 its tests, its dependencies and what "done" means. The coordinator creates each task as an
 issue labelled `task`, a sub-issue of the epic.
 
-- **Produces:** the tasks, in dependency order. For the filter: one task for the filter
-  itself, one for the words, if they are separate.
+- **Produces:** the tasks, in dependency order.
+  Example: one task for the filter itself, one for the words, if they are separate.
 - **You decide:** nothing routine. A task that needs a new runtime dependency, or a major
   version upgrade, is yours to approve.
 
@@ -84,8 +89,10 @@ commit status named `agent-review` on the head SHA it read.
 - **Suggestions** are sorted by the coordinator: fixed now if a cycle is already owed, noted
   on the epic as a follow-up, or rejected with a reason.
 - **Produces:** the review status on the SHA, and the triage published on the pull request.
-- **You decide:** when the developer and the reviewer disagree and the coordinator judges the
-  finding a false positive, or when one survives two cycles, you rule.
+- **You decide:** when the developer disputes a finding, or one survives two cycles, the
+  coordinator judges it first: a valid finding goes back to the developer, with no question
+  to you. Only a finding it judges a false positive comes to you, and your answer is
+  recorded so that the reviewer treats it as settled.
 
 ## 7. security-reviewer — only when the change touches a declared path
 
@@ -95,7 +102,7 @@ finding it reports is checked by a second security-reviewer that reads it cold, 
 confirmed finding goes to a developer. It sets no status; the coordinator waits for it all
 the same.
 
-The filter touches none of those paths, so this step does not happen for our request.
+Example: the filter touches none of those paths, so this step does not happen for our request.
 
 - **Produces:** findings, each confirmed or refuted.
 - **You decide:** a finding you rule a false positive is recorded in the project's security
