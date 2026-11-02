@@ -1160,6 +1160,79 @@ case $(cat "$ROOT/skills/workflow-init/SKILL.md") in
   *) ko "workflow-init: nothing says preview is asked for" ;;
 esac
 
+# --- workflow-init writes the session settings, in integrated mode only ---------------
+# The coordinator's context is reread on every call, and the session only summarises itself
+# near the end of a 1M window. `autoCompactWindow` moves that to 250k; it lives in the
+# project's `.claude/settings.json`, next to `agent`, so workflow-init has to write it.
+init_skill=$(tr -s '\n ' ' ' < "$ROOT/skills/workflow-init/SKILL.md")
+# The integrated passage: from its marker to the next numbered step.
+passage=$(awk '/^ *\*\*The session settings/{on=1} on && /^[0-9]+\. /{exit} on' "$ROOT/skills/workflow-init/SKILL.md" | tr -s '\n ' ' ')
+case $passage in
+  *'`"agent": "ola-workflow:coordinator"`'*) ok "workflow-init: the integrated passage writes the coordinator as the agent" ;;
+  *) ko "workflow-init: the integrated passage does not write \"agent\": \"ola-workflow:coordinator\"" ;;
+esac
+case $passage in
+  *'`"autoCompactWindow": 250000`'*) ok "workflow-init: the integrated passage writes the auto-compact window at 250000" ;;
+  *) ko "workflow-init: the integrated passage does not write \"autoCompactWindow\": 250000" ;;
+esac
+case $passage in
+  *'read it and keep its other keys'*) ok "workflow-init: the integrated passage keeps the other keys of an existing file" ;;
+  *) ko "workflow-init: the integrated passage does not say it keeps the other keys" ;;
+esac
+case $passage in
+  *'`agent` is already there with another value'*'ask the human before replacing'*) ok "workflow-init: a different existing agent is asked about before it is replaced" ;;
+  *) ko "workflow-init: nothing says a different existing agent is asked about before it is replaced" ;;
+esac
+case $passage in
+  *'`autoCompactWindow` is already there with another value'*'ask the human'*) ok "workflow-init: a different existing auto-compact window is shown and asked about" ;;
+  *) ko "workflow-init: nothing says a different existing auto-compact window is asked about" ;;
+esac
+case $passage in
+  *'keeps another `agent`'*'`autoCompactWindow` is still written'*) ok "workflow-init: the auto-compact window is still written when the human keeps another agent" ;;
+  *) ko "workflow-init: nothing says the auto-compact window is still written when the human keeps another agent" ;;
+esac
+discreet_says() {
+  case $1 in
+    *'In `discreet` mode this setting is not written in the repository'*'`.claude/settings.local.json`'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if discreet_says "$init_skill"; then
+  ok "workflow-init: in discreet mode the setting is not written in the repository"
+else
+  ko "workflow-init: nothing says the setting is not written in the repository in discreet mode"
+fi
+# Witness: the matcher must refuse the opposite sentence, or the check above proves nothing.
+if discreet_says 'In `discreet` mode this setting is written in the repository, in `.claude/settings.local.json`'; then
+  ko "workflow-init: the discreet matcher accepts the opposite sentence"
+else
+  ok "workflow-init: the discreet matcher refuses the opposite sentence"
+fi
+case $init_skill in
+  *'`.claude/settings.local.json`'*'by hand'*'check-ignore'*) ok "workflow-init: a settings.local.json made by hand is checked for being git-ignored" ;;
+  *) ko "workflow-init: nothing says to check that a hand-made settings.local.json is git-ignored" ;;
+esac
+step7=$(awk '/^7\. \*\*Report/{on=1} on && /^## /{exit} on' "$ROOT/skills/workflow-init/SKILL.md" | tr -s '\n ' ' ')
+case $step7 in
+  *'three things'*) ko "workflow-init: step 7 still says it names three things, and lists more" ;;
+  *'settings file'*) ok "workflow-init: step 7 does not count what it lists" ;;
+  *) ko "workflow-init: step 7 does not name the settings file" ;;
+esac
+readme_first=$(awk '/^### Writing the first one/{on=1; next} on && /^### /{exit} on' "$ROOT/README.md" | tr -s '\n ' ' ')
+case $readme_first in
+  *'.claude/settings.json'*'autoCompactWindow'*) ok "README: \"Writing the first one\" says the skill also writes the session settings" ;;
+  *) ko "README: \"Writing the first one\" describes a skill that writes only the profile" ;;
+esac
+case $init_skill in
+  *'settings file too'*'commit'*) ok "workflow-init: the report says the settings file is the human's to commit" ;;
+  *) ko "workflow-init: the report does not say the settings file is the human's to commit" ;;
+esac
+if jq -e '.agent == "ola-workflow:coordinator" and .autoCompactWindow == 250000' "$ROOT/.claude/settings.json" >/dev/null; then
+  ok "this repository's settings.json sets the coordinator and the 250000 auto-compact window"
+else
+  ko "this repository's settings.json lacks the coordinator or the 250000 auto-compact window"
+fi
+
 # --- Dispatch names are namespaced ----------------------------------------------------
 # subagent_type is an exact match: a bare name does not resolve to a plugin agent, and the
 # spike in the README is where that was measured. A coordinator that writes `developer`
