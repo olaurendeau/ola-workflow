@@ -4,7 +4,7 @@
 #   SC2016: the backticks in single quotes below are the Markdown being tested, not a command.
 # What the documentation promises and the repository can check: every relative link of the
 # README and of docs/ resolves to a file, and every anchor to a heading; and the table of
-# profile keys in the README is the schema's own list of keys.
+# profile keys in docs/configuration.md is the schema's own list of keys.
 #
 # Each check is proved on a throwaway tree first. On the real tree a clean verdict is also
 # what a check that reads nothing prints, so the fixtures are what say the check can fail,
@@ -368,8 +368,7 @@ config_need() { # config_need <label> <fixed string>
 config_need "the user's location" '/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json'
 config_need "the project's location" '<project>/.claude/workflow.json'
 config_need "the precedence: the user's profile wins" '**Your own profile wins**'
-config_need "the unusable profile that still wins" 'One
-that is there but unusable'
+config_need "the unusable profile that still wins" 'that is there but unusable — corrupt, empty, not even a file — still wins'
 config_need "no profile, no effect" 'No profile means no effect'
 config_need "the first profile" '### Writing the first one'
 config_need "the slot placeholder" 'Any string value may hold `{slot}`'
