@@ -51,9 +51,12 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    Then you do not review the changes again (steps 4 and 6) and you do not break the code
    in a worktree to see whether the tests fail. You read what has been settled since
    (step 2), read the checks of the head (step 5), and publish (step 8) the previous
-   verdict carried over to the head, with the same findings and the words "confirmation of
-   `<reviewed SHA>`". A blocking finding that was still open stays open — a catch-up lifts
-   no finding — so the status is `failure`, as it was. The comparison cannot see a change
+   findings carried over to the head, with the words "confirmation of `<reviewed SHA>`".
+   The findings are carried, not the verdict: step 8 sets the status from them and from
+   the checks of the head, so a status that was `failure` is not republished as it was. A
+   blocking finding that was still open stays open — a catch-up lifts no finding — so the
+   status is `failure` while one is; with none open, it is `success` unless a required
+   check failed on the head. The comparison cannot see a change
    that moves between two places with identical context; accept that limit. When either
    condition fails, or cannot be evaluated because the reviewed SHA is gone, review the
    changes as usual: the delta below.

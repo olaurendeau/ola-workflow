@@ -943,6 +943,15 @@ case $prr in
     ok "pr-reviewer: a confirmation carries an open blocking finding, and a catch-up lifts none" ;;
   *) ko "pr-reviewer: nothing says a confirmation keeps an open blocking finding open" ;;
 esac
+# What is carried to the head is the findings, not the verdict: a republished `failure` would
+# keep the merge gate shut after a flaky check's rerun, or ignore a catch-up that breaks CI.
+case $prr in
+  *'previous verdict carried over'*)
+    ko "pr-reviewer: a confirmation carries the previous verdict over, and may republish a stale failure" ;;
+  *'The findings are carried, not the verdict: step 8 sets the status from them and from the checks of the head'*'with none open, it is `success` unless a required check failed on the head'*)
+    ok "pr-reviewer: a confirmation carries the findings and lets step 8 set the status from the head's checks" ;;
+  *) ko "pr-reviewer: nothing says a confirmation sets its status from the findings and the head's checks" ;;
+esac
 case $prr in
   *'cannot be evaluated because the reviewed SHA is gone, review the changes as usual'*)
     ok "pr-reviewer: a condition that cannot be evaluated sends back to the normal review" ;;
