@@ -146,3 +146,18 @@ That is not tidiness. Seven prompts restating the same facts drift apart one jus
 at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
 name a base branch, a check command, a review status, a slot value or a line budget, since
 those belong to the brief. Run it against an agent that hard-codes one and it says which.
+
+### Globs
+
+Every glob in a profile is a git pathspec `:(glob)`, and `schema/profile.schema.json` states
+the rule for whoever writes one. Two notes for whoever *implements* a key that consumes
+them:
+
+- **Let git do the matching** — `git diff --numstat base..head -- . ':(glob,exclude)<pattern>'`
+  does it inside the command that already counts lines. Re-implementing the dialect with a
+  shell `case` would silently widen `pr.exclude` and `sensitive_patterns[].exclude`, and
+  widening those two *removes* coverage, which is the one direction that matters.
+- **The recursion keys on literal versus glob**, not on the absence of a slash: `docs` and
+  `src/deep` pull in their subtrees, while `doc*`, `doc?` and `[dx]ocs` match nothing at
+  all. That is what makes the schema's own example sound — `Dockerfile*` cannot reach into a
+  neighbouring `Dockerfiles/`.
