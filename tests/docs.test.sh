@@ -227,8 +227,8 @@ fi
 # The first table of the page whose header begins with `| key |` is the list of profile
 # keys, and it is the schema's list of keys: in both directions, because a key the schema
 # has and the page lacks is undocumented, and a key the page has and the schema lacks is
-# documented and refused. #129 moves the table: that is the variable below.
-KEYS_PAGE=$ROOT/README.md
+# documented and refused. The table moved out of the README with #129: that is the variable below.
+KEYS_PAGE=$ROOT/docs/configuration.md
 SCHEMA=$ROOT/schema/profile.schema.json
 # `$schema` is a key of `properties` (so that an editor may point at the schema) and no row
 # of the table carries it: it is not a setting. Declared rather than filtered silently, so
@@ -351,6 +351,39 @@ if grep -qE '^#{1,3} (GitHub tokens|Setting them up|What it does not stop)$' "$R
   ko "tokens page: the README still holds a section that moved to docs/github-tokens.md"
 else
   ok "tokens page: the README no longer holds the sections that moved"
+fi
+
+# --- The page of the configuration ---------------------------------------------------------
+# The sections moved out of the README (#129). Each part is named by what the reader looks it
+# up for; the keys table is checked above, against the schema. Globs stay in the README
+# until #130.
+CONFIG_PAGE=$ROOT/docs/configuration.md
+config_need() { # config_need <label> <fixed string>
+  if [ -f "$CONFIG_PAGE" ] && grep -qF -- "$2" "$CONFIG_PAGE"; then
+    ok "configuration page: $1"
+  else
+    ko "configuration page: $1 is missing from docs/configuration.md (looked for '$2')"
+  fi
+}
+config_need "the user's location" '/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json'
+config_need "the project's location" '<project>/.claude/workflow.json'
+config_need "the precedence: the user's profile wins" '**Your own profile wins**'
+config_need "the unusable profile that still wins" 'One
+that is there but unusable'
+config_need "no profile, no effect" 'No profile means no effect'
+config_need "the first profile" '### Writing the first one'
+config_need "the slot placeholder" 'Any string value may hold `{slot}`'
+config_need "the CLI" 'ola-profile get check.affected --slot 3'
+config_need "the exit codes" 'Exit status 1 means the value asked for is not available'
+config_need "the profile of this repository" '[`.claude/workflow.json`](../.claude/workflow.json)'
+config_need "the table integrated / discreet" '|  | integrated | discreet |'
+config_need "the captures" '### Captures'
+config_need "where the rules live" '## Where the rules live'
+config_need "the link to the tokens page" '[GitHub tokens](github-tokens.md)'
+if grep -qE '^#{1,3} (How a project is configured|Writing the first one|Captures|Where the rules live)$' "$ROOT/README.md"; then
+  ko "configuration page: the README still holds a section that moved to docs/configuration.md"
+else
+  ok "configuration page: the README no longer holds the sections that moved"
 fi
 
 if [ "$failures" -gt 0 ]; then
