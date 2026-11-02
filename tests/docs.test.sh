@@ -230,24 +230,47 @@ fi
 # the move would still pass the link check; each part is named by what the reader looks it up for.
 CONTRIB_PAGE=$ROOT/docs/contributing.md
 CONTRIB_FILE=$ROOT/CONTRIBUTING.md
-contrib_need() { # contrib_need <label> <fixed string>
-  if [ -f "$CONTRIB_PAGE" ] && grep -qF -- "$2" "$CONTRIB_PAGE"; then
-    ok "contributing page: $1"
+# contrib_in <section heading> <label> <fixed string>: the string must be in that section, not
+# merely somewhere on the page, so that a word found in another section cannot stand for it.
+contrib_section() { # contrib_section <heading> → the text under that heading, up to the next one
+  awk -v h="$1" '/^#+ / { t = $0; sub(/^#+ /, "", t); if (on) exit; if (t == h) on = 1; next } on { print }' "$CONTRIB_PAGE"
+}
+contrib_in() {
+  local text # in a variable: under pipefail, grep -q closing the pipe early fails the test
+  text=$(contrib_section "$1" | tr '\n' ' ') # one line, so a rewrapped sentence still matches
+  if [ -f "$CONTRIB_PAGE" ] && grep -qF -- "$3" <<<"$text"; then
+    ok "contributing page: $2"
   else
-    ko "contributing page: $1 is missing from docs/contributing.md (looked for '$2')"
+    ko "contributing page: $2 is missing from the section '$1' of docs/contributing.md (looked for '$3')"
   fi
 }
+# A command is a line of the code block that starts with it, not any mention of its prefix
+# (`make spike` must not be satisfied by `make spike-artifact`).
 for cmd in 'make check' 'make lint' 'make test' 'make validate' 'make spike' 'scripts/token-cost.sh'; do
-  contrib_need "names \`$cmd\`" "$cmd"
+  if [ -f "$CONTRIB_PAGE" ] && grep -qE -- "^$cmd([[:space:]]|\$)" "$CONTRIB_PAGE"; then
+    ok "contributing page: names \`$cmd\`"
+  else
+    ko "contributing page: \`$cmd\` is not at the start of a line of docs/contributing.md"
+  fi
 done
+# A folder is a row of the layout table, not a mention in the prose: `docs/` is written in the
+# convention text and the profile paragraph whatever the table says.
 for dir in agents skills bin hooks schema tests docs; do
-  contrib_need "describes the folder $dir/" "\`$dir/\`"
+  contrib_in 'How the repository is laid out' "describes the folder $dir/" "| \`$dir/\` |"
 done
-contrib_need "keeps the writing convention" '### One writing convention, enforced by the suite'
-contrib_need "says when to write a decision, with a link to the journal" '(decisions/README.md)'
-contrib_need "names the Conventional Commits form" 'Conventional Commits'
-contrib_need "gives the line budget" '1000'
-contrib_need "says the coordinator merges" 'coordinator'
+contrib_in 'One writing convention, enforced by the suite' "keeps the writing convention" 'do not write this plugin'
+contrib_in 'A change' "names the Conventional Commits form" 'Conventional Commits'
+contrib_in 'A change' "gives the line budget" '1000 changed lines'
+contrib_in 'A change' "says the coordinator merges" 'merged by the coordinator'
+contrib_in 'A change' "says the human merges a sensitive path" 'merged by the human'
+# The rule on when to write an entry is the one of decisions/README.md: a page that kept a
+# shorter list would send a contributor away without the entry the journal asks for.
+for t in 'boundary of what a role can do' 'the model or the effort of a role' 'precedence or the format of the profile' \
+         'what is written where, according to the mode' 'a runtime dependency' 'founded on a measurement' \
+         'Not for a fix, a rename or a matter of style' '(decisions/README.md)' 'Decision: … — Reason: …'; do
+  contrib_in 'When a change needs a decision entry' "decision rule says '$t'" "$t"
+done
+contrib_in 'Development' "names the claude CLI that make validate needs" '`claude` CLI'
 if [ -s "$CONTRIB_FILE" ] && grep -qF '(docs/contributing.md)' "$CONTRIB_FILE"; then
   ok "contributing page: CONTRIBUTING.md exists and links docs/contributing.md"
 else

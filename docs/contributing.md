@@ -14,6 +14,17 @@ make spike-artifact  # prints how to replay the artifact spike, by hand
 scripts/token-cost.sh [--since D] [--until D] <dir>...  # weighted token cost per role, per model and per PR, raw and in $, from ~/.claude/projects/<slug>/
 ```
 
+What each command needs:
+
+- `make test` needs `bash`, `jq` 1.5 or later, `perl` and `git` only — the suites build
+  throwaway repositories and fake `PreToolUse` payloads, never executing the commands they
+  contain — and runs identically on macOS (bash 3.2) and on CI. `tests/run.sh` refuses up
+  front when one is missing, rather than failing a hundred assertions that name the wrong
+  cause.
+- `make lint` needs Docker.
+- `make validate` needs the `claude` CLI, on your `PATH`.
+- `make check` needs all of the above.
+
 ### How the repository is laid out
 
 | folder | holds |
@@ -41,10 +52,18 @@ this page does not copy it, so that it cannot drift from it.
 
 ### When a change needs a decision entry
 
-A change to the boundary of a role, a model, the precedence of the profile, what is written
-where, a runtime dependency, or a choice founded on a measurement is recorded in
-[`docs/decisions/`](decisions/README.md), which says when to write an entry and how. The
-`Decision: … — Reason: …` line of the pull request then links to the entry.
+A pull request that changes one of these is recorded in
+[`docs/decisions/`](decisions/README.md), which also says how to write an entry:
+
+- the boundary of what a role can do: tokens, hooks, what is enforced and what is only asked;
+- the model or the effort of a role;
+- the precedence or the format of the profile;
+- what is written where, according to the mode;
+- a runtime dependency;
+- a choice founded on a measurement.
+
+Not for a fix, a rename or a matter of style. The `Decision: … — Reason: …` line of the pull
+request then links to the entry.
 
 ### One writing convention, enforced by the suite
 
@@ -89,9 +108,3 @@ a sentence, which is not. That asymmetry is the whole reason it is written this 
 What is deliberately **not** checked at all: the namespace spelled wrong. That rule existed
 for three cycles and failed on ordinary sentences about image tags, log lines and SQL every
 time it was narrowed.
-
-The test suites fake `PreToolUse` payloads and never execute the commands they contain.
-They need `bash`, `jq` 1.5 or later, `perl` and `git` only — the suites build throwaway
-repositories — and run identically on macOS (bash 3.2) and on CI. `tests/run.sh` refuses up
-front when one is missing, rather than failing a hundred assertions that name the wrong
-cause.
