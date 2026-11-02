@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2015
-#   SC2015, `A && ok || ko`: ok() only counts and prints, so ko() cannot run after a passing test.
 # What docs/discreet-mode.md promises and the code does: the page names the profile path, the
 # memory path, the mode key and the identity remotes; it carries the only table of
 # integrated / discreet; it does not call "refused" what nothing refuses, and it quotes the
@@ -26,6 +24,7 @@ need() { # need <label> <fixed string>
     ko "discreet page: $1 is missing from docs/discreet-mode.md (looked for '$2')"
   fi
 }
+# shellcheck disable=SC2088  # the page prints a literal ~, and grep -F looks for that very text
 need "the profile's path" '~/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json'
 need "the memory's path" 'runs/<slug>/'
 need "the mode key" '"mode": "discreet"'
@@ -54,15 +53,24 @@ else
 fi
 need "no claim of real-world verification, stated" 'does not claim that a real contribution'
 
-# "refused" is true of a merge and a commit status only: nothing refuses the rest. Every line
-# of the page that says refused / refuses must be about the merge, the status or the tokens,
-# or negate it ("nothing refuses").
-bad=$(grep -niE 'refus' "$PAGE" 2>/dev/null |
-  grep -viE 'nothing refuses|merg|status|token' || true)
+# "refused" is true of a merge and a commit status only: nothing refuses the rest. A line of
+# the page may say refused / refuses only in one of the sentences below, which are the
+# true ones; take them out and no "refus" may remain. A line about issues or labels that
+# merely mentions the merge is not exempt.
+allowed='nothing refuses|that github refuses|github refuses it to every role|what github refuses'
+allowed="$allowed|refuse two operations whatever the mode: merging a pull request|those two are refused to"
+bad=$(grep -niE 'refus' "$PAGE" 2>/dev/null | tr '[:upper:]' '[:lower:]' |
+  sed -E "s/($allowed)//g" | grep -E 'refus' || true)
 if [ -z "$bad" ]; then
-  ok "discreet page: it says refused only of the merge, the status, or in the negative"
+  ok "discreet page: it says refused only in the sentences about the merge and the status, or in the negative"
 else
-  ko "discreet page: a line says refused of something else: $bad"
+  ko "discreet page: a line says refused outside those sentences: $bad"
+fi
+# The page does not state as fact what its own table calls a rule.
+if grep -qiE 'writes nothing on the forge' "$PAGE" 2>/dev/null; then
+  ko "discreet page: it states as fact that nothing is written on the forge"
+else
+  ok "discreet page: it does not state as fact that nothing is written on the forge"
 fi
 # The table's Writes row must not carry the word without the negation.
 row=$(grep -F '| Writes to GitHub |' "$PAGE" 2>/dev/null || true)

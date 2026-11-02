@@ -2,7 +2,8 @@
 
 Discreet mode is for a repository that is not yours, or one where nothing of the workflow
 may be committed. The agents work the same way, but the workflow leaves no trace in the
-repository and writes nothing on the forge.
+repository, and the agents are told to write nothing on the forge: a push and a pull request
+wait for your confirmation.
 
 This page says what the code does. It describes the rules the agents are given and the
 merge and the commit status that GitHub refuses; it does not claim that a real contribution
@@ -20,8 +21,8 @@ The identity comes from `git remote get-url upstream || git remote get-url origi
 fork is known by the repository it contributes to. The file sets `"mode": "discreet"`.
 
 **Your profile wins** over a `.claude/workflow.json` committed in the repository, even when
-that one is corrupt: a third-party repository must not be able to turn the profile you
-chose for it into an integrated one. The resolution, the identity details and the keys are
+yours is unusable (corrupt, say) and the repository's is fine: a third-party repository
+must not be able to turn the profile you chose for it into an integrated one. The resolution, the identity details and the keys are
 in [configuration](configuration.md).
 
 ## Writing it
