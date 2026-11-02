@@ -552,7 +552,7 @@ for f in "${AGENTS[@]}"; do
   if printf '%s' "$fm" | grep -q '^description: '; then ok "$name: has a description"; else ko "$name: has no description, so nothing can dispatch it on purpose"; fi
   if printf '%s' "$fm" | grep -q '^tools: '; then ok "$name: declares its tools"; else ko "$name: declares no tools, so it gets all of them"; fi
   # Keys Claude Code ignores for a plugin agent. Writing one would promise a guard rail
-  # that does not exist — the spike recorded in the README established which.
+  # that does not exist — the spike recorded in docs/agent-identity.md established which.
   ignored=$(printf '%s' "$fm" | grep -cE '^(permissionMode|hooks|mcpServers|initialPrompt|observer[A-Za-z]*):')
   if [ "$ignored" = 0 ]; then ok "$name: claims no frontmatter key that plugin agents ignore"; else ko "$name: sets a key that is ignored for a plugin agent"; fi
 done
@@ -1371,7 +1371,7 @@ fi
 
 # --- Dispatch names are namespaced ----------------------------------------------------
 # subagent_type is an exact match: a bare name does not resolve to a plugin agent, and the
-# spike in the README is where that was measured. A coordinator that writes `developer`
+# spike in docs/agent-identity.md is where that was measured. A coordinator that writes `developer`
 # fails at dispatch time, in front of the human.
 coord=$ROOT/agents/coordinator.md
 if [ -s "$coord" ]; then
@@ -1474,8 +1474,8 @@ fi
 # Nothing above compared the README's table to anything: EXPECTED_MODEL and EXPECTED_EFFORT
 # are compared to the frontmatter, and the table the README prints could say anything. It is
 # compared to the same two maps, in both directions. `*(none)*` is the table's way of
-# writing `-`. #127 moves the table: that is the variable below.
-MODELS_PAGE=$ROOT/README.md
+# writing `-`. The table lives in docs/models.md: that is the variable below.
+MODELS_PAGE=$ROOT/docs/models.md
 
 # models_problems <page> → one line per disagreement; `no-page` / `no-table` when there is
 # nothing to compare, which is a failure and not a pass.

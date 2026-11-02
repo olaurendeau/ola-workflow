@@ -294,6 +294,39 @@ EOF
   ;;
 esac
 
+# --- The pages moved out of the README --------------------------------------------------
+# docs/agent-identity.md keeps the spike between its two markers, in that order, and the
+# publishing section; docs/models.md keeps the rule that says why each agent has its model.
+# The README no longer carries either.
+AI_PAGE=$ROOT/docs/agent-identity.md
+MODELS_DOC=$ROOT/docs/models.md
+if [ -f "$AI_PAGE" ]; then
+  b=$(grep -n '^<!-- spike:begin -->$' "$AI_PAGE" | head -1 | cut -d: -f1)
+  e=$(grep -n '^<!-- spike:end -->$' "$AI_PAGE" | head -1 | cut -d: -f1)
+  if [ -n "$b" ] && [ -n "$e" ] && [ "$b" -lt "$e" ]; then
+    ok "pages: docs/agent-identity.md holds spike:begin before spike:end"
+  else
+    ko "pages: docs/agent-identity.md lacks the spike markers, or has them out of order"
+  fi
+  if grep -q '^### Publishing an artifact from a plugin agent$' "$AI_PAGE"; then
+    ok "pages: docs/agent-identity.md has the section Publishing an artifact"
+  else
+    ko "pages: docs/agent-identity.md has no section Publishing an artifact"
+  fi
+else
+  ko "pages: docs/agent-identity.md does not exist"
+fi
+if [ -f "$MODELS_DOC" ] && grep -qF 'Opus where a wrong judgement costs a whole cycle, Sonnet where the volume is' "$MODELS_DOC"; then
+  ok "pages: docs/models.md states the rule: Opus where a wrong judgement costs a cycle, Sonnet where the volume is"
+else
+  ko "pages: docs/models.md is missing or lacks the rule on Opus and Sonnet"
+fi
+if grep -qE '^## (What each agent runs on|Agent identity)$' "$ROOT/README.md"; then
+  ko "pages: the README still carries a section that moved to docs/"
+else
+  ok "pages: the README carries neither the models section nor the agent identity one"
+fi
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total docs test(s) failed"
   exit 1
