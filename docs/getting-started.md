@@ -46,8 +46,11 @@ The plugin's commands (`ola-workflow-tokens`, `ola-profile`, and the others) are
 ask Claude Code where it is instead of typing it:
 
 ```bash
-export PATH="$(claude plugin list --json | jq -r '.[] | select(.id == "ola-workflow@ola-workflow") | .installPath')/bin:$PATH"
+export PATH="$(claude plugin list --json | jq -r '[.[] | select(.id == "ola-workflow@ola-workflow")] | sort_by(.scope != "user") | .[0].installPath')/bin:$PATH"
 ```
+
+If the plugin is installed in both user and project scope, the list has two entries; the line
+keeps the user one, so it works from any directory.
 
 This lasts for that terminal only. Run the line again in each new terminal where steps 3 and 5
 ask for a command, and after the plugin has been updated.

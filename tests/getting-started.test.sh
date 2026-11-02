@@ -34,6 +34,7 @@ QUOTED=(
   'No ola-workflow profile applies to this project'
   'not valid JSON'
   'is not one of'
+  'expected object, got array'
   'there is no base GitHub token in the keychain'
   'present, but GitHub rejects it (expired or revoked?)'
   'missing — ola-workflow-tokens setup'
@@ -72,6 +73,27 @@ EOF
   ! grep -qiw 'perl' "$page" || echo "the page lists perl, which no user needs"
 }
 
+# export_problems <page> → what the PATH line does when two installs of the plugin are listed
+# (user and project scope): it has to add exactly one directory. The line is read from the page
+# and run with a `claude` that prints a fixture.
+export_problems() {
+  local page=$1 line before after added
+  line=$(grep -F 'claude plugin list --json' "$page" | head -n 1)
+  [ -n "$line" ] || { echo "export: the page has no PATH line"; return; }
+  claude() { cat "$fx/two-installs.json"; }
+  before=$PATH
+  after=$(eval "$line" 2>/dev/null; printf '%s' "$PATH")
+  added=${after%":$before"}
+  case $added in
+    */bin) ;;
+    *) echo "export: the PATH line adds \"$added\", not one bin/ directory" ;;
+  esac
+  case $added in
+    *:* | *$'\n'*) echo "export: the PATH line adds two directories when user and project installs are listed" ;;
+  esac
+  unset -f claude
+}
+
 # quoted_problems <page> <root> → a quoted output missing from the page or from the code
 quoted_problems() {
   local page=$1 root=$2 q
@@ -85,6 +107,11 @@ quoted_problems() {
 REAL=$ROOT/docs/getting-started.md
 fx=$WORK/fx
 mkdir -p "$fx"
+cat >"$fx/two-installs.json" <<'JSON'
+[{"id":"ola-workflow@ola-workflow","scope":"project","installPath":"/project/ola-workflow/0.9.0"},
+ {"id":"other@market","scope":"user","installPath":"/user/other/1.0.0"},
+ {"id":"ola-workflow@ola-workflow","scope":"user","installPath":"/user/ola-workflow/0.9.0"}]
+JSON
 
 mutate() { # mutate <name> <sed arguments> → $fx/<name>.md
   sed "${@:2}" "$REAL" >"$fx/$1.md"
@@ -107,6 +134,10 @@ if [ -s "$REAL" ]; then
   expect_defect "no PATH line for a terminal" nopath "on the PATH of a terminal"
   mutate five 's/^## 6\. /## /'
   expect_defect "a step lacking its number" five "six numbered steps"
+  # The export line moved below the command that needs it
+  awk -v l="$(grep -nF 'claude plugin list --json' "$REAL" | head -n 1 | cut -d: -f1)" \
+    'NR == l { held = $0; next } { print } END { print held }' "$REAL" >"$fx/late.md"
+  expect_defect "the PATH line after ola-workflow-tokens setup" late "before it puts bin/ on the PATH"
   : >"$fx/empty.md"
   expect_defect "an empty page" empty "no-page"
 else
@@ -127,6 +158,14 @@ out=$(quoted_problems "$fx/page.md" "$ROOT")
 printf '%s\n' "$out" | grep -q 'does not quote' && ok "quoted check: refuses an output the page does not carry" ||
   ko "quoted check should refuse an output the page does not carry"
 
+# The PATH line: refused when it yields two paths. The fixture is the line as it was.
+cat >"$fx/twopaths.md" <<'PAGE'
+export PATH="$(claude plugin list --json | jq -r '.[] | select(.id == "ola-workflow@ola-workflow") | .installPath')/bin:$PATH"
+PAGE
+out=$(export_problems "$fx/twopaths.md")
+printf '%s\n' "$out" | grep -q 'adds two directories' && ok "export check: refuses a line that yields two paths" ||
+  ko "export check should refuse a line that yields two paths (got: ${out:-nothing})"
+
 # --- The real page ------------------------------------------------------------------------
 [ -s "$REAL" ] && [ "$(grep -c '^## ' "$REAL")" -gt 0 ] && ok "the real page was read ($(grep -c '^## ' "$REAL") sections)" ||
   ko "the real page is missing or has no section"
@@ -137,6 +176,15 @@ if [ -z "$problems" ]; then
 else
   while IFS= read -r p; do ko "getting-started: $p"; done <<EOF
 $problems
+EOF
+fi
+
+exports=$(export_problems "$REAL")
+if [ -z "$exports" ]; then
+  ok "the PATH line adds one directory when user and project installs are both listed"
+else
+  while IFS= read -r p; do ko "getting-started: $p"; done <<EOF
+$exports
 EOF
 fi
 
