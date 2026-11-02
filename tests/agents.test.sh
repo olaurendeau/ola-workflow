@@ -95,8 +95,42 @@ done
 # to separate a mention from an offer, it cannot, because they are the same characters. Only
 # the two ends of that spectrum are decidable — a name that must resolve, and a name this
 # plugin provides written without its namespace.
-PROMPTS=("$ROOT"/agents/*.md "$BRIEF" "$ROOT/README.md")
-for skill in "$ROOT"/skills/*/SKILL.md; do [ -f "$skill" ] && PROMPTS+=("$skill"); done
+
+# The pages under docs/, because text moved out of the README does not stop being read by
+# whoever opens the repository: a command named wrongly there is as wrong as in the README.
+# Not security-precedents.md, which quotes what an attacker types, nor docs/design/, which
+# holds pages published elsewhere and not prose of this project.
+# `find` from $1/docs, never from the root of the repository: .claude/worktrees/ lives there
+# and holds other agents' copies of this very tree. No globstar and no mapfile, for bash 3.2.
+docs_pages() { # docs_pages <root> → the pages, one path per line, sorted
+  [ -d "$1/docs" ] || return 0
+  find "$1/docs" -type f -name '*.md' ! -path "$1/docs/design/*" ! -path "$1/docs/security-precedents.md" |
+    LC_ALL=C sort
+}
+# The label keeps the path under docs/: docs/decisions/README.md is not README.md.
+page_label() { # page_label <root> <path>
+  case $2 in
+    "$1"/docs/*) echo "docs/${2#"$1"/docs/}" ;;
+    */skills/*) echo "skills/${2#*/skills/}" ;;
+    *) echo "${2##*/}" ;;
+  esac
+}
+# The files scanned for offers, and the files that may promise what was removed. Functions of
+# a root, because docs_pages answers nothing on the real tree today: that the docs pages are
+# in both lists is proved further down, on a throwaway tree.
+prompt_files() { # prompt_files <root> → one path per line
+  local f
+  for f in "$1"/agents/*.md "$BRIEF" "$1/README.md"; do echo "$f"; done
+  for f in "$1"/skills/*/SKILL.md; do [ -f "$f" ] && echo "$f"; done
+  docs_pages "$1"
+}
+claimant_files() { # claimant_files <root> → one path per line
+  local f
+  for f in "$1"/agents/*.md "$BRIEF" "$1/README.md" "$1/skills/workflow-init/SKILL.md"; do echo "$f"; done
+  docs_pages "$1"
+}
+PROMPTS=()
+while IFS= read -r page; do PROMPTS+=("$page"); done < <(prompt_files "$ROOT")
 
 # Every scanned file must be *readable* and have content. Without this the scan reads
 # whatever it can and the verdicts below pass on the rest: dropping $BRIEF from the list left
@@ -112,8 +146,7 @@ for skill in "$ROOT"/skills/*/SKILL.md; do [ -f "$skill" ] && PROMPTS+=("$skill"
 # left the one next to it, because the label ("readable, has content") was treated as the
 # specification instead of being derived from what `cat` actually needs.
 for f in "${PROMPTS[@]}"; do
-  label=$f
-  case $label in */skills/*) label=skills/${label#*/skills/} ;; *) label=${label##*/} ;; esac
+  label=$(page_label "$ROOT" "$f")
   if [ -f "$f" ] && [ -r "$f" ] && [ -s "$f" ]; then
     ok "$label is a regular file, readable and non-empty, so the scan below covers it"
   else
@@ -1397,6 +1430,147 @@ trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 
+# --- docs_pages, on a tree built for it ------------------------------------------------
+dfx=$WORK/docs-pages
+mkdir -p "$dfx/docs/decisions" "$dfx/docs/design/x" "$dfx/.claude/worktrees/w/docs"
+for f in docs/top.md docs/decisions/README.md docs/security-precedents.md docs/design/x/README.md \
+  docs/note.txt .claude/worktrees/w/docs/other.md README.md; do
+  echo x >"$dfx/$f"
+done
+got=$(docs_pages "$dfx" | sed "s#^$dfx/##" | tr '\n' ' ')
+if [ "$got" = "docs/decisions/README.md docs/top.md " ]; then
+  ok "docs_pages finds a page at the top of docs/ and one in a subfolder, and skips security-precedents.md, docs/design/, non-pages and worktrees"
+else
+  ko "docs_pages answered '$got' on a tree holding two pages and five things that are not"
+fi
+# Status and stderr as well as stdout: without the `[ -d ]` guard `find` complains and fails,
+# and an empty stdout alone would call that a pass.
+absent=$(docs_pages "$WORK/absent" 2>&1)
+absent_rc=$?
+if [ -z "$absent" ] && [ "$absent_rc" = 0 ]; then
+  ok "docs_pages answers nothing, without failing, when there is no docs/"
+else
+  ko "docs_pages answered '$absent' with status $absent_rc where there is no docs/"
+fi
+# The two lists that carry the pages to the scans: dropping docs_pages from either left the
+# suite green, because today there is no page to miss.
+for list in prompt_files claimant_files; do
+  if "$list" "$dfx" | grep -qxF "$dfx/docs/decisions/README.md" &&
+    "$list" "$dfx" | grep -qxF "$dfx/docs/top.md" &&
+    ! "$list" "$dfx" | grep -qF "security-precedents.md"; then
+    ok "$list includes the pages under docs/"
+  else
+    ko "$list does not include the pages under docs/, or includes one it should skip"
+  fi
+done
+if [ "$(page_label "$dfx" "$dfx/docs/decisions/README.md")" = docs/decisions/README.md ] &&
+  [ "$(page_label "$dfx" "$dfx/README.md")" = README.md ]; then
+  ok "a page under docs/ keeps its path as its label, so it is not taken for the README"
+else
+  ko "docs/decisions/README.md and README.md are labelled alike"
+fi
+
+# --- The table of models and efforts, against the two maps -----------------------------
+# Nothing above compared the README's table to anything: EXPECTED_MODEL and EXPECTED_EFFORT
+# are compared to the frontmatter, and the table the README prints could say anything. It is
+# compared to the same two maps, in both directions. `*(none)*` is the table's way of
+# writing `-`. #127 moves the table: that is the variable below.
+MODELS_PAGE=$ROOT/README.md
+
+# models_problems <page> → one line per disagreement; `no-page` / `no-table` when there is
+# nothing to compare, which is a failure and not a pass.
+models_problems() {
+  local page=$1 rows row agent model effort pair key want
+  [ -f "$page" ] || { echo "no-page"; return; }
+  rows=$(awk '
+    !t && /^\| agent \|/ { t = 1; next }
+    t && /^\|/ { print; next }
+    t { exit }
+  ' "$page" | sed '1d')
+  [ -n "$rows" ] || { echo "no-table"; return; }
+  local seen=" "
+  while IFS= read -r row; do
+    agent=$(printf '%s' "$row" | awk -F'|' '{ gsub(/[` ]/, "", $2); print $2 }')
+    model=$(printf '%s' "$row" | awk -F'|' '{ gsub(/[` ]/, "", $3); print $3 }')
+    effort=$(printf '%s' "$row" | awk -F'|' '{ gsub(/[` ]/, "", $4); print $4 }')
+    [ "$model" = '*(none)*' ] && model=-
+    [ "$effort" = '*(none)*' ] && effort=-
+    seen="$seen$agent "
+    for key in model effort; do
+      case $key in model) want=$EXPECTED_MODEL ;; effort) want=$EXPECTED_EFFORT ;; esac
+      pair=
+      for p in $want; do case $p in "$agent="*) pair=${p#*=} ;; esac; done
+      if [ -z "$pair" ]; then
+        echo "the table has a row for $agent, which the suite's $key map does not name"
+      else
+        case $key in model) got=$model ;; effort) got=$effort ;; esac
+        [ "$got" = "$pair" ] || echo "$agent: the table says $key '$got', the suite declares '$pair'"
+      fi
+    done
+  done <<EOF
+$rows
+EOF
+  for p in $EXPECTED_MODEL; do
+    case $seen in *" ${p%%=*} "*) ;; *) echo "the suite declares ${p%%=*}, which the table has no row for" ;; esac
+  done
+}
+
+mt=$WORK/models-table
+mkdir -p "$mt"
+cat >"$mt/page.md" <<'EOF'
+| agent | `model` | `effort` | what it buys |
+|---|---|---|---|
+| coordinator | *(none)* | *(none)* | x |
+| product-designer | `sonnet` | *(none)* | x |
+| design-reviewer | `sonnet` | *(none)* | x |
+| architect | `opus` | *(none)* | x |
+| developer | `sonnet` | `high` | x |
+| pr-reviewer | `opus` | `high` | x |
+| security-reviewer | `opus` | `high` | x |
+| probe | `haiku` | `low` | x |
+
+Text after.
+EOF
+if [ -z "$(models_problems "$mt/page.md")" ]; then
+  ok "models table: a table that says what the maps say, *(none)* included, has no disagreement"
+else
+  ko "models table: the good fixture is refused: $(models_problems "$mt/page.md" | tr '\n' '|')"
+fi
+sed 's/| architect | `opus`/| architect | `sonnet`/' "$mt/page.md" >"$mt/model.md"
+case $(models_problems "$mt/model.md") in
+  *"architect: the table says model 'sonnet'"*) ok "models table: a model changed in the table is reported" ;;
+  *) ko "models table: a model changed in the table is not reported" ;;
+esac
+sed 's/| developer | `sonnet` | `high`/| developer | `sonnet` | *(none)*/' "$mt/page.md" >"$mt/effort.md"
+case $(models_problems "$mt/effort.md") in
+  *"developer: the table says effort '-'"*) ok "models table: an effort dropped in the table is reported" ;;
+  *) ko "models table: an effort dropped in the table is not reported" ;;
+esac
+grep -v '^| probe ' "$mt/page.md" >"$mt/short.md"
+case $(models_problems "$mt/short.md") in
+  *"declares probe, which the table has no row for"*) ok "models table: an agent the suite declares and the table lacks is reported" ;;
+  *) ko "models table: a missing row is not reported" ;;
+esac
+sed 's/^| probe .*/&\n| ghost | `opus` | `high` | x |/' "$mt/page.md" >"$mt/ghost.md"
+case $(models_problems "$mt/ghost.md") in
+  *"row for ghost"*) ok "models table: a row for an agent the suite does not name is reported" ;;
+  *) ko "models table: a row for an unknown agent is not reported" ;;
+esac
+printf 'no table\n' >"$mt/none.md"
+if [ "$(models_problems "$mt/none.md")" = no-table ]; then ok "models table: a page without the table is a failure"; else ko "models table: a page without the table is not reported"; fi
+if [ "$(models_problems "$mt/absent.md")" = no-page ]; then ok "models table: an absent page is a failure"; else ko "models table: an absent page is not reported"; fi
+
+problems=$(models_problems "$MODELS_PAGE")
+case $problems in
+  "") ok "the table of ${MODELS_PAGE#"$ROOT"/} says what each agent runs on, as the suite declares it" ;;
+  no-page) ko "${MODELS_PAGE#"$ROOT"/} does not exist, so nothing says what each agent runs on" ;;
+  no-table) ko "${MODELS_PAGE#"$ROOT"/} has no table whose header begins with '| agent |'" ;;
+  *) while IFS= read -r p; do ko "models table: $p"; done <<EOF
+$problems
+EOF
+  ;;
+esac
+
 for want in keychain off; do
   probe=$WORK/stops-$want
   mkdir -p "$probe/.claude"
@@ -1434,13 +1608,25 @@ fi
 
 # The guard that read command lines is gone, so nothing shipped may still promise it. A net
 # over prose, not a proof: it catches the phrasings this project actually wrote.
-CLAIMANTS=("${ALL[@]}" "$BRIEF" "$ROOT/README.md" "$ROOT/skills/workflow-init/SKILL.md")
-claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents|reads)|tokeniz' \
-  "${CLAIMANTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+claims_in() { # claims_in <root> → the label of each claimant that still promises it, blank-terminated
+  local files=() page
+  while IFS= read -r page; do files+=("$page"); done < <(claimant_files "$1")
+  while IFS= read -r page; do
+    printf '%s ' "$(page_label "$1" "$page")"
+  done < <(grep -lE 'guard (refuses|blocks|will ask|asks|prevents|reads)|tokeniz' "${files[@]}" 2>/dev/null)
+}
+claims=$(claims_in "$ROOT")
 if [ -z "$claims" ]; then
   ok "nothing shipped promises the command-line guard that was removed"
 else
   ko "these still promise the removed command-line guard: $claims"
+fi
+# The message names the page by its path under docs/, as the scan's own labels do.
+echo "the guard refuses" >"$dfx/docs/decisions/README.md"
+if [ "$(claims_in "$dfx")" = "docs/decisions/README.md " ]; then
+  ok "a page under docs/ that still promises the guard is named by its path, not as README.md"
+else
+  ko "a promise in docs/decisions/README.md is named '$(claims_in "$dfx")'"
 fi
 
 # --- The brief, per mode --------------------------------------------------------------
