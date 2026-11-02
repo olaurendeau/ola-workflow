@@ -204,7 +204,7 @@ fi
 # The real tree. README.md and docs/**, with no exclusion: security-precedents.md and the
 # designs hold links too. Listed from $ROOT/docs, never from the root of the repository,
 # where .claude/worktrees/ holds other agents' copies of this very tree.
-pages=("$ROOT/README.md")
+pages=("$ROOT/README.md" "$ROOT/CONTRIBUTING.md")
 while IFS= read -r p; do pages+=("$p"); done < <(find "$ROOT/docs" -type f -name '*.md' 2>/dev/null | LC_ALL=C sort)
 real=$(check_links "$ROOT" "${pages[@]}")
 read_links=$(printf '%s\n' "$real" | grep -c '^LINK ')
@@ -221,6 +221,65 @@ else
   while IFS= read -r e; do ko "links: ${e#ERR }"; done <<EOF
 $errs
 EOF
+fi
+
+# --- The page of the contributors -----------------------------------------------------------
+# The Development section moved out of the README (#128). The page keeps the commands, the
+# writing convention, the layout of the repository and the rule on when to write a decision,
+# and CONTRIBUTING.md, the file GitHub looks for, points at it. A page that lost a part in
+# the move would still pass the link check; each part is named by what the reader looks it up for.
+CONTRIB_PAGE=$ROOT/docs/contributing.md
+CONTRIB_FILE=$ROOT/CONTRIBUTING.md
+# contrib_in <section heading> <label> <fixed string>: the string must be in that section, not
+# merely somewhere on the page, so that a word found in another section cannot stand for it.
+contrib_section() { # contrib_section <heading> → the text under that heading, up to the next one
+  awk -v h="$1" '/^#+ / { t = $0; sub(/^#+ /, "", t); if (on) exit; if (t == h) on = 1; next } on { print }' "$CONTRIB_PAGE"
+}
+contrib_in() {
+  local text # in a variable: under pipefail, grep -q closing the pipe early fails the test
+  text=$(contrib_section "$1" | tr '\n' ' ') # one line, so a rewrapped sentence still matches
+  if [ -f "$CONTRIB_PAGE" ] && grep -qF -- "$3" <<<"$text"; then
+    ok "contributing page: $2"
+  else
+    ko "contributing page: $2 is missing from the section '$1' of docs/contributing.md (looked for '$3')"
+  fi
+}
+# A command is a line of the code block that starts with it, not any mention of its prefix
+# (`make spike` must not be satisfied by `make spike-artifact`).
+for cmd in 'make check' 'make lint' 'make test' 'make validate' 'make spike' 'scripts/token-cost.sh'; do
+  if [ -f "$CONTRIB_PAGE" ] && grep -qE -- "^$cmd([[:space:]]|\$)" "$CONTRIB_PAGE"; then
+    ok "contributing page: names \`$cmd\`"
+  else
+    ko "contributing page: \`$cmd\` is not at the start of a line of docs/contributing.md"
+  fi
+done
+# A folder is a row of the layout table, not a mention in the prose: `docs/` is written in the
+# convention text and the profile paragraph whatever the table says.
+for dir in agents skills bin hooks schema tests docs; do
+  contrib_in 'How the repository is laid out' "describes the folder $dir/" "| \`$dir/\` |"
+done
+contrib_in 'One writing convention, enforced by the suite' "keeps the writing convention" 'do not write this plugin'
+contrib_in 'A change' "names the Conventional Commits form" 'Conventional Commits'
+contrib_in 'A change' "gives the line budget" '1000 changed lines'
+contrib_in 'A change' "says the coordinator merges" 'merged by the coordinator'
+contrib_in 'A change' "says the human merges a sensitive path" 'merged by the human'
+# The rule on when to write an entry is the one of decisions/README.md: a page that kept a
+# shorter list would send a contributor away without the entry the journal asks for.
+for t in 'boundary of what a role can do' 'the model or the effort of a role' 'precedence or the format of the profile' \
+         'what is written where, according to the mode' 'a runtime dependency' 'founded on a measurement' \
+         'Not for a fix, a rename or a matter of style' '(decisions/README.md)' 'Decision: … — Reason: …'; do
+  contrib_in 'When a change needs a decision entry' "decision rule says '$t'" "$t"
+done
+contrib_in 'Development' "names the claude CLI that make validate needs" '`claude` CLI'
+if [ -s "$CONTRIB_FILE" ] && grep -qF '(docs/contributing.md)' "$CONTRIB_FILE"; then
+  ok "contributing page: CONTRIBUTING.md exists and links docs/contributing.md"
+else
+  ko "contributing page: CONTRIBUTING.md is missing, empty or does not link docs/contributing.md"
+fi
+if grep -qE '^#{1,3} (Development|One writing convention, enforced by the suite)$' "$ROOT/README.md"; then
+  ko "contributing page: the README still holds a section that moved to docs/contributing.md"
+else
+  ok "contributing page: the README no longer holds the sections that moved"
 fi
 
 # --- Keys -----------------------------------------------------------------------------
