@@ -134,19 +134,6 @@ Two scripts, on the PATH of every Bash call:
 `pr-assets` is as readable as the repository: capture development data only. Captures are
 written outside the worktree and are never committed.
 
-## Where the rules live
-
-The agents share one source: `ola-workflow-brief`, on the PATH beside `ola-profile`. It
-resolves the profile and prints the rules that follow from it — mode, languages, base
-branch, commands, slots, escalation, restricted commands, where the memory goes, what the
-merge gate requires. Each agent starts by running it, and each prompt holds only what is
-specific to its role.
-
-That is not tidiness. Seven prompts restating the same facts drift apart one justified edit
-at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
-name a base branch, a check command, a review status, a slot value or a line budget, since
-those belong to the brief. Run it against an agent that hard-codes one and it says which.
-
 ### Globs
 
 Every glob in a profile is a git pathspec `:(glob)`, and `schema/profile.schema.json` states
@@ -161,3 +148,16 @@ them:
   `src/deep` pull in their subtrees, while `doc*`, `doc?` and `[dx]ocs` match nothing at
   all. That is what makes the schema's own example sound — `Dockerfile*` cannot reach into a
   neighbouring `Dockerfiles/`.
+
+## Where the rules live
+
+The agents share one source: `ola-workflow-brief`, on the PATH beside `ola-profile`. It
+resolves the profile and prints the rules that follow from it — mode, languages, base
+branch, commands, slots, escalation, restricted commands, where the memory goes, what the
+merge gate requires. Each agent starts by running it, and each prompt holds only what is
+specific to its role.
+
+That is not tidiness. Seven prompts restating the same facts drift apart one justified edit
+at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
+name a base branch, a check command, a review status, a slot value or a line budget, since
+those belong to the brief. Run it against an agent that hard-codes one and it says which.
