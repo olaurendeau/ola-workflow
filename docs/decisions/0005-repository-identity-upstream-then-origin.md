@@ -23,5 +23,4 @@ A fork is known by the repository it contributes to, and a worktree resolves lik
 ## Evidence
 
 - [Pull request 3](https://github.com/olaurendeau/ola-workflow/pull/3)
-- [CHANGELOG, 0.2.0](../../CHANGELOG.md#020)
 - [README, how a project is configured, at the commit the journal began](https://github.com/olaurendeau/ola-workflow/blob/936ff0996fbedb5e0d981e91030c9a63efdc00fd/README.md#L212-L233)

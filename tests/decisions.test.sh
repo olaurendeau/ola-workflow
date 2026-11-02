@@ -97,7 +97,7 @@ decision_problems() {
     if ! section_lines "$f" Evidence | grep -qE 'https?://|CHANGELOG\.md#|#[0-9]+'; then
       echo "$base: the Evidence cites no pull request, issue, CHANGELOG version or address"
     fi
-    if grep -qE '\]\((\.\./)*README\.md' "$f"; then
+    if grep -oE '\]\([^)]*README\.md[^)]*\)' "$f" | grep -qvE '/blob/[0-9a-f]{40}/'; then
       echo "$base: links to the live README, whose sections move"
     fi
 
@@ -116,6 +116,11 @@ decision_problems() {
   while IFS= read -r target; do
     [ -f "$d/$target" ] || echo "README.md: the link '$target' points at no file"
   done < <(grep -oE '\]\([^)#:]+\.md\)' "$idx" | sed 's/^](//; s/)$//')
+}
+
+# rule_before_rows <index> → success when "When to write an entry" is a heading above the first row
+rule_before_rows() {
+  awk '/^\|/ { exit 1 } /When to write an entry/ { found = 1 } END { exit !found }' "$1" 2>/dev/null
 }
 
 # --- A tree that is right, and each way to make it wrong ------------------------------
@@ -224,12 +229,31 @@ write_entry "$good" 0001-first.md accepted "19 October 2026"
 expect "a date in words is reported" "the date '19 October 2026' is not YYYY-MM-DD"
 
 good_tree
+sed -i.bak '/^## Consequences$/{n;n;s/.*//;}' "$good/0001-first.md" && rm -f "$good/0001-first.md.bak"
+expect "an empty section is reported" "0001-first.md: the Consequences section is empty"
+
+good_tree
+write_entry "$good" 0001-first.md accepted 2026-10-19 '```
+## Example
+```
+[Pull request 1](https://github.com/example/repo/pull/1)'
+if [ -z "$(decision_problems "$good")" ]; then
+  ok "decisions: a heading inside a code fence is neither a section nor the end of one"
+else
+  ko "decisions: a heading in a code fence is taken for a section: $(decision_problems "$good" | tr '\n' '|')"
+fi
+
+good_tree
 write_entry "$good" 0001-first.md accepted 2026-10-19 "Because we said so."
 expect "an Evidence that cites nothing is reported" "the Evidence cites no pull request"
 
 good_tree
 write_entry "$good" 0001-first.md accepted 2026-10-19 "[the README](../../README.md#section)"
 expect "a link to the live README is reported" "links to the live README"
+
+good_tree
+write_entry "$good" 0001-first.md accepted 2026-10-19 "[the README on main](https://github.com/o/r/blob/main/README.md#section)"
+expect "a link to the README on a branch is reported" "links to the live README"
 
 good_tree
 write_entry "$good" 0001-first.md accepted 2026-10-19 "See [the README at a commit](https://github.com/o/r/blob/0123456789abcdef0123456789abcdef01234567/README.md#L1)."
@@ -277,6 +301,19 @@ write_index "$good"
 
 [ "$(decision_problems "$WORK/absent")" = no-dir ] && ok "decisions: an absent directory is a failure" || ko "decisions: an absent directory is not reported"
 
+printf '# Decisions\n\n| number | title | status | date |\n|---|---|---|---|\n\n## When to write an entry\n' >"$WORK/late-rule.md"
+if rule_before_rows "$WORK/late-rule.md"; then
+  ko "decisions: a rule written after the first row is accepted"
+else
+  ok "decisions: a rule written after the first row of the index is refused"
+fi
+printf '# Decisions\n\nNothing.\n' >"$WORK/no-rule.md"
+if rule_before_rows "$WORK/no-rule.md"; then
+  ko "decisions: an index with no rule is accepted"
+else
+  ok "decisions: an index with no rule is refused"
+fi
+
 # --- The real tree --------------------------------------------------------------------
 REAL=$ROOT/docs/decisions
 entries=0
@@ -311,7 +348,7 @@ else
 fi
 
 # The rule for when to write one is at the head of the index, before the first row.
-if awk '/^\|/ { exit 1 } /When to write an entry/ { found = 1 } END { exit !found }' "$REAL/README.md" 2>/dev/null; then
+if rule_before_rows "$REAL/README.md"; then
   ok "decisions: the index states when to write an entry, before its first row"
 else
   ko "decisions: the index does not state when to write an entry before its first row"

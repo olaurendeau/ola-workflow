@@ -33,7 +33,7 @@ number of the entry that replaces it), Date, Context, Decision, Consequences, Ev
 | [0006](0006-one-brief-for-every-agent.md) | One brief, printed by a command, for every agent | accepted | 2026-10-12 |
 | [0007](0007-profile-key-only-on-a-positive-result.md) | A profile key is written only on a positive result | accepted | 2026-10-14 |
 | [0008](0008-model-and-effort-per-role.md) | Each role pins its model and effort: Opus for judgement, Sonnet for volume | accepted | 2026-10-21 |
-| [0009](0009-agent-identity-measured-by-a-spike.md) | A plugin agent's identity and effort are measured, not read | accepted | 2026-10-10 |
+| [0009](0009-agent-identity-measured-by-a-spike.md) | A plugin agent's identity and effort are measured, not read | accepted | 2026-10-21 |
 | [0010](0010-security-reviewer-precision-over-recall.md) | The security reviewer favours precision, and every blocking finding is read cold | accepted | 2026-10-21 |
 | [0011](0011-only-the-coordinator-has-a-browser.md) | Only the coordinator declares the browser tools | accepted | 2026-10-23 |
 | [0012](0012-writing-convention-by-whitelist.md) | The prompts follow a writing convention enforced with a whitelist | accepted | 2026-10-14 |

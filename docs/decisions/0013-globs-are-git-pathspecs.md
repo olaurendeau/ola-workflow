@@ -18,7 +18,7 @@ Every glob in a profile is a git pathspec with the glob magic, and the matching 
 
 ## Consequences
 
-One dialect is documented once, in the schema, for whoever writes a glob. A directory named literally is recursive and a wildcard is not, so `docs` takes its subtree and `doc*` matches nothing at all. Every key that consumes a glob has to be implemented through git and not through the shell.
+One dialect is documented once, in the schema, for whoever writes a glob. A directory named literally is recursive and a wildcard is not, so `docs` takes its subtree and `doc*` matches `doc1.md` but does not reach into `docs/`. Every key that consumes a glob has to be implemented through git and not through the shell.
 
 ## Evidence
 

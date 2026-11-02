@@ -14,7 +14,7 @@ A false positive from a security review costs a developer a whole review cycle, 
 
 ## Decision
 
-A security finding blocks only when it is a complete path introduced by the change and proven line by line at medium severity or above, and each blocking finding stays pending until a second reviewer in a fresh context has tried to refute it.
+A security finding blocks only when it is a complete path that the change introduces or makes reachable, and proven line by line at medium severity or above, and each blocking finding stays pending until a second reviewer in a fresh context has tried to refute it.
 
 ## Consequences
 
