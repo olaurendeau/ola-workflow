@@ -97,7 +97,7 @@ decision_problems() {
     if ! section_lines "$f" Evidence | grep -qE 'https?://|CHANGELOG\.md#|#[0-9]+'; then
       echo "$base: the Evidence cites no pull request, issue, CHANGELOG version or address"
     fi
-    if grep -oE '\]\([^)]*README\.md[^)]*\)' "$f" | grep -qvE '/blob/[0-9a-f]{40}/'; then
+    if grep -oE '\]\(((\.\./)*|https?://[^)]*/blob/[^/)]+/)README\.md[^)]*\)' "$f" | grep -qvE '/blob/[0-9a-f]{40}/'; then
       echo "$base: links to the live README, whose sections move"
     fi
 
@@ -254,6 +254,14 @@ expect "a link to the live README is reported" "links to the live README"
 good_tree
 write_entry "$good" 0001-first.md accepted 2026-10-19 "[the README on main](https://github.com/o/r/blob/main/README.md#section)"
 expect "a link to the README on a branch is reported" "links to the live README"
+
+good_tree
+write_entry "$good" 0001-first.md accepted 2026-10-19 "[a design](../design/foo/README.md) and [its page](https://github.com/o/r/blob/main/design/foo/README.md#x)"
+if [ -z "$(decision_problems "$good")" ]; then
+  ok "decisions: a link to the README of another directory is allowed"
+else
+  ko "decisions: a link to the README of another directory is refused: $(decision_problems "$good" | tr '\n' '|')"
+fi
 
 good_tree
 write_entry "$good" 0001-first.md accepted 2026-10-19 "See [the README at a commit](https://github.com/o/r/blob/0123456789abcdef0123456789abcdef01234567/README.md#L1)."
