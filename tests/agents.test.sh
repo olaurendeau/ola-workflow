@@ -264,7 +264,7 @@ verdicts_for() { # verdicts_for < text → one `ok|ko:<rule>:<token>` line per v
     # `ola-workflow:workflow-init` (a command) are the same shape, and no reading of the text
     # tells them apart. So the rule flags every `ola-workflow:<x>` that is not a command, and
     # that is the **limit**: do not write this plugin's namespace followed by something that
-    # is not one of its commands. It is in the README, next to the reason.
+    # is not one of its commands. It is in docs/contributing.md, next to the reason.
     as_path=$(printf '%s' "$t" | tr ':' '/')
     if [ -f "$ROOT/skills/$as_path/SKILL.md" ] || [ -f "$ROOT/agents/$as_path.md" ]; then
       echo "ok:named:$t"

@@ -204,7 +204,7 @@ fi
 # The real tree. README.md and docs/**, with no exclusion: security-precedents.md and the
 # designs hold links too. Listed from $ROOT/docs, never from the root of the repository,
 # where .claude/worktrees/ holds other agents' copies of this very tree.
-pages=("$ROOT/README.md")
+pages=("$ROOT/README.md" "$ROOT/CONTRIBUTING.md")
 while IFS= read -r p; do pages+=("$p"); done < <(find "$ROOT/docs" -type f -name '*.md' 2>/dev/null | LC_ALL=C sort)
 real=$(check_links "$ROOT" "${pages[@]}")
 read_links=$(printf '%s\n' "$real" | grep -c '^LINK ')
@@ -221,6 +221,42 @@ else
   while IFS= read -r e; do ko "links: ${e#ERR }"; done <<EOF
 $errs
 EOF
+fi
+
+# --- The page of the contributors -----------------------------------------------------------
+# The Development section moved out of the README (#128). The page keeps the commands, the
+# writing convention, the layout of the repository and the rule on when to write a decision,
+# and CONTRIBUTING.md, the file GitHub looks for, points at it. A page that lost a part in
+# the move would still pass the link check; each part is named by what the reader looks it up for.
+CONTRIB_PAGE=$ROOT/docs/contributing.md
+CONTRIB_FILE=$ROOT/CONTRIBUTING.md
+contrib_need() { # contrib_need <label> <fixed string>
+  if [ -f "$CONTRIB_PAGE" ] && grep -qF -- "$2" "$CONTRIB_PAGE"; then
+    ok "contributing page: $1"
+  else
+    ko "contributing page: $1 is missing from docs/contributing.md (looked for '$2')"
+  fi
+}
+for cmd in 'make check' 'make lint' 'make test' 'make validate' 'make spike' 'scripts/token-cost.sh'; do
+  contrib_need "names \`$cmd\`" "$cmd"
+done
+for dir in agents skills bin hooks schema tests docs; do
+  contrib_need "describes the folder $dir/" "\`$dir/\`"
+done
+contrib_need "keeps the writing convention" '### One writing convention, enforced by the suite'
+contrib_need "says when to write a decision, with a link to the journal" '(decisions/README.md)'
+contrib_need "names the Conventional Commits form" 'Conventional Commits'
+contrib_need "gives the line budget" '1000'
+contrib_need "says the coordinator merges" 'coordinator'
+if [ -s "$CONTRIB_FILE" ] && grep -qF '(docs/contributing.md)' "$CONTRIB_FILE"; then
+  ok "contributing page: CONTRIBUTING.md exists and links docs/contributing.md"
+else
+  ko "contributing page: CONTRIBUTING.md is missing, empty or does not link docs/contributing.md"
+fi
+if grep -qE '^#{1,3} (Development|One writing convention, enforced by the suite)$' "$ROOT/README.md"; then
+  ko "contributing page: the README still holds a section that moved to docs/contributing.md"
+else
+  ok "contributing page: the README no longer holds the sections that moved"
 fi
 
 # --- Keys -----------------------------------------------------------------------------
