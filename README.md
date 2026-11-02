@@ -9,6 +9,52 @@ The workflow is **generic**: everything project-specific lives in a profile file
 same plugin drives a project you own and a repository you contribute to twice a year
 **without committing anything to it**.
 
+## How it works
+
+You talk to one agent, the **coordinator**. It hands the work from role to role, in the steps
+below. Each reads **role** — what it does — what it produces. A change that no user sees and that
+fits one pull request skips steps 2 to 4.
+
+1. **coordinator** — asks you only if your goal is unclear — a request in one sentence.
+2. **product-designer** — says what "done" means, and the words users read — an epic, the GitHub issue that holds it.
+3. **design-reviewer** — checks the design, for visual work only — a verdict. You settle a dispute.
+4. **architect** — splits the epic into small tasks — one issue per task.
+5. **developer** — builds one task, test first, in its own worktree — a pull request.
+6. **pr-reviewer** — reviews what it did not write — a verdict and an `agent-review` status.
+7. **security-reviewer** — also reads changes to paths the project marks for security review — findings; a second reading confirms each blocking one.
+8. **coordinator** — merges once the checks, the review status and any security review are green.
+   You merge instead when a change touches a path the project reserves to you; in a repository that is not yours, nobody does.
+
+```mermaid
+flowchart TD
+  co[coordinator] -->|"request, framed with you"| pd[product-designer]
+  pd <-->|"visual work: design, verdict"| dr[design-reviewer]
+  pd -->|"epic"| ar[architect]
+  ar -->|"tasks"| co
+  co -->|"a task; findings to fix"| dv[developer]
+  dv -->|"pull request"| pr[pr-reviewer]
+  pr -->|"verdict, status"| co
+  co -.->|"security paths"| sr[security-reviewer]
+  sr -.->|"findings"| co
+```
+
+The agents decide the rest alone, taking the option closest to existing code. Yours to decide:
+
+- Scope and product: what a user sees, departing from what was asked.
+- Dependencies: a new runtime dependency, any major version upgrade.
+- Process and security: CI, rulesets, quality thresholds, hooks, agent definitions.
+- Release: whether to release, and the version. The release is your act.
+
+Each role writes down what the next needs: on GitHub (issues, labels, the `agent-review` status) in
+your own project, in local files in a repository that is not yours. A project opts in with a profile
+file; without one, nothing happens. See [Configuration](docs/configuration.md).
+
+GitHub refuses merging and setting the review status to the agents' token. The coordinator gets a
+stronger one for the merge command alone, the pr-reviewer for the status command alone. Pushing,
+tags and releases rest on rules alone: see [GitHub tokens](docs/github-tokens.md#what-it-does-not-stop).
+
+A whole request, step by step, is in the [walkthrough](docs/walkthrough.md).
+
 ## Install
 
 ```

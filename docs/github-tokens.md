@@ -48,7 +48,10 @@ misspelled.
 
 ## Setting them up
 
-The tokens live in the macOS keychain, so for now this works on macOS only.
+The tokens live in the macOS keychain, so for now this works on macOS only. Run these in a
+terminal, not in a Claude Code session, where `setup` refuses for lack of a keyboard. A
+terminal does not have the plugin's commands on its `PATH`: the `export` line of
+[Getting started](getting-started.md#2-install-the-plugin) adds them.
 
 ```bash
 ola-workflow-tokens setup     # opens GitHub's form pre-filled, once per token, and stores what you paste

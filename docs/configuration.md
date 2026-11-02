@@ -107,12 +107,8 @@ workflow, which is the only honest test of how generic it is. Its
 not rewritten under itself while it works. For an ordinary session, name another agent:
 `claude --agent <name>`.
 
-|  | integrated | discreet |
-|---|---|---|
-| Memory | GitHub issues, labels, a review commit status, review comments | local files under the profile directory |
-| Conventions | the profile, plus the project's own CONTRIBUTING | read from the project: CONTRIBUTING, PR template, commit language |
-| Writes to GitHub | allowed, per role | issues, labels, comments, statuses: **refused**. `git push` and `gh pr create`: **ask** (a human confirms) |
-| Merge | the coordinator, through the merge gate; the `RFR` label marks a pull request ready to merge, by the coordinator or by the human | nobody |
+What changes between the two modes — memory, writes to the forge, merge — is in
+[discreet mode](discreet-mode.md).
 
 ### Captures
 
