@@ -22,7 +22,7 @@ claude plugin install ola-workflow --marketplace olaurendeau/ola-workflow
 ```
 
 User scope is the default, which is what you want: install once, use everywhere. Then, in a
-terminal, create the tokens the agents work with — see [GitHub tokens](#github-tokens):
+terminal, create the tokens the agents work with — see [GitHub tokens](docs/github-tokens.md):
 
 ```bash
 ola-workflow-tokens setup
@@ -35,7 +35,7 @@ merging belongs to the coordinator and the review status to the pr-reviewer, and
 works with a token that can do neither. Pushing to the base branch, tagging, releasing,
 publishing and changing repository settings are **not refused by anything** — they are rules
 the prompts carry and nothing applies, which is a different thing from a rule. See
-[What it does not stop](#what-it-does-not-stop).
+[What it does not stop](docs/github-tokens.md#what-it-does-not-stop).
 
 In place: the manifests, the CI,
 the test harness, the answer to how a plugin agent is identified (see
@@ -64,88 +64,7 @@ exit before doing anything, and its sessions keep your own GitHub login.
 Until the merge gate exists, the coordinator checks it by hand against the forge: GitHub
 checks *who* merges, not whether the checks were green.
 
-## GitHub tokens
-
-The agents never hold your GitHub login. In a project with a profile, every Bash command of
-the session — the coordinator's and each subagent's — runs with `GH_TOKEN` set to a **base**
-token. It reads the code, writes pull requests and issues and reads statuses, and it can
-neither merge nor write a commit status. GitHub refuses those two with a 403, however the
-command is written: `gh pr merge`, `gh api -X PUT …/merge`, `curl`, a script, an alias.
-
-Two commands, in one exact form each, run with a stronger token:
-
-| who | the command, exactly | token | its permissions |
-|---|---|---|---|
-| coordinator | `gh pr merge <N> --squash --match-head-commit <SHA>` | merge | contents: write, pull requests: write |
-| pr-reviewer | `gh api repos/{owner}/{repo}/statuses/<SHA> -f state=… -f context=<review_status> [-f description='…'] [-f target_url=…]` | review | commit statuses: write |
-| everyone | anything else | base | contents: read, pull requests: write, issues: write, commit statuses: read, actions: read |
-
-`<SHA>` is the full 40 characters, and nothing may come before, after or around the command.
-
-The base token cannot read check runs: GitHub gives the Checks API to no fine-grained token
-(a classic one with `repo` can read it), so `gh pr checks` fails with "Resource not
-accessible by personal access token". The brief has the agents read a SHA's GitHub Actions
-jobs and its commit statuses instead, which carry the same names. A check posted by an app
-other than GitHub Actions is in neither, and the agents are told to ask you about a required
-check they cannot find.
-
-How it is wired:
-
-- [`hooks/session.sh`](hooks/session.sh), on `SessionStart`, appends one line to
-  `CLAUDE_ENV_FILE`. Claude Code sources that file before each Bash command, subagents
-  included (measured on 2.1.302). The line looks the base token up in the keychain each
-  time, so the token is never written to a file.
-- [`hooks/elevate.sh`](hooks/elevate.sh), on `PreToolUse` for Bash, recognises the two forms
-  with one regular expression each, over a character set with no shell metacharacter in it.
-  It checks that the role owns the form (from `agent_type`) and that the project is
-  `integrated`, then rewrites the command to run through `hooks/lib/with-token.sh` and allows
-  it.
-- Every other command passes untouched: no rewrite, no decision, and your permission rules
-  apply as written. That is deliberate, because a rewritten command is the one the
-  permission rules are matched against (measured), so rewriting every command would turn
-  every allowlisted one into a question.
-- When anything goes wrong, a right is lost and never gained. A form the hook does not
-  recognise runs with the base token, and GitHub refuses it.
-
-This replaces a guard that read command lines looking for the same two operations. It had to
-undo every spelling a shell accepts, and each spelling it missed was a merge it let through:
-0.3.2 alone fixed fifty-seven of them, and three more were still open. A token cannot be
-misspelled.
-
-### Setting them up
-
-The tokens live in the macOS keychain, so for now this works on macOS only.
-
-```bash
-ola-workflow-tokens setup     # opens GitHub's form pre-filled, once per token, and stores what you paste
-ola-workflow-tokens status    # who each token acts as, and when it expires
-```
-
-On each form, choose **Only select repositories** and pick the projects that have a
-profile. A token expires after 90 days unless you change it on the form; `status` says when.
-
-With no base token, every gh call of the session fails with a 401, and the session is told
-why when it starts. `"github_tokens": "off"` in a profile turns all of this off, and the
-agents then use your own login.
-
-### What it does not stop
-
-- **An agent that sets out to get around it.** The tokens live in your keychain, under your
-  user. An agent that runs `security find-generic-password` itself, or sets its own
-  `GH_TOKEN`, gets them. This stops mistakes and misreadings, not an agent determined to
-  break the rules.
-- **`git push`.** Git authenticates with your own credentials (keychain or SSH), not with
-  `GH_TOKEN`, so an agent can push to the base branch. On a free plan with a private
-  repository, nothing on GitHub's side can refuse that. Branch protection or a ruleset can,
-  on a public repository or a paid plan. And if `gh auth git-credential` is your only git
-  credential helper, git uses the base token and pushing fails: configure another helper,
-  or SSH.
-- **The merge gate's conditions.** GitHub checks *who* merges. Whether the checks and the
-  review status are green on the head SHA is still the coordinator's to verify.
-- **The main session with no agent.** It has no `agent_type`, so it holds the base token and
-  nothing is elevated. Merge from your own terminal.
-
-### Where the rules live
+## Where the rules live
 
 The agents share one source: `ola-workflow-brief`, on the PATH beside `ola-profile`. It
 resolves the profile and prints the rules that follow from it — mode, languages, base
@@ -226,7 +145,7 @@ is also what validates it — point your editor at it:
 | `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
 | `security` | `paths`: the globs whose change gets a security review beside the code review; none, and nobody is dispatched |
 | `commands` | per-command `allow_args` / `deny_args` rules the brief states — nothing applies them yet |
-| `github_tokens` | `keychain` (the default) or `off` — see [GitHub tokens](#github-tokens) |
+| `github_tokens` | `keychain` (the default) or `off` — see [GitHub tokens](docs/github-tokens.md) |
 | `db_hosts_allowed` | the databases an agent may connect to |
 | `context` | the documents the agents read: product, architecture, review checklist, security precedents, glossary; and `design`, where each design is documented (`docs/design` by default, integrated mode only) |
 | `verify_ui` | how a change is seen running |

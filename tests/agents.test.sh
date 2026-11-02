@@ -1471,8 +1471,8 @@ else
 fi
 
 # --- The table of models and efforts, against the two maps -----------------------------
-# Nothing above compared the README's table to anything: EXPECTED_MODEL and EXPECTED_EFFORT
-# are compared to the frontmatter, and the table the README prints could say anything. It is
+# Nothing above compared the models table to anything: EXPECTED_MODEL and EXPECTED_EFFORT
+# are compared to the frontmatter, and the table docs/models.md prints could say anything. It is
 # compared to the same two maps, in both directions. `*(none)*` is the table's way of
 # writing `-`. The table lives in docs/models.md: that is the variable below.
 MODELS_PAGE=$ROOT/docs/models.md
