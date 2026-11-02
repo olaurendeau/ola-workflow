@@ -80,6 +80,7 @@ export_problems() {
   local page=$1 line before after added
   line=$(grep -F 'claude plugin list --json' "$page" | head -n 1)
   [ -n "$line" ] || { echo "export: the page has no PATH line"; return; }
+  # shellcheck disable=SC2329  # called by the eval below
   claude() { cat "$fx/two-installs.json"; }
   before=$PATH
   after=$(eval "$line" 2>/dev/null; printf '%s' "$PATH")
