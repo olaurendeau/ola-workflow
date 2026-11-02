@@ -1095,9 +1095,112 @@ case $step8 in
   *'fresh session'*'forge'*'memory'*) ok "coordinator: offers a fresh session when an epic closes" ;;
   *) ko "coordinator: does not offer a fresh session when an epic closes" ;;
 esac
+# Suggestions: a suggestion costs a whole cycle (developer, review, CI) when it is fixed on
+# its own, so "fix now" is tied to a cycle already owed, and the rest are noted, not opened as
+# tasks. The bullet is read on its own: the same words elsewhere in step 6 prove nothing.
+sugg=$(printf '%s' "$step6" | sed 's/.*\*\*Suggestions\*\*/**Suggestions**/; s/- \*\*A security review\*\*.*//')
+case $sugg in
+  '**Suggestions**'*) ok "witness: coordinator step 6 has a Suggestions bullet" ;;
+  *) ko "witness: coordinator step 6 has no Suggestions bullet to read" ;;
+esac
+case $sugg in
+  *'Fix now'*'only if a cycle is already owed'*'blocking finding'*'confirmed security finding'*'failing check'*'same dispatch'*)
+    ok "coordinator: a suggestion is fixed now only when a cycle is already owed, and travels with it" ;;
+  *) ko "coordinator: a suggestion can cost a cycle of its own" ;;
+esac
+case $sugg in
+  *'Follow-up'*'otherwise'*'where the epic lives'*'integrated mode'*'comment'*'Follow-ups of #'*'discreet mode'*'epic.md'*'No task per suggestion'*)
+    ok "coordinator: other suggestions are noted where the epic lives, with no task per suggestion" ;;
+  *) ko "coordinator: nothing says where a suggestion triaged as a follow-up is noted" ;;
+esac
+case $sugg in
+  *'Reject'*'reason'*'Publish the triage'*) ok "coordinator: a rejected suggestion carries a reason, and the triage is published" ;;
+  *) ko "coordinator: a rejected suggestion can be dropped without a reason or a publication" ;;
+esac
+case $coord_all in
+  *'keep as a follow-up task'*) ko "coordinator: still opens a follow-up task per suggestion" ;;
+  *) ok "coordinator: opens no follow-up task per suggestion" ;;
+esac
+case $step8 in
+  *'epic closes'*'follow-ups'*'noted'*'one task'*'all of them'*'files'*'proves'*'report'*)
+    ok "coordinator: closing an epic builds one task from its noted follow-ups, and reports it" ;;
+  *) ko "coordinator: closing an epic does not group its follow-ups into one task" ;;
+esac
+case $step8 in
+  *'without an epic'*'single task'*'one task when its pull request is merged'*)
+    ok "coordinator: a request without an epic groups its follow-ups when its pull request merges" ;;
+  *) ko "coordinator: a single-task request leaves its follow-ups ungrouped" ;;
+esac
+case $coord_all in
+  *'The human rules a security finding a false positive'*'open a task that adds it'*)
+    ok "coordinator: the security precedent task is kept, it is no suggestion" ;;
+  *) ko "coordinator: the security precedent task is gone" ;;
+esac
+
 case $coord_all in
   *'only the Report block'*) ok "coordinator: asks an agent for its Report block only" ;;
   *) ko "coordinator: asks for a detailed account that stays in its context" ;;
+esac
+
+# --- The coordinator takes its state back from the forge ------------------------------
+# A summary or a /clear erases what the coordinator held; the forge is the memory, so the
+# coordinator reads it again, one line per item and bounded. The section is read between
+# its heading and the next, and the commands out of it, so a mention elsewhere in the file
+# cannot satisfy these.
+resume_state=$(coord_part '^## Resume the state' '^## ')
+resume_state_raw=$(awk '/^## Resume the state/{on=1; next} on && /^## /{exit} on' "$coord")
+step4=$(coord_part '^4\\. \\*\\*Design and split' '^5\\. \\*\\*')
+for part in resume_state step4; do
+  if [ -n "${!part}" ]; then
+    ok "witness: coordinator $part is readable"
+  else
+    ko "witness: coordinator $part is not where the assertions below look"
+  fi
+done
+case $coord_all in
+  *'ola-workflow-brief'*'## Resume the state'*'## The team'*)
+    ok "coordinator: resumes the state right after the brief, before the team" ;;
+  *) ko "coordinator: the state is not resumed between the brief and the team" ;;
+esac
+case $resume_state in
+  *'At startup'*'/clear'*'summarised'*'forge'*)
+    ok "coordinator: reads the forge again at startup, after /clear and after a summary" ;;
+  *) ko "coordinator: does not say to read the forge again at startup, after /clear and a summary" ;;
+esac
+case $resume_state in
+  *'open epics'*'open tasks'*'epic'*'open pull request'*'head SHA'*'RFR'*'task it closes'*)
+    ok "coordinator: reads open epics, tasks with their epic, and pull requests with head SHA, RFR and task" ;;
+  *) ko "coordinator: the state it resumes lacks epics, tasks, or pull requests with head SHA and RFR" ;;
+esac
+case $resume_state in
+  *'epic.md'*'tasks/'*'gh pr list'*'only reads'*)
+    ok "coordinator: in discreet mode, reads the memory directory and the open pull requests" ;;
+  *) ko "coordinator: says nothing of resuming the state in discreet mode" ;;
+esac
+resume_cmds=$(printf '%s\n' "$resume_state_raw" | grep -E '^ +gh ' || true)
+case $(printf '%s\n' "$resume_cmds" | grep -c 'gh ') in
+  3) ok "coordinator: resumes the state with three commands" ;;
+  *) ko "coordinator: the state is not three commands: epics, tasks, pull requests" ;;
+esac
+for sub in 'issue list --label epic' 'issue list --label task' 'pr list'; do
+  line=$(printf '%s\n' "$resume_cmds" | grep -F "gh $sub" || true)
+  case $line in
+    *'--jq'*) ok "coordinator: '$sub' prints one line per item, through --jq" ;;
+    *) ko "coordinator: '$sub' is not reduced to one line per item by --jq" ;;
+  esac
+done
+case $resume_cmds in
+  *body*|*comments*) ko "coordinator: the state it resumes reads a body or comments, not one line per item" ;;
+  *) ok "coordinator: the state it resumes reads no body and no comments" ;;
+esac
+case $resume_cmds in
+  *'--limit'*'parent'*'headRefOid'*'closingIssuesReferences'*)
+    ok "coordinator: bounds the task list, and asks the parent, head SHA and closed tasks" ;;
+  *) ko "coordinator: the commands lack --limit, parent, headRefOid or closingIssuesReferences" ;;
+esac
+case $step4 in
+  *'sub-issue of the epic'*'--parent <epic>'*) ok "coordinator: step 4 creates each task as a sub-issue of its epic" ;;
+  *) ko "coordinator: step 4 does not create tasks with --parent, so the task list has no epic to show" ;;
 esac
 
 # --- The shape of a pull request description ------------------------------------------
@@ -1159,6 +1262,79 @@ case $(cat "$ROOT/skills/workflow-init/SKILL.md") in
   *'`preview`'*'ask'*) ok "workflow-init: preview is asked for, not detected" ;;
   *) ko "workflow-init: nothing says preview is asked for" ;;
 esac
+
+# --- workflow-init writes the session settings, in integrated mode only ---------------
+# The coordinator's context is reread on every call, and the session only summarises itself
+# near the end of a 1M window. `autoCompactWindow` moves that to 250k; it lives in the
+# project's `.claude/settings.json`, next to `agent`, so workflow-init has to write it.
+init_skill=$(tr -s '\n ' ' ' < "$ROOT/skills/workflow-init/SKILL.md")
+# The integrated passage: from its marker to the next numbered step.
+passage=$(awk '/^ *\*\*The session settings/{on=1} on && /^[0-9]+\. /{exit} on' "$ROOT/skills/workflow-init/SKILL.md" | tr -s '\n ' ' ')
+case $passage in
+  *'`"agent": "ola-workflow:coordinator"`'*) ok "workflow-init: the integrated passage writes the coordinator as the agent" ;;
+  *) ko "workflow-init: the integrated passage does not write \"agent\": \"ola-workflow:coordinator\"" ;;
+esac
+case $passage in
+  *'`"autoCompactWindow": 250000`'*) ok "workflow-init: the integrated passage writes the auto-compact window at 250000" ;;
+  *) ko "workflow-init: the integrated passage does not write \"autoCompactWindow\": 250000" ;;
+esac
+case $passage in
+  *'read it and keep its other keys'*) ok "workflow-init: the integrated passage keeps the other keys of an existing file" ;;
+  *) ko "workflow-init: the integrated passage does not say it keeps the other keys" ;;
+esac
+case $passage in
+  *'`agent` is already there with another value'*'ask the human before replacing'*) ok "workflow-init: a different existing agent is asked about before it is replaced" ;;
+  *) ko "workflow-init: nothing says a different existing agent is asked about before it is replaced" ;;
+esac
+case $passage in
+  *'`autoCompactWindow` is already there with another value'*'ask the human'*) ok "workflow-init: a different existing auto-compact window is shown and asked about" ;;
+  *) ko "workflow-init: nothing says a different existing auto-compact window is asked about" ;;
+esac
+case $passage in
+  *'keeps another `agent`'*'`autoCompactWindow` is still written'*) ok "workflow-init: the auto-compact window is still written when the human keeps another agent" ;;
+  *) ko "workflow-init: nothing says the auto-compact window is still written when the human keeps another agent" ;;
+esac
+discreet_says() {
+  case $1 in
+    *'In `discreet` mode this setting is not written in the repository'*'`.claude/settings.local.json`'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if discreet_says "$init_skill"; then
+  ok "workflow-init: in discreet mode the setting is not written in the repository"
+else
+  ko "workflow-init: nothing says the setting is not written in the repository in discreet mode"
+fi
+# Witness: the matcher must refuse the opposite sentence, or the check above proves nothing.
+if discreet_says 'In `discreet` mode this setting is written in the repository, in `.claude/settings.local.json`'; then
+  ko "workflow-init: the discreet matcher accepts the opposite sentence"
+else
+  ok "workflow-init: the discreet matcher refuses the opposite sentence"
+fi
+case $init_skill in
+  *'`.claude/settings.local.json`'*'by hand'*'check-ignore'*) ok "workflow-init: a settings.local.json made by hand is checked for being git-ignored" ;;
+  *) ko "workflow-init: nothing says to check that a hand-made settings.local.json is git-ignored" ;;
+esac
+step7=$(awk '/^7\. \*\*Report/{on=1} on && /^## /{exit} on' "$ROOT/skills/workflow-init/SKILL.md" | tr -s '\n ' ' ')
+case $step7 in
+  *'three things'*) ko "workflow-init: step 7 still says it names three things, and lists more" ;;
+  *'settings file'*) ok "workflow-init: step 7 does not count what it lists" ;;
+  *) ko "workflow-init: step 7 does not name the settings file" ;;
+esac
+readme_first=$(awk '/^### Writing the first one/{on=1; next} on && /^### /{exit} on' "$ROOT/README.md" | tr -s '\n ' ' ')
+case $readme_first in
+  *'.claude/settings.json'*'autoCompactWindow'*) ok "README: \"Writing the first one\" says the skill also writes the session settings" ;;
+  *) ko "README: \"Writing the first one\" describes a skill that writes only the profile" ;;
+esac
+case $init_skill in
+  *'settings file too'*'commit'*) ok "workflow-init: the report says the settings file is the human's to commit" ;;
+  *) ko "workflow-init: the report does not say the settings file is the human's to commit" ;;
+esac
+if jq -e '.agent == "ola-workflow:coordinator" and .autoCompactWindow == 250000' "$ROOT/.claude/settings.json" >/dev/null; then
+  ok "this repository's settings.json sets the coordinator and the 250000 auto-compact window"
+else
+  ko "this repository's settings.json lacks the coordinator or the 250000 auto-compact window"
+fi
 
 # --- Dispatch names are namespaced ----------------------------------------------------
 # subagent_type is an exact match: a bare name does not resolve to a plugin agent, and the
@@ -1659,7 +1835,7 @@ for mode in integrated discreet; do
     ko "$mode: the brief does not give the command matching security.paths: $(head -c 200 "$WORK/secured-$mode.out" | tr '\n' ' ')"
   fi
   # Whether a fix owes a security review is a question about the fix, not the request.
-  if grep -qF "<reviewed SHA>...<SHA> -- ':(glob)back/auth/**'" "$WORK/secured-$mode.out"; then
+  if grep -qF "diff <(git diff --no-color --no-ext-diff origin/main...<reviewed SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim) <(git diff --no-color --no-ext-diff origin/main...<SHA> -- ':(glob)back/auth/**' ':(glob)Dockerfile*' | git patch-id --verbatim)" "$WORK/secured-$mode.out"; then
     ok "$mode: the brief gives the command for a fix since the last review"
   else
     ko "$mode: the brief matches the security paths only against the whole request"
@@ -1682,6 +1858,116 @@ for forbidden in 'gh pr comment' 'gh api'; do
     ok "discreet: the security section gives no way to run $forbidden"
   fi
 done
+
+# The command for a fix, run for real. A catch-up brings main's files into the diff between
+# two SHAs, and none of them is the pull request's: only what the PR changes against main may
+# make a fix owe a new security review. Built on a real repository with a bare origin.
+fixrepo=$WORK/fix-origin-work
+gitq() { git -C "$fixrepo" -c user.email=t@e -c user.name=t "$@"; }
+git init -q --bare -b main "$WORK/fix-origin.git" 2>/dev/null
+git clone -q "$WORK/fix-origin.git" "$fixrepo" 2>/dev/null
+mkdir -p "$fixrepo/back/auth" "$fixrepo/docs" "$fixrepo/.claude"
+printf '{"mode":"integrated","base_branch":"main","security":{"paths":["back/auth/**"]}}\n' \
+  >"$fixrepo/.claude/workflow.json"
+seq 1 40 >"$fixrepo/back/auth/a"
+echo b >"$fixrepo/back/auth/b"
+seq 1 40 >"$fixrepo/back/auth/c"
+echo doc >"$fixrepo/docs/d"
+gitq checkout -q -b main 2>/dev/null
+gitq add -A && gitq commit -q -m base && gitq push -q origin main 2>/dev/null
+# The pull request changes the top of a and the middle of c; main then changes b, the bottom
+# of a and inserts lines above the whole of c, which moves the PR's hunk in c; the PR
+# catches up by a merge that conflicts with nothing.
+gitq checkout -q -b pr
+sed -i.bak '2s/.*/pr/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+sed -i.bak '20s/.*/pr/' "$fixrepo/back/auth/c" && rm "$fixrepo/back/auth/c.bak"
+gitq commit -q -am "pr change"
+reviewed=$(gitq rev-parse HEAD)
+gitq checkout -q main
+echo b2 >>"$fixrepo/back/auth/b"
+sed -i.bak '39s/.*/main/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+seq 101 105 | cat - "$fixrepo/back/auth/c" >"$fixrepo/back/auth/c.new" && mv "$fixrepo/back/auth/c.new" "$fixrepo/back/auth/c"
+gitq commit -q -am "main moves"
+gitq push -q origin main 2>/dev/null
+gitq checkout -q pr
+gitq merge -q --no-edit main >/dev/null 2>&1
+caught_up=$(gitq rev-parse HEAD)
+fixcmd=$("$BRIEF" "$fixrepo" | awk '/^    diff </{sub(/^    /,""); print; exit}')
+fix_run() { # fix_run <new SHA> — what the brief's command prints for a fix at that SHA
+  local cmd=${fixcmd//<reviewed SHA>/$reviewed}
+  cmd=${cmd//<SHA>/$1}
+  (cd "$fixrepo" && bash -c "$cmd" 2>&1)
+}
+if [ -n "$fixcmd" ]; then
+  ok "behaviour: the brief prints a comparison command to run"
+else
+  ko "behaviour: the brief prints no comparison command"
+fi
+if [ -z "$(fix_run "$caught_up")" ]; then
+  ok "behaviour: a catch-up of main owes no new security review"
+else
+  ko "behaviour: a catch-up of main prints $(fix_run "$caught_up" | head -c 200)"
+fi
+sed -i.bak '10s/.*/fix/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+gitq commit -q -am "fix in a"
+fix_a=$(gitq rev-parse HEAD)
+if [ -n "$(fix_run "$fix_a")" ]; then
+  ok "behaviour: a fix changing a security path owes a new security review"
+else
+  ko "behaviour: a fix changing back/auth/a prints nothing"
+fi
+gitq checkout -q -b outside "$caught_up"
+echo more >>"$fixrepo/docs/d"
+gitq commit -q -am "fix outside"
+if [ -z "$(fix_run "$(gitq rev-parse HEAD)")" ]; then
+  ok "behaviour: a fix outside the security paths owes nothing"
+else
+  ko "behaviour: a fix outside the security paths prints something"
+fi
+gitq checkout -q -b spaces "$caught_up"
+sed -i.bak '2s/$/ /' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+gitq commit -q -am "whitespace only"
+if [ -n "$(fix_run "$(gitq rev-parse HEAD)")" ]; then
+  ok "behaviour: a fix changing only whitespace in a security path owes a new security review"
+else
+  ko "behaviour: a whitespace-only fix prints nothing, so --verbatim is not doing its work"
+fi
+# A host's git config must not blind the comparison: with colour forced or an external diff
+# tool, git diff writes nothing git patch-id can read, and two empty sides print nothing.
+for setting in "color.diff always" "color.ui always" "diff.external true"; do
+  # shellcheck disable=SC2086 # the setting is a name and a value
+  gitq config $setting
+  if [ -n "$(fix_run "$fix_a")" ]; then
+    ok "behaviour: a fix changing a security path owes a review under $setting"
+  else
+    ko "behaviour: under $setting a fix changing back/auth/a prints nothing"
+  fi
+  gitq config --unset "${setting%% *}"
+done
+# The sentence around the command names the base branch of the project, not a fixed one.
+basedir=$WORK/fix-base-develop
+mkdir -p "$basedir/.claude"
+git -C "$basedir" init -q 2>/dev/null
+printf '{"mode":"integrated","base_branch":"develop","security":{"paths":["back/auth/**"]}}\n' \
+  >"$basedir/.claude/workflow.json"
+basetext=$("$BRIEF" "$basedir" | sed -n '/^A fix owes a new one/,/^$/p')
+case $basetext in
+  *main*) ko "behaviour: the fix paragraph says main on a project whose base branch is develop" ;;
+  *'against develop'*'origin/develop'*) ok "behaviour: the fix paragraph names the project's base branch" ;;
+  *) ko "behaviour: the fix paragraph does not name develop: $(printf '%s' "$basetext" | head -c 200)" ;;
+esac
+case $("$BRIEF" "$basedir") in
+  *'identical change between two places'*) ok "behaviour: the brief states the limit of the comparison" ;;
+  *) ko "behaviour: the brief does not state that moving an identical change goes unseen" ;;
+esac
+case $step6 in
+  *'prints anything'*) ok "coordinator: a fix owes a security review when the comparison prints anything" ;;
+  *) ko "coordinator: step 6 does not say a fix owes a security review when the comparison prints anything" ;;
+esac
+case $step6 in
+  *'command for a fix, from the SHA last reviewed, prints a file'*) ko "coordinator: step 6 still reads the fix command as a diff between the two SHAs printing a file" ;;
+  *) ok "coordinator: step 6 no longer reads the fix command as a file list between the two SHAs" ;;
+esac
 # No paths: said, so that a quiet result is not read as a clean one.
 case $integrated in
   *'## Security review'*'not dispatched'*) ok "no security paths: the brief says the security-reviewer is not dispatched" ;;

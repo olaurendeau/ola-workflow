@@ -22,6 +22,24 @@ arrives while an epic is running is yours to handle, in parallel, with the slots
 brief. Reason: a sub-agent loses its prompt cache after 5 minutes and never summarises its
 context, which is ruinous for a role that spends its time waiting.
 
+## Resume the state
+
+At startup, and whenever the state of a request is no longer in front of you — after
+`/clear`, after your context was summarised — take it back from the forge, which is the
+memory. One line per item, bounded:
+
+    gh issue list --label epic --state open --json number,title --jq '.[] | "epic #\(.number) \(.title)"'
+    gh issue list --label task --state open --limit 100 --json number,title,parent --jq '.[] | "task #\(.number) epic #\(.parent.number // "-") \(.title)"'
+    gh pr list --state open --json number,headRefOid,labels,closingIssuesReferences --jq '.[] | "PR #\(.number) \(.headRefOid) \(if any(.labels[]; .name == "RFR") then "RFR" else "-" end) closes \([.closingIssuesReferences[].number | "#\(.)"] | join(","))"'
+
+That is the open epics, the open tasks with their epic, and the open pull requests with
+their head SHA, whether they carry `RFR`, and the task it closes. No issue body and no
+comment at this stage: read the detail when you pick an item up.
+
+In discreet mode, read the same from the memory directory the brief names — the first line
+of `epic.md`, the list of `tasks/` — and the open pull requests with the same
+`gh pr list`, which only reads.
+
 ## The team
 
 | Agent | Dispatch with | Returns |
@@ -103,6 +121,9 @@ context.
 4. **Design and split.** Dispatch the architect with the epic, including the paths of the
    design's page and README when there is one. Record each task in
    dependency order, with the files it touches, the tests it needs and what "done" means.
+   In integrated mode, create each task as a sub-issue of the epic,
+   with the `--parent <epic>` option of the issue creation: the task-to-epic link then lives on the forge,
+   whatever language the issues are in, and *Resume the state* has it to show.
    Done when every task names its dependencies.
 
 5. **Build.** For each task whose dependencies are merged, dispatch a developer with the
@@ -143,8 +164,15 @@ context.
      cycles, judge it: valid, send it back; a false positive, ask the human. Record the
      human's answer where the work lives, and dispatch the reviewer again — it treats a
      finding settled that way as settled.
-   - **Suggestions** → triage each: fix now, keep as a follow-up task, or reject with a
-     reason. Publish the triage; a suggestion silently dropped is a suggestion that comes
+   - **Suggestions** → triage each into one of three. **Fix now** only if a cycle is already
+     owed on this pull request: a blocking finding going to a developer, a confirmed security
+     finding, a failing check that points at the code. The suggestion then goes in the same
+     dispatch, since a cycle of its own — developer, review, CI — costs as much as the one
+     already owed. **Follow-up** otherwise: note it where the epic lives, at the time you
+     triage it. In integrated mode that is a comment on the epic's issue, `Follow-ups of
+     #<PR>`, then one line per suggestion (file:line — one sentence); in discreet mode, a
+     section of `epic.md`. No task per suggestion. **Reject** with a reason. Publish the
+     triage on the pull request; a suggestion silently dropped is a suggestion that comes
      back.
    - **A security review** is owed when the command in the brief's *Security review* section
      prints a file for this request. Dispatch the security-reviewer in review mode beside
@@ -187,7 +215,8 @@ context.
    | only prose — a comment, a README, a commit message | no new cycle; report it and merge |
 
    A fix that owes a review owes a security review on the same terms, and only when the
-   brief's *Security review* command for a fix, from the SHA last reviewed, prints a file.
+   brief's *Security review* comparison for a fix — what the request changes in those paths,
+   at the SHA last reviewed against the new one — prints anything.
 
    Two things keep this honest. A prose fix still goes to the reviewer, so a false claim in
    it is caught on the next change rather than never. And a claim that must be *true* rather
@@ -205,9 +234,12 @@ context.
    catch up, and a new head SHA needs a new review.
 
 8. **Close.** Report to the human: what shipped, which decisions you took alone, which
-   follow-ups you opened. When an epic closes, offer to continue in a fresh session: the
-   forge is the memory, so nothing is lost, and this session's context only gets more
-   expensive to carry.
+   follow-up task you opened. When an epic closes and follow-ups were noted, build one task
+   that groups all of them, read from the epic's comments or from `epic.md`, with its files
+   and what proves it done, and cite it in the report. A request without an epic (a single
+   task, step 2) groups its follow-ups into one task when its pull request is merged. Then,
+   when an epic closes, offer to continue in a fresh session: the forge is the memory, so
+   nothing is lost, and this session's context only gets more expensive to carry.
 
 ## What you do not do
 

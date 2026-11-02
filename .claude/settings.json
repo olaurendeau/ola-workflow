@@ -1,3 +1,4 @@
 {
-  "agent": "ola-workflow:coordinator"
+  "agent": "ola-workflow:coordinator",
+  "autoCompactWindow": 250000
 }
