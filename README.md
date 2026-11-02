@@ -16,25 +16,25 @@ below. Each reads **role** — what it does — what it produces. A change that 
 fits one pull request skips steps 2 to 4.
 
 1. **coordinator** — asks you only if your goal is unclear — a request in one sentence.
-2. **product-designer** — says what "done" means, and the words users read — a spec.
+2. **product-designer** — says what "done" means, and the words users read — an epic, the GitHub issue that holds it.
 3. **design-reviewer** — checks the design, for visual work only — a verdict. You settle a dispute.
-4. **architect** — splits the spec into small tasks — one issue per task.
+4. **architect** — splits the epic into small tasks — one issue per task.
 5. **developer** — builds one task, test first, in its own worktree — a pull request.
 6. **pr-reviewer** — reviews what it did not write — a verdict and an `agent-review` status.
-7. **security-reviewer** — also reads changes to paths the project lists as sensitive — findings, each blocking one read again.
+7. **security-reviewer** — also reads changes to paths the project marks for security review — findings; a second reading confirms each blocking one.
 8. **coordinator** — merges once the checks, the review status and any security review are green.
-   You merge instead when a change touches a sensitive path; in a repository that is not yours, nobody does.
+   You merge instead when a change touches a path the project reserves to you; in a repository that is not yours, nobody does.
 
 ```mermaid
 flowchart TD
   co[coordinator] -->|"request, framed with you"| pd[product-designer]
   pd <-->|"visual work: design, verdict"| dr[design-reviewer]
-  pd -->|"spec"| ar[architect]
+  pd -->|"epic"| ar[architect]
   ar -->|"tasks"| co
   co -->|"a task; findings to fix"| dv[developer]
   dv -->|"pull request"| pr[pr-reviewer]
   pr -->|"verdict, status"| co
-  co -.->|"sensitive paths"| sr[security-reviewer]
+  co -.->|"security paths"| sr[security-reviewer]
   sr -.->|"findings"| co
 ```
 
@@ -49,9 +49,9 @@ Each role writes down what the next needs: on GitHub (issues, labels, the `agent
 your own project, in local files in a repository that is not yours. A project opts in with a profile
 file; without one, nothing happens. See [Configuration](docs/configuration.md).
 
-Each role works with its own GitHub token. GitHub refuses two acts to the others: merging, kept by
-the coordinator, and setting the review status, kept by the pr-reviewer. Pushing to the base
-branch, tags and releases rest on the agents' rules alone: see [GitHub tokens](docs/github-tokens.md#what-it-does-not-stop).
+GitHub refuses merging and setting the review status to the agents' token. The coordinator gets a
+stronger one for the merge command alone, the pr-reviewer for the status command alone. Pushing,
+tags and releases rest on rules alone: see [GitHub tokens](docs/github-tokens.md#what-it-does-not-stop).
 
 A whole request, step by step, is in the [walkthrough](docs/walkthrough.md).
 

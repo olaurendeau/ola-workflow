@@ -169,9 +169,17 @@ printf '%s\n' "$SEC" | grep -q '^###' && ko "the section has a subsection" || ok
   ko "fixture: the length is not measured"
 
 # The two things a stranger would get wrong: who merges, and the steps a change may skip.
-printf '%s\n' "$SEC" | grep -qi 'sensitive' && printf '%s\n' "$SEC" | grep -qi 'nobody' &&
-  ok "the section says who else merges (sensitive paths) and when nobody does" ||
-  ko "the section does not say who merges on sensitive paths, or when nobody does"
+printf '%s\n' "$SEC" | grep -qi 'You merge instead' && printf '%s\n' "$SEC" | grep -qi 'nobody' &&
+  ok "the section says when the human merges and when nobody does" ||
+  ko "the section does not say when the human merges, or when nobody does"
+# One word, one list: "sensitive" names the paths the human merges in the profile, and the
+# paths that get a security review are another list, so the section must not use it for both.
+! printf '%s\n' "$SEC" | grep -qi 'sensitive' &&
+  ok "the section does not call either path list 'sensitive'" ||
+  ko "the section says 'sensitive', which names two different lists"
+printf '%s\n' "$SEC" | grep -qiw 'spec' &&
+  ko "the section says 'spec', where the rest of the repository says 'epic'" ||
+  ok "the section says 'epic', not 'spec'"
 printf '%s\n' "$SEC" | grep -qiE 'skips steps? [0-9]' &&
   ok "the section says which steps a change may skip" || ko "the section does not say which steps may be skipped"
 
