@@ -39,14 +39,27 @@ trap 'rm -rf "${WORK:?}"' EXIT
 cat >"$WORK/links.pl" <<'PERL'
 use strict; use warnings; use utf8;
 use File::Basename qw(dirname);
+use Encode qw(decode encode);
 binmode(STDOUT, ':utf8');
-my ($root, @files) = @ARGV;
+# Paths are characters here and bytes only at the filesystem: argv is decoded once, and `fs()`
+# encodes at each open and each test, so a non-ASCII checkout path is not double-encoded.
+my ($root, @files) = map { decode('UTF-8', $_) } @ARGV;
+sub fs { encode('UTF-8', shift) }
+# %XX is a byte; a run of them is UTF-8 and decodes to characters, not to one char per byte.
+sub unescape { my $x = shift; $x =~ s/((?:%[0-9A-Fa-f]{2})+)/decode('UTF-8', pack('H*', join '', $1 =~ m{%(..)}g))/ge; $x }
 my %cache;
 
 sub slug {
   my $t = shift;
   $t =~ s/\[((?:[^\[\]]|\[[^\]]*\])*)\]\([^)]*\)/$1/g;
+  # A code span is literal text: `<n>` is the letter n, `_` stays. Set aside first, so that
+  # what follows (HTML tags, emphasis) only reads the prose around it.
+  my @code;
+  $t =~ s/(`+)(.+?)(?<!`)\1(?!`)/push @code, $2; "\x00" . $#code . "\x00"/ge;
   $t =~ s/<[^>]*>//g;
+  # `_x_` and `__x__` are emphasis at a word boundary and vanish; `snake_case` keeps its `_`.
+  $t =~ s/(?<![\p{L}\p{N}_])(_{1,2})(?=\S)(.+?)(?<=\S)\1(?![\p{L}\p{N}_])/$2/g;
+  $t =~ s/\x00(\d+)\x00/$code[$1]/g;
   $t =~ s/`//g;
   $t =~ s/\s+#+\s*$//;
   $t =~ s/^\s+|\s+$//g;
@@ -61,7 +74,7 @@ sub scan {
   my $f = shift;
   return @{$cache{$f}} if $cache{$f};
   my (%anchors, @links, %seen);
-  open(my $fh, '<:encoding(UTF-8)', $f) or return ({}, []);
+  open(my $fh, '<:encoding(UTF-8)', fs($f)) or return ({}, []);
   my ($fence, $n) = ('', 0);
   while (my $line = <$fh>) {
     $n++;
@@ -99,14 +112,14 @@ for my $file (@files) {
     print "LINK $rel:$n $t\n";
     next if $t =~ /^[A-Za-z][A-Za-z0-9+.\-]*:/ || $t =~ m{^//};
     my ($p, $a) = split /#/, $t, 2;
-    $p =~ s/%([0-9A-Fa-f]{2})/chr hex $1/ge;
+    $p = unescape($p);
     my $target =
         $p eq ''         ? $file
       : $p =~ m{^/}      ? "$root$p"
       :                    dirname($file) . "/$p";
-    unless (-e $target) { print "ERR $rel:$n: $t points at a file that does not exist\n"; next; }
-    next unless defined $a && length $a && -f $target && $target =~ /\.md$/;
-    $a =~ s/%([0-9A-Fa-f]{2})/chr hex $1/ge;
+    unless (-e fs($target)) { print "ERR $rel:$n: $t points at a file that does not exist\n"; next; }
+    next unless defined $a && length $a && -f fs($target) && $target =~ /\.md$/;
+    $a = unescape($a);
     my ($anchors) = scan($target);
     print "ANCHOR $rel:$n $t\n";
     print "ERR $rel:$n: $t points at a heading that does not exist\n" unless $anchors->{lc $a};
@@ -143,6 +156,23 @@ if [ "$(printf '%s\n' "$good" | grep -c "^LINK ")" = 10 ] && ! printf '%s\n' "$g
   ok "links: a page of good links, duplicates, backticks, a dash and accents included, has no defect and ten links read"
 else
   ko "links: the good fixture is not clean or not fully read: $(printf '%s' "$good" | grep -E '^ERR|^LINK' | head -5 | tr '\n' '|')"
+fi
+
+# What GitHub renders, not what the source says: a code span keeps its `<n>`, an emphasised
+# word loses its `_`, a word with an inner `_` keeps it; `%C3%A9` is one é, in an anchor and
+# in a path. The tree sits under a non-ASCII folder, so a path built from bytes and from
+# characters alike would double-encode it and every link would be reported missing.
+ux=$WORK/répertoire
+mkdir -p "$ux/docs"
+printf '%s\n' '# U' '' '## Run `gh pr merge <n>`' '' '## _emph_ word' '' '## a snake_case word' '' \
+  '## Café déjà' '' '[a](#run-gh-pr-merge-n), [b](#emph-word), [c](#a-snake_case-word),' \
+  '[d](#caf%C3%A9-d%C3%A9j%C3%A0), [e](fichi%C3%A9.md), [f](fichi%C3%A9.md#fichi%C3%A9), [g](fichié.md)' >"$ux/docs/u.md"
+printf '# fichié\n' >"$ux/docs/fichié.md"
+unicode=$(check_links "$ux" "$ux/docs/u.md")
+if [ "$(printf '%s\n' "$unicode" | grep -c '^LINK ')" = 7 ] && ! printf '%s\n' "$unicode" | grep -q '^ERR '; then
+  ok "links: <n> in a code span, an emphasised word, a snake_case word and %XX as UTF-8 resolve, under a non-ASCII path"
+else
+  ko "links: GitHub's anchors or a non-ASCII path are refused: $(printf '%s' "$unicode" | grep -E '^ERR' | head -5 | tr '\n' '|')"
 fi
 
 # One defect per fixture, each alone on its page, so a verdict names its cause.

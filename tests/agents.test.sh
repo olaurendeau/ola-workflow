@@ -95,8 +95,6 @@ done
 # to separate a mention from an offer, it cannot, because they are the same characters. Only
 # the two ends of that spectrum are decidable — a name that must resolve, and a name this
 # plugin provides written without its namespace.
-PROMPTS=("$ROOT"/agents/*.md "$BRIEF" "$ROOT/README.md")
-for skill in "$ROOT"/skills/*/SKILL.md; do [ -f "$skill" ] && PROMPTS+=("$skill"); done
 
 # The pages under docs/, because text moved out of the README does not stop being read by
 # whoever opens the repository: a command named wrongly there is as wrong as in the README.
@@ -117,9 +115,22 @@ page_label() { # page_label <root> <path>
     *) echo "${2##*/}" ;;
   esac
 }
-# docs_pages answers nothing on the real tree today, so its coverage is proved further down,
-# on a throwaway one.
-while IFS= read -r page; do PROMPTS+=("$page"); done < <(docs_pages "$ROOT")
+# The files scanned for offers, and the files that may promise what was removed. Functions of
+# a root, because docs_pages answers nothing on the real tree today: that the docs pages are
+# in both lists is proved further down, on a throwaway tree.
+prompt_files() { # prompt_files <root> → one path per line
+  local f
+  for f in "$1"/agents/*.md "$BRIEF" "$1/README.md"; do echo "$f"; done
+  for f in "$1"/skills/*/SKILL.md; do [ -f "$f" ] && echo "$f"; done
+  docs_pages "$1"
+}
+claimant_files() { # claimant_files <root> → one path per line
+  local f
+  for f in "$1"/agents/*.md "$BRIEF" "$1/README.md" "$1/skills/workflow-init/SKILL.md"; do echo "$f"; done
+  docs_pages "$1"
+}
+PROMPTS=()
+while IFS= read -r page; do PROMPTS+=("$page"); done < <(prompt_files "$ROOT")
 
 # Every scanned file must be *readable* and have content. Without this the scan reads
 # whatever it can and the verdicts below pass on the rest: dropping $BRIEF from the list left
@@ -1432,11 +1443,26 @@ if [ "$got" = "docs/decisions/README.md docs/top.md " ]; then
 else
   ko "docs_pages answered '$got' on a tree holding two pages and five things that are not"
 fi
-if [ -z "$(docs_pages "$WORK/absent")" ]; then
+# Status and stderr as well as stdout: without the `[ -d ]` guard `find` complains and fails,
+# and an empty stdout alone would call that a pass.
+absent=$(docs_pages "$WORK/absent" 2>&1)
+absent_rc=$?
+if [ -z "$absent" ] && [ "$absent_rc" = 0 ]; then
   ok "docs_pages answers nothing, without failing, when there is no docs/"
 else
-  ko "docs_pages answers something where there is no docs/"
+  ko "docs_pages answered '$absent' with status $absent_rc where there is no docs/"
 fi
+# The two lists that carry the pages to the scans: dropping docs_pages from either left the
+# suite green, because today there is no page to miss.
+for list in prompt_files claimant_files; do
+  if "$list" "$dfx" | grep -qxF "$dfx/docs/decisions/README.md" &&
+    "$list" "$dfx" | grep -qxF "$dfx/docs/top.md" &&
+    ! "$list" "$dfx" | grep -qF "security-precedents.md"; then
+    ok "$list includes the pages under docs/"
+  else
+    ko "$list does not include the pages under docs/, or includes one it should skip"
+  fi
+done
 if [ "$(page_label "$dfx" "$dfx/docs/decisions/README.md")" = docs/decisions/README.md ] &&
   [ "$(page_label "$dfx" "$dfx/README.md")" = README.md ]; then
   ok "a page under docs/ keeps its path as its label, so it is not taken for the README"
@@ -1582,14 +1608,25 @@ fi
 
 # The guard that read command lines is gone, so nothing shipped may still promise it. A net
 # over prose, not a proof: it catches the phrasings this project actually wrote.
-CLAIMANTS=("${ALL[@]}" "$BRIEF" "$ROOT/README.md" "$ROOT/skills/workflow-init/SKILL.md")
-while IFS= read -r page; do CLAIMANTS+=("$page"); done < <(docs_pages "$ROOT")
-claims=$(grep -lE 'guard (refuses|blocks|will ask|asks|prevents|reads)|tokeniz' \
-  "${CLAIMANTS[@]}" 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')
+claims_in() { # claims_in <root> → the label of each claimant that still promises it, blank-terminated
+  local files=() page
+  while IFS= read -r page; do files+=("$page"); done < <(claimant_files "$1")
+  while IFS= read -r page; do
+    printf '%s ' "$(page_label "$1" "$page")"
+  done < <(grep -lE 'guard (refuses|blocks|will ask|asks|prevents|reads)|tokeniz' "${files[@]}" 2>/dev/null)
+}
+claims=$(claims_in "$ROOT")
 if [ -z "$claims" ]; then
   ok "nothing shipped promises the command-line guard that was removed"
 else
   ko "these still promise the removed command-line guard: $claims"
+fi
+# The message names the page by its path under docs/, as the scan's own labels do.
+echo "the guard refuses" >"$dfx/docs/decisions/README.md"
+if [ "$(claims_in "$dfx")" = "docs/decisions/README.md " ]; then
+  ok "a page under docs/ that still promises the guard is named by its path, not as README.md"
+else
+  ko "a promise in docs/decisions/README.md is named '$(claims_in "$dfx")'"
 fi
 
 # --- The brief, per mode --------------------------------------------------------------
