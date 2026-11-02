@@ -229,9 +229,12 @@ what is read.
 Two details of that identity, both deliberate. An IPv6 host keeps its address and loses its
 brackets (`ssh://git@[fd00::1]/srv/app.git` → `fd00::1/srv/app`), so two spellings of one
 address give two profile directories — a split, never a collision. And `ola-profile id`
-prints `<host>/<owner>/<repo>` only: the credentials of a remote URL are dropped, never
-printed. They still do not belong in a remote URL, which any `git remote -v` shows: use a
-credential helper.
+prints `<host>/<owner>/<repo>`, dropping the credentials of a remote URL when they are
+encoded as git expects (`/` written `%2F`). An unencoded `/` ends the authority early: with
+a `user:password` form `id` refuses (status 1), but with a lone token or a user name and no
+colon before the `/`, what precedes the `@` is printed as part of the identity — and so
+becomes a directory name. Either way credentials do not belong in a remote URL, which any
+`git remote -v` shows: use a credential helper.
 
 No profile means no effect: the hook exits 0 and the agents offer to run
 `/ola-workflow:workflow-init`, the skill that writes one.
@@ -458,8 +461,8 @@ scripts/token-cost.sh [--since D] [--until D] <dir>...  # weighted token cost pe
 ### One writing convention, enforced by the suite
 
 `tests/agents.test.sh` checks that every `ola-workflow:<name>` written in an agent prompt,
-in a skill, in `ola-workflow-brief` or in this README resolves to something shipped, and that a command
-this plugin provides is never written as a bare `/name`. Both catch the same defect: a
+in a skill, in `ola-workflow-brief` or in this README resolves to something shipped, and
+that a command this plugin provides is never written as a bare `/name`. Both catch the same defect: a
 prompt that offers a human a command which does not exist, found only at the one moment the
 plugin had to explain itself.
 
@@ -498,6 +501,6 @@ for three cycles and failed on ordinary sentences about image tags, log lines an
 time it was narrowed.
 
 The test suites fake `PreToolUse` payloads and never execute the commands they contain.
-They need `bash`, `jq` 1.5 or later, `perl` and `git` only — the suites build throwaway repositories —
-and run identically on macOS (bash 3.2) and on CI. `tests/run.sh` refuses up front when one
+They need `bash`, `jq` 1.5 or later, `perl` and `git` only — the suites build throwaway
+repositories — and run identically on macOS (bash 3.2) and on CI. `tests/run.sh` refuses up front when one
 is missing, rather than failing a hundred assertions that name the wrong cause.
