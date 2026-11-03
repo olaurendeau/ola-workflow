@@ -130,6 +130,21 @@ Two scripts, on the PATH of every Bash call:
 `pr-assets` is as readable as the repository: capture development data only. Captures are
 written outside the worktree and are never committed.
 
+### Globs
+
+Every glob in a profile is a git pathspec `:(glob)`, and `schema/profile.schema.json` states
+the rule for whoever writes one. Two notes for whoever *implements* a key that consumes
+them:
+
+- **Let git do the matching** — `git diff --numstat base..head -- . ':(glob,exclude)<pattern>'`
+  does it inside the command that already counts lines. Re-implementing the dialect with a
+  shell `case` would silently widen `pr.exclude` and `sensitive_patterns[].exclude`, and
+  widening those two *removes* coverage, which is the one direction that matters.
+- **The recursion keys on literal versus glob**, not on the absence of a slash: `docs` and
+  `src/deep` pull in their subtrees, while `doc*`, `doc?` and `[dx]ocs` match nothing at
+  all. That is what makes the schema's own example sound — `Dockerfile*` cannot reach into a
+  neighbouring `Dockerfiles/`.
+
 ## Where the rules live
 
 The agents share one source: `ola-workflow-brief`, on the PATH beside `ola-profile`. It

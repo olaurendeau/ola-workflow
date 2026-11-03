@@ -895,7 +895,7 @@ esac
 
 # A deletion canary, which is all this is: it answers "has someone removed the rule?",
 # never "is the rule right?".
-for claim in ':(glob)' 'no wildcard crosses' '**/Dockerfile*' 'named literally' 'never with a' 'README: Globs'; do
+for claim in ':(glob)' 'no wildcard crosses' '**/Dockerfile*' 'named literally' 'never with a' 'docs/configuration.md: Globs'; do
   total=$((total + 1))
   case $dialect in
     *"$claim"*) echo "ok    canary: the description still mentions '$claim'" ;;

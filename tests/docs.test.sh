@@ -414,8 +414,7 @@ fi
 
 # --- The page of the configuration ---------------------------------------------------------
 # The sections moved out of the README (#129). Each part is named by what the reader looks it
-# up for; the keys table is checked above, against the schema. Globs stay in the README
-# until #130.
+# up for; the keys table is checked above, against the schema.
 CONFIG_PAGE=$ROOT/docs/configuration.md
 config_need() { # config_need <label> <fixed string>
   if [ -f "$CONFIG_PAGE" ] && grep -qF -- "$2" "$CONFIG_PAGE"; then
@@ -436,9 +435,10 @@ config_need "the exit codes" 'Exit status 1 means the value asked for is not ava
 config_need "the profile of this repository" '[`.claude/workflow.json`](../.claude/workflow.json)'
 config_need "the link to the discreet mode page, where the table integrated / discreet went" '[discreet mode](discreet-mode.md)'
 config_need "the captures" '### Captures'
+config_need "the globs" '### Globs'
 config_need "where the rules live" '## Where the rules live'
 config_need "the link to the tokens page" '[GitHub tokens](github-tokens.md)'
-if grep -qE '^#{1,3} (How a project is configured|Writing the first one|Captures|Where the rules live)$' "$ROOT/README.md"; then
+if grep -qE '^#{1,3} (How a project is configured|Writing the first one|Captures|Globs|Where the rules live)$' "$ROOT/README.md"; then
   ko "configuration page: the README still holds a section that moved to docs/configuration.md"
 else
   ok "configuration page: the README no longer holds the sections that moved"
