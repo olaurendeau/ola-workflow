@@ -111,9 +111,17 @@ docs_pages() { # docs_pages <root> → the pages, one path per line, sorted
 page_label() { # page_label <root> <path>
   case $2 in
     "$1"/docs/*) echo "docs/${2#"$1"/docs/}" ;;
+    "$1"/brief/*) echo "brief/${2#"$1"/brief/}" ;;
     */skills/*) echo "skills/${2#*/skills/}" ;;
     *) echo "${2##*/}" ;;
   esac
+}
+# The text of the brief lives in brief/, in templates: the script no longer holds it, so a
+# scan that read only the script would pass on less than it used to, and say nothing.
+# Subfolders included, and no globstar for bash 3.2.
+brief_pages() { # brief_pages <root> → the templates, one path per line, sorted
+  [ -d "$1/brief" ] || return 0
+  find "$1/brief" -type f -name '*.md' | LC_ALL=C sort
 }
 # The files scanned for offers, and the files that may promise what was removed. Functions of
 # a root, because docs_pages answers nothing on the real tree today: that the docs pages are
@@ -123,11 +131,13 @@ prompt_files() { # prompt_files <root> → one path per line
   for f in "$1"/agents/*.md "$BRIEF" "$1/README.md"; do echo "$f"; done
   for f in "$1"/skills/*/SKILL.md; do [ -f "$f" ] && echo "$f"; done
   docs_pages "$1"
+  brief_pages "$1"
 }
 claimant_files() { # claimant_files <root> → one path per line
   local f
   for f in "$1"/agents/*.md "$BRIEF" "$1/README.md" "$1/skills/workflow-init/SKILL.md"; do echo "$f"; done
   docs_pages "$1"
+  brief_pages "$1"
 }
 PROMPTS=()
 while IFS= read -r page; do PROMPTS+=("$page"); done < <(prompt_files "$ROOT")
@@ -1462,7 +1472,7 @@ for key in $(jq -r '.properties | keys[] | select(startswith("$") | not)' \
   if grep -q "\b$key\b" "$BRIEF"; then ok "schema key '$key' reaches the agents through the brief"; else ko "schema key '$key' is declared and no agent can ever see it"; fi
 done
 for key in $(grep -v '^[[:space:]]*#' "$BRIEF" |
-             perl -nle 'print $1 while /\$\(get\s+"?([a-z_]+)/g' | sort -u); do
+             perl -nle 'print $1 while /(?:\$\(get|^\s*read_key)\s+"?([a-z_]+)/g' | sort -u); do
   if jq -e --arg k "$key" '.properties | has($k)' \
       "$ROOT/schema/profile.schema.json" >/dev/null 2>&1; then
     ok "the brief reads '$key', which the schema declares"
