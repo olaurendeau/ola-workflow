@@ -1,0 +1,1 @@
+- {{cmd}}: {{#reason_given}}{{reason}}{{/reason_given}}{{#args_allowed}}only some arguments are allowed{{/args_allowed}}{{#args_refused}}some arguments are refused{{/args_refused}}

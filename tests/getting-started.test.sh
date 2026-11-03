@@ -27,7 +27,7 @@ trap 'rm -rf "${WORK:?}"' EXIT
 # runs them.
 STEPS='Prerequisites|Install|Create the tokens|Write the project|Check it|Make your first request'
 
-# Every output the page quotes. Each is a fragment of what bin/ or hooks/ prints, found by
+# Every output the page quotes. Each is a fragment of what bin/, hooks/ or brief/ prints, found by
 # grep -F; the page has to carry the same fragment, so neither side can drift alone.
 QUOTED=(
   'no profile found'
@@ -100,7 +100,7 @@ quoted_problems() {
   local page=$1 root=$2 q
   for q in "${QUOTED[@]}"; do
     grep -qF -- "$q" "$page" || echo "the page does not quote \"$q\""
-    grep -rqF -- "$q" "$root/bin" "$root/hooks" || echo "\"$q\" is printed by nothing in bin/ or hooks/"
+    grep -rqF -- "$q" "$root/bin" "$root/hooks" "$root/brief" 2>/dev/null || echo "\"$q\" is printed by nothing in bin/, hooks/ or brief/"
   done
 }
 
@@ -191,7 +191,7 @@ fi
 
 quoted=$(quoted_problems "$REAL" "$ROOT")
 if [ -z "$quoted" ]; then
-  ok "every output the page quotes (${#QUOTED[@]}) is printed by bin/ or hooks/"
+  ok "every output the page quotes (${#QUOTED[@]}) is printed by bin/, hooks/ or brief/"
 else
   while IFS= read -r p; do ko "getting-started: $p"; done <<EOF
 $quoted
