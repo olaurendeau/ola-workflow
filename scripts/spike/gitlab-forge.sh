@@ -32,6 +32,7 @@
 #   read -rs SPIKE_BOT_TOKEN; read -rs SPIKE_HUMAN_TOKEN; export SPIKE_BOT_TOKEN SPIKE_HUMAN_TOKEN
 #   SPIKE_BOT_TOKEN   the Developer identity, scope api
 #   SPIKE_HUMAN_TOKEN the human's personal access token, scope api
+# (SPIKE_NAP, whole seconds between two looks at GitLab, is for the test: leave it alone.)
 #
 # Usage: scripts/spike/gitlab-forge.sh --dry-run [--host H] [--project P]
 #        scripts/spike/gitlab-forge.sh --project <group/.../project> [--host gitlab.com] [--yes] | tee run.txt
@@ -133,7 +134,8 @@ EXPIRES=$(date -u -v+1d +%F 2>/dev/null || date -u -d tomorrow +%F)
 ENC=$(jq -rn --arg p "$PROJECT" '$p|@uri')
 GITURL="https://$HOST/$PROJECT.git"
 HTTP=000
-NAP=${SPIKE_NAP:-3} # seconds between two looks at GitLab; the test sets it to 0
+NAP=${SPIKE_NAP:-3} # seconds between two looks at GitLab; for the test, which sets it to 0
+case $NAP in '' | *[!0-9]*) die "SPIKE_NAP is for the test and takes whole seconds" ;; esac
 PID=""
 BASE=""
 
@@ -160,10 +162,11 @@ api() { # api <bot|human> <METHOD> <path> [key=value ...] → HTTP (code), BODY 
 jb() { jq -r "$1" "$BODY" 2>/dev/null; }
 transport() { # the last line curl said, without a token in it
   local l t
-  l=$(tail -n 1 "$WORK/curl.err" 2>/dev/null | cut -c1-160)
+  l=$(tail -n 1 "$WORK/curl.err" 2>/dev/null)
   for t in "$SPIKE_BOT_TOKEN" "$SPIKE_HUMAN_TOKEN"; do
-    [ -z "$t" ] || l=${l//"$t"/***}
+    [ -z "$t" ] || l=${l//"$t"/***} # mask first: a cut would leave the start of a token on the edge
   done
+  l=$(printf '%s' "$l" | cut -c1-160)
   echo "${l:-curl said nothing}"
 }
 msg() { jq -r '(.message // .error // "no message") | tostring' "$BODY" 2>/dev/null | tr '\n' ' ' | cut -c1-140; }
@@ -538,7 +541,7 @@ gl() { # gl <token|-|empty> <dir> <glab args...> — the token goes by environme
 who_glab() { gl "$1" "$2" api user | jq -r '.username // "no user"' 2>/dev/null || echo "no answer"; }
 
 m10() {
-  local im sq out
+  local im sq out rc
   if ! command -v glab >/dev/null; then m 10 "glab" "not measurable: glab is not on PATH"; return; fi
   m 10 "glab version" "$(glab --version 2>&1 | head -n 1)"
   mkdir -p "$WORK/glab-config" "$WORK/glab-home" "$WORK/norepo" "$GLREPO"
@@ -547,7 +550,12 @@ m10() {
   git -C "$GLREPO" remote add upstream "https://$HOST/${PROJECT}-ola-spike-absent.git"
   GL_HOST_ENV=""
   printf '%s' "$SPIKE_HUMAN_TOKEN" | gl - "$WORK/norepo" auth login --hostname "$HOST" --stdin >"$WORK/glab-login.out"
-  m 10 "glab auth login --stdin into a scratch config (the human's PAT)" "exit $?"
+  rc=$?
+  m 10 "glab auth login --stdin into a scratch config (the human's PAT)" "exit $rc"
+  if [ "$rc" != 0 ]; then
+    m 10 "glab" "not measurable: glab could not log in (exit $rc), so nothing else was asked of it"
+    return
+  fi
   if [ -z "$(find "$WORK/glab-config" -type f 2>/dev/null | head -n 1)" ]; then
     m 10 "the login landed in the scratch GLAB_CONFIG_DIR" "no file there: this glab ignores GLAB_CONFIG_DIR (scratch home: $(find "$WORK/glab-home" -type f 2>/dev/null | wc -l | tr -d ' ') file(s), the human's own configuration untouched) — the run stops"
     exit 1

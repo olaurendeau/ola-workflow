@@ -39,7 +39,7 @@ cfg=$(cat)
 # what the script asked for, without the token line: the test reads the encoding from it
 [ -z "${CFGS:-}" ] || { printf '%s\n' "$cfg" | grep -v '^header' >>"$CFGS"; echo "--" >>"$CFGS"; }
 # a dead network, whose message happens to repeat the token: the script must not print it
-[ "${MODE:-}" != down ] || { echo "curl: (7) Failed to connect to gitlab.com port 443 (token $FAKE_BOT)" >&2; exit 7; }
+[ "${MODE:-}" != down ] || { echo "curl: (7) Failed to connect to gitlab.com port 443 ${PAD:-}(token $FAKE_BOT)" >&2; exit 7; }
 out=""
 prev=""
 for a in "$@"; do
@@ -71,7 +71,7 @@ exit 0
 EOF
 # glab: a login writes its config where GLAB_CONFIG_DIR says (FAKE_GLAB=honours), or, like a glab
 # too old to know the variable, under XDG_CONFIG_HOME or HOME (FAKE_GLAB=ignores). It records
-# the HOME it was given. Everything else fails.
+# the HOME it was given. FAKE_GLAB=fails refuses the login. Everything else fails.
 cat >"$FAKES/glab" <<'EOF'
 #!/usr/bin/env bash
 printf 'glab %s\n' "$*" >>"$CALLS"
@@ -79,6 +79,7 @@ printf 'glab %s HOME=%s XDG_CONFIG_HOME=%s\n' "$*" "$HOME" "${XDG_CONFIG_HOME:-}
 cat >/dev/null </dev/stdin 2>/dev/null || true
 case "$*" in
   *"auth login"*)
+    [ "${FAKE_GLAB:-}" != fails ] || exit 1
     if [ "${FAKE_GLAB:-honours}" = honours ]; then dir=$GLAB_CONFIG_DIR; else dir=${XDG_CONFIG_HOME:-$HOME/.config}/glab-cli; fi
     mkdir -p "$dir" && echo "hosts:" >"$dir/config.yml"
     exit 0 ;;
@@ -157,6 +158,11 @@ no_secret "dead network"
 # the transport error is shown, with no token in it
 printf '%s' "$OUT" | grep -q 'Failed to connect' && ok "a transport failure shows what curl said" || ko "HTTP 000 without curl's message: $OUT"
 printf '%s' "$OUT" | grep -qF '***' && ok "…with the token in curl's message masked" || ko "the token in curl's message was not masked: $OUT"
+PAD=$(printf '%090d' 0) MODE=down run --yes --project group/throwaway
+printf '%s' "$OUT" | grep -q 'Failed to connect' && ! printf '%s' "$OUT" | grep -qF 'glp' && ok "a token across column 160 of curl's message is masked, not cut" || ko "a start of the token shows on the cut: $OUT"
+SPIKE_NAP=soon PATH="$FAKES:$PATH" "$SCRIPT" --yes --project group/throwaway >/dev/null 2>&1 </dev/null
+STATUS=$?
+[ "$STATUS" = 2 ] && ok "a SPIKE_NAP that is not whole seconds exits 2" || ko "SPIKE_NAP=soon exited $STATUS"
 
 : >"$CALLS"
 run --yes --project group/throwaway
@@ -173,7 +179,11 @@ no_secret "full run"
 # '%23428BCA' on the config line would become %2523428BCA on the wire, and a 400
 grep -qF 'data-urlencode = "color=#428BCA"' "$CFGS" && ok "the label colour is sent as #428BCA, encoded once by curl" || ko "no color=#428BCA in what curl was given: $(grep color "$CFGS")"
 ! grep -qF 'color=%23' "$CFGS" && ok "the label colour is not encoded by hand" || ko "color=%23… is given to curl, which would encode the % again"
-# M11: a failed status posted last, the project setting put on then back, M12 plays on the default branch
+# M11: a failed status posted last, the project setting put on then back, M12 plays on the default branch.
+# $CFGS holds blocks cut by "--": the last status posted must be the failed one; M12 must create a
+# pipeline on the default branch (the fake's "main") and try its manual job.
+awk -v RS='--\n' '/\/statuses\// { last = $0 } END { exit !(last ~ /state=failed/ && last ~ /name=agent-review-m11/) }' "$CFGS" && ok "M11's failed status is the last one posted" || ko "the last status posted is not agent-review-m11 failed"
+awk -v RS='--\n' '/\/pipeline"/ && /ref=main"/ { f = 1 } END { exit !f }' "$CFGS" && printf '%s\n' "$OUT" | grep -q '^M12 bot: play the manual job on the protected branch' && ok "M12 plays on the default branch" || ko "M12 never created a pipeline on main nor played its manual job"
 printf '%s\n' "$OUT" | grep -q '^M11 bot: POST a last failed status' && ok "M11 posts a last failed status itself" || ko "no M11 line for the last failed status"
 printf '%s\n' "$OUT" | grep -q "^M11 the same MR with 'Pipelines must succeed' on" && ok "M11 reads the MR with the setting on" || ko "no M11 line with the setting on"
 grep -qF 'data-urlencode = "only_allow_merge_if_pipeline_succeeds=true"' "$CFGS" && ok "M11 turns 'Pipelines must succeed' on" || ko "M11 never sets only_allow_merge_if_pipeline_succeeds"
@@ -198,7 +208,7 @@ done
 REALHOME=$WORK/realhome
 mkdir -p "$REALHOME"
 : >"$GLAB_ENV"
-OUT=$(HOME="$REALHOME" FAKE_GLAB=ignores PATH="$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" "$SCRIPT" --yes --project group/throwaway 2>&1 </dev/null)
+OUT=$(HOME="$REALHOME" XDG_CONFIG_HOME="$REALHOME/.config" FAKE_GLAB=ignores PATH="$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" "$SCRIPT" --yes --project group/throwaway 2>&1 </dev/null)
 STATUS=$?
 [ "$STATUS" = 1 ] && printf '%s\n' "$OUT" | grep -q '^M10 the login landed in the scratch GLAB_CONFIG_DIR → no file there' && ok "a glab that ignores GLAB_CONFIG_DIR stops the run at M10, exit 1" || ko "ignoring glab: status $STATUS: $(printf '%s\n' "$OUT" | grep '^M10')"
 ! printf '%s\n' "$OUT" | grep -q '^M11 ' && ok "…and nothing after M10 was measured" || ko "the run went on after M10"
@@ -206,6 +216,12 @@ STATUS=$?
 grep -q 'auth login' "$GLAB_ENV" && ! grep 'auth login' "$GLAB_ENV" | grep -qF "HOME=$REALHOME" && ok "the glab login ran with a scratch HOME" || ko "the glab login ran with the real HOME: $(cat "$GLAB_ENV")"
 printf '%s\n' "$OUT" | grep -q '^Cleanup' && ok "…and the cleanup still ran" || ko "no Cleanup line after the stop"
 no_secret "glab that ignores GLAB_CONFIG_DIR"
+
+# --- a glab that refuses the login: that is the cause told, and the run goes on to M11 to M14
+OUT=$(FAKE_GLAB=fails PATH="$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" "$SCRIPT" --yes --project group/throwaway 2>&1 </dev/null)
+STATUS=$?
+[ "$STATUS" = 0 ] && printf '%s\n' "$OUT" | grep -q '^M10 glab → not measurable: glab could not log in (exit 1)' && ! printf '%s\n' "$OUT" | grep -q 'ignores GLAB_CONFIG_DIR' && ok "a refused glab login says so, not that GLAB_CONFIG_DIR is ignored" || ko "refused login: status $STATUS: $(printf '%s\n' "$OUT" | grep '^M10')"
+printf '%s\n' "$OUT" | grep -q '^M14 ' && ok "…and M11 to M14 are still measured" || ko "the run stopped after a refused login"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total gitlab-spike test(s) failed"
