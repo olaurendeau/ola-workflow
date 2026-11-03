@@ -36,27 +36,22 @@ get() {
   fi
 }
 
-unreadable() {
-  cat >&2 <<'BROKEN'
-This project has a profile, and it cannot be read.
+# The refusals are rules too (brief/refusals/), and are rendered before the helpers below
+# exist: this one is the only helper they need.
+render() { # render <section> → brief/<section>.md, or the end of the brief
+  if ! awk -f "$SELF_DIR/../hooks/lib/brief-render.awk" "$SELF_DIR/../brief/$1.md"; then
+    echo "ola-workflow-brief: brief/$1.md could not be rendered" >&2
+    exit 2
+  fi
+}
 
-Do not carry on with defaults: a profile that is truncated, empty or not a JSON object
-would otherwise produce a complete-looking set of rules, every one of them invented — a
-base branch the project does not have, a check command nobody runs. Tell the human which
-file it is and that it needs fixing; `ola-profile validate` says what is wrong with it.
-BROKEN
+unreadable() {
+  render refusals/unreadable >&2
   exit 1
 }
 
 profile=$(ola_profile_path "$dir") || {
-  cat >&2 <<'NOPROFILE'
-No ola-workflow profile applies to this project, so the workflow does not apply either.
-
-Nothing is wrong: the plugin stays out of the way until a project opts in. Tell the human
-this, and offer to run /ola-workflow:workflow-init, which inspects the repository and writes
-a profile. Do not guess a branch, a check command or a mode — a wrong guess here is how an
-agent pushes to the wrong branch or writes on a repository that did not ask for it.
-NOPROFILE
+  render refusals/no-profile >&2
   exit 1
 }
 ola_profile_readable "$profile" || unreadable
@@ -80,17 +75,17 @@ with_default() { # with_default <key> <default>
 
 # The base branch is the one default worth resolving rather than guessing: the repository
 # knows which branch it belongs to.
-if base=$(ola_profile_get base_branch "$dir" 2>/dev/null); then
-  base_note=""
-else
+base_from_origin=""
+base_guessed=""
+if ! base=$(ola_profile_get base_branch "$dir" 2>/dev/null); then
   resolved=$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
   if [ -n "$resolved" ]; then
     base=${resolved#origin/}
-    base_note=" (not in the profile — read from origin/HEAD)"
+    base_from_origin=1
     DEFAULTED="$DEFAULTED base_branch"
   else
     base=main
-    base_note=" (not in the profile, and origin/HEAD says nothing — a guess)"
+    base_guessed=1
     DEFAULTED="$DEFAULTED base_branch"
   fi
 fi
@@ -106,7 +101,7 @@ for pair in language.human=en language.artifacts=en language.agents=en \
             slots.var=SLOT; do
   ola_profile_has "${pair%%=*}" "$dir" || MISSING="$MISSING $pair"
 done
-[ -n "$base_note" ] && MISSING="$MISSING base_branch=$base"
+[ -n "$base_from_origin$base_guessed" ] && MISSING="$MISSING base_branch=$base"
 
 # A preview is usable only whole: one that cannot be stopped keeps its slot, and without a
 # url there is nothing to capture. A partial one — the schema check above says so — is
@@ -146,12 +141,6 @@ read_key() { # read_key <dotted.key> [join] → <key, . as _> and <key>_absent; 
     value "${name}_absent" 1
   fi
 }
-render() { # render <section> → brief/<section>.md, or the end of the brief
-  if ! awk -f "$SELF_DIR/../hooks/lib/brief-render.awk" "$SELF_DIR/../brief/$1.md"; then
-    echo "ola-workflow-brief: brief/$1.md could not be rendered" >&2
-    exit 2
-  fi
-}
 
 # What several sections share.
 value base "$base"
@@ -162,34 +151,27 @@ flag tokens_off [ "$(with_default github_tokens keychain)" = off ]
 flag tokens_on [ "$(with_default github_tokens keychain)" != off ]
 value language_artifacts "$(with_default language.artifacts en)"
 
-echo "# ola-workflow — the rules for this project"
-echo
-echo "Profile: $profile"
-echo "Mode:    $mode"
-
+# The header: the problems are indented here, the words around them are the template's.
+schema_mismatch=""
+problems_indented=""
 if ! problems=$(ola_profile_validate "$profile" 2>&1) || [ -n "$problems" ]; then
-  echo
-  echo "## This profile does not match the schema"
-  echo
-  echo "Read what follows with that in mind, and tell the human. A key spelled wrong is a"
-  echo "key that is not there, so a rule you are about to read may be a default of mine"
-  echo "standing in for one this project meant to set:"
-  echo
-  printf '%s\n' "$problems" | sed 's/^/  /'
+  schema_mismatch=1
+  problems_indented=$(printf '%s\n' "$problems" | sed 's/^/  /')
 fi
-
-if [ -n "$MISSING" ]; then
-  echo
-  echo "## Not in the profile — these are my defaults, not this project's rules"
-  echo
-  for pair in $MISSING; do printf '  %s → %s\n' "${pair%%=*}" "${pair#*=}"; done
-  echo
-  echo "Treat them as a question to ask rather than a decision to enforce. Rejecting a"
-  echo "change for breaking a budget nobody set is worse than not having a budget."
-fi
-echo "Base branch: $base$base_note — nobody pushes to it, every change arrives by"
-echo "pull request."
-echo
+missing_lines=""
+for pair in $MISSING; do
+  printf -v line '  %s → %s' "${pair%%=*}" "${pair#*=}"
+  missing_lines="${missing_lines:+$missing_lines$'\n'}$line"
+done
+value profile "$profile"
+value mode "$mode"
+flag schema_mismatch [ -n "$schema_mismatch" ]
+value problems_indented "$problems_indented"
+flag missing_any [ -n "$MISSING" ]
+value missing_lines "$missing_lines"
+flag base_from_origin [ -n "$base_from_origin" ]
+flag base_guessed [ -n "$base_guessed" ]
+render header; echo
 value language_human "$(with_default language.human en)"
 value language_agents "$(with_default language.agents en)"
 render languages; echo
@@ -238,55 +220,15 @@ else
   echo "is the only security review)"
 fi
 echo
-echo "## A reviewable pull request"
-printf 'At most %s changed lines' "$(with_default pr.max_lines 1000)"
-excluded=$(get pr.exclude)
-[ -n "$excluded" ] && printf ', excluding %s' "$(printf '%s' "$excluded" | tr '\n' ' ')"
-echo "."
-case $(with_default pr.title conventional) in
-  conventional) echo "Title in Conventional Commits form: it becomes the commit message on $base." ;;
-  *) echo "Title: no imposed form." ;;
-esac
-# The shape of the description is a fact two roles use — the developer writes it, the
-# pr-reviewer judges it — so it is stated here once, like the title, and both cite it.
-echo
-echo "Description: short, in this order —"
-if [ "$mode" = integrated ]; then
-  echo "- \`Closes #<task>\`, when the request closes a task: one made from a task closes it. A"
-  echo "  request that closes none (a release, say) has no such line."
-else
-  echo "- \`Closes #<issue>\` only if the human named an issue to close: the task lives in the"
-  echo "  local memory, not on the forge."
-fi
-echo "- 1 to 3 sentences: what changes, and why."
-echo "- a line saying what was checked, its label in the language of the artifacts (\"Checked\" in"
-echo "  English): the check command you ran, then one line per notable verification."
-if [ "$mode" = integrated ]; then
-  echo "- a Design line, only if the task points at a design: its artifact URL from the design's"
-  echo "  README, or the path of its page when it was never published."
-fi
-if [ -n "$preview" ]; then
-  echo "- a Captures block, only if the request changes what a user sees: a before/after table,"
-  echo "  \"before\" only when an existing screen changes, then the lines pr-assets printed."
-fi
-echo "- \`Decision: … — Reason: …\`, only if there is one."
-echo "- \`<details><summary>…</summary> … </details>\`, only if needed: the rest goes there."
-echo "Headings and labels in the language of the artifacts: $(with_default language.artifacts en)."
-echo "A longer description is a suggestion in review, never a blocking finding."
-echo
-echo "## Escalation — what belongs to the human"
-cat <<'BASE'
-- Scope and product: what a user sees, departing from what was asked.
-- Dependencies: adding a runtime dependency, any major version upgrade.
-- Process and security: CI, rulesets, quality thresholds, hooks, agent definitions.
-- Release: whether to release, and the version. The release itself is the human's act.
-BASE
+value pr_max_lines "$(with_default pr.max_lines 1000)"
+read_key pr.exclude join
+flag title_conventional [ "$(with_default pr.title conventional)" = conventional ]
+flag title_free [ "$(with_default pr.title conventional)" != conventional ]
+render pull-request; echo
 extra=$(get escalation_extra)
-[ -n "$extra" ] && printf '%s\n' "$extra" | sed 's/^/- /'
-echo
-echo "Anything else, decide yourself and favour the option closest to existing code."
-echo "Record a decision where the work lives: Decision: … — Reason: …"
-echo
+[ -n "$extra" ] && extra=$(printf '%s\n' "$extra" | sed 's/^/- /')
+value escalation_extra "$extra"
+render escalation; echo
 # What GitHub itself refuses, read from the profile like everything else. An agent has to know
 # whether a rule it is about to break will stop it: told it will be refused and seeing no
 # refusal, it reads the silence as sanction — which is why this section exists and why
@@ -351,21 +293,37 @@ ENFORCED
     ;;
 esac
 echo
-echo "## Restricted commands"
+# Each element is read by jq, with jq's own truth: `.reason // …` keeps a reason of "", and
+# `if .allow_args` takes "" for true, which a test of the shell on an empty string would not.
+# -j and a final x, so that a value ending in a newline survives the substitution.
+element() { # element <index> <jq program on that element> → ELEMENT, its text as it is
+  ELEMENT=$(printf '%s' "$restricted" | jq -j --argjson i "$1" "[.[]][\$i] | $2"; printf x)
+  ELEMENT=${ELEMENT%x}
+}
 restricted=$(get commands)
+commands_list=""
 if [ -n "$restricted" ]; then
-  printf '%s' "$restricted" | jq -r '.[] | "- \(.cmd): \(.reason // (if .allow_args then "only some arguments are allowed" else "some arguments are refused" end))"'
-else
-  echo "(none declared)"
+  count=$(printf '%s' "$restricted" | jq -r '[.[]] | length') || count=0
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    element "$i" '"\(.cmd)"'
+    value cmd "$ELEMENT"
+    element "$i" '.reason // empty | "\(.)"'
+    value reason "$ELEMENT"
+    element "$i" 'if .reason then "given" elif .allow_args then "allowed" else "refused" end'
+    flag reason_given [ "$ELEMENT" = given ]
+    flag args_allowed [ "$ELEMENT" = allowed ]
+    flag args_refused [ "$ELEMENT" = refused ]
+    item=$(render items/restricted-command && printf x) || exit 2
+    commands_list="$commands_list${item%x}"
+    i=$((i + 1))
+  done
+  commands_list=${commands_list%$'\n'}
 fi
-hosts=$(get db_hosts_allowed)
-if [ -n "$hosts" ]; then
-  printf -- '- a database: only at %s. Anything else is production until proven otherwise.\n' \
-    "$(printf '%s' "$hosts" | tr '\n' ' ')"
-fi
-echo "Anything else is out of bounds. Knowing it in advance saves a cycle; it is not an"
-echo "invitation to find out where the boundary is by walking into it."
-echo
+flag commands_none [ -z "$restricted" ]
+value commands_list "$commands_list"
+read_key db_hosts_allowed join
+render restricted-commands; echo
 ui_kind=$(get verify_ui.kind)
 if [ -n "$ui_kind" ]; then
   echo "## Seeing it run"
