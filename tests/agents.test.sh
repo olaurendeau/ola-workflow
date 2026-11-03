@@ -941,6 +941,60 @@ case $prr in
   *) ko "pr-reviewer: nothing says what the status is while checks run or after one fails" ;;
 esac
 
+# A catch-up of the base branch gives a new head SHA and leaves the request's change as it
+# was: a confirmation of the previous review, not a review of the changes again. The witness
+# first: the paragraph the absences and phrases below are looked for in.
+case $prr in
+  *'A **confirmation** is for a head that is the reviewed SHA caught up with the base branch'*)
+    ok "witness: pr-reviewer step 3 has its confirmation paragraph" ;;
+  *) ko "witness: pr-reviewer step 3 has no confirmation paragraph, the checks below look at nothing" ;;
+esac
+case $prr in
+  *'git merge-tree --write-tree'*) ok "pr-reviewer: a confirmation needs a merge of the base that conflicts with nothing" ;;
+  *) ko "pr-reviewer: a confirmation does not check that merging the base conflicts with nothing" ;;
+esac
+case $prr in
+  *'git patch-id --verbatim'*) ok "pr-reviewer: a confirmation needs the request's change identical" ;;
+  *) ko "pr-reviewer: a confirmation does not check that the request's change is identical" ;;
+esac
+case $prr in
+  *'--no-color --no-ext-diff origin/<base>...<reviewed SHA> | git patch-id --verbatim'*'--no-color --no-ext-diff origin/<base>...<head> | git patch-id --verbatim'*)
+    ok "pr-reviewer: the comparison of a confirmation does not depend on the host's git config" ;;
+  *) ko "pr-reviewer: the comparison of a confirmation can be blinded by color.diff or diff.external" ;;
+esac
+case $prr in
+  *'full, delta from <SHA> or confirmation of <SHA>'*) ok "pr-reviewer: the report says confirmation of <SHA>" ;;
+  *) ko "pr-reviewer: the report has no value for a confirmation" ;;
+esac
+case $prr in
+  *'you do not review the changes again (steps 4 and 6) and you do not break the code in a worktree to see whether the tests fail'*)
+    ok "pr-reviewer: a confirmation redoes neither the review nor the tests breaking the code" ;;
+  *) ko "pr-reviewer: nothing says a confirmation spares the review and the tests breaking the code" ;;
+esac
+case $prr in
+  *'A blocking finding that was still open stays open'*'so the status is `failure`'*)
+    ok "pr-reviewer: a confirmation carries an open blocking finding, and a catch-up lifts none" ;;
+  *) ko "pr-reviewer: nothing says a confirmation keeps an open blocking finding open" ;;
+esac
+# What is carried to the head is the findings, not the verdict: a republished `failure` would
+# keep the merge gate shut after a flaky check's rerun, or ignore a catch-up that breaks CI.
+case $prr in
+  *'previous verdict carried over'*)
+    ko "pr-reviewer: a confirmation carries the previous verdict over, and may republish a stale failure" ;;
+  *'The findings are carried, not the verdict: step 8 sets the status from them and from the checks of the head'*'with none open, it is `success` unless a required check failed on the head'*)
+    ok "pr-reviewer: a confirmation carries the findings and lets step 8 set the status from the head's checks" ;;
+  *) ko "pr-reviewer: nothing says a confirmation sets its status from the findings and the head's checks" ;;
+esac
+case $prr in
+  *'cannot be evaluated because the reviewed SHA is gone, review the changes as usual'*)
+    ok "pr-reviewer: a condition that cannot be evaluated sends back to the normal review" ;;
+  *) ko "pr-reviewer: nothing says what a confirmation does when its conditions cannot be evaluated" ;;
+esac
+case $prr in
+  *'diff <(git diff <base>...<reviewed SHA>) <(git diff <base>...<head>)'*) ok "pr-reviewer: the delta command is still there" ;;
+  *) ko "pr-reviewer: the delta command is gone" ;;
+esac
+
 # --- One source, cited by all ---------------------------------------------------------
 # The pair that matters: the brief is stated once and needed by every agent. Each agent
 # citing it is what makes "once" reachable rather than stranded.
@@ -2153,6 +2207,80 @@ esac
 case $step6 in
   *'command for a fix, from the SHA last reviewed, prints a file'*) ko "coordinator: step 6 still reads the fix command as a diff between the two SHAs printing a file" ;;
   *) ok "coordinator: step 6 no longer reads the fix command as a file list between the two SHAs" ;;
+esac
+
+# The two conditions of a confirmation, run as the pr-reviewer writes them, on the repository
+# above: a catch-up with no conflict, a fix on top of one, a catch-up that needed a conflict
+# resolved. The commands are taken out of the prompt, so a rewording that breaks one fails here.
+prr_cmd() { # prr_cmd <start of the command line> — that command as the prompt writes it
+  awk -v s="         $1" 'index($0, s) == 1 { sub(/^         /, ""); print; exit }' "$ROOT/agents/pr-reviewer.md"
+}
+merge_cmd=$(prr_cmd 'git merge-tree --write-tree')
+ident_cmd=$(prr_cmd 'diff <(git diff')
+if [ -n "$merge_cmd" ] && [ -n "$ident_cmd" ]; then
+  ok "behaviour: the pr-reviewer prompt gives both commands of a confirmation"
+else
+  ko "behaviour: the pr-reviewer prompt lacks a command of a confirmation (merge-tree: '$merge_cmd')"
+fi
+conf_run() { # conf_run <command> <reviewed SHA> <head> — runs it in the repository, prints its output and "exit N"
+  local cmd=${1//<reviewed SHA>/$2}
+  cmd=${cmd//<head>/$3}
+  cmd=${cmd//<base>/main}
+  (cd "$fixrepo" && bash -c "$cmd" 2>&1; echo "exit $?")
+}
+out=$(conf_run "$merge_cmd" "$reviewed" "$caught_up")
+if [ "$out" = "exit 0" ]; then
+  ok "behaviour: merging the base into the reviewed SHA of a plain catch-up conflicts with nothing"
+else
+  ko "behaviour: merge-tree on a plain catch-up says: $out"
+fi
+out=$(conf_run "$ident_cmd" "$reviewed" "$caught_up")
+if [ "$out" = "exit 0" ]; then
+  ok "behaviour: a catch-up leaves the request's change identical, nothing is printed"
+else
+  ko "behaviour: the comparison on a catch-up says: $(printf '%s' "$out" | head -c 200)"
+fi
+out=$(conf_run "$ident_cmd" "$reviewed" "$fix_a")
+if [ "$out" != "exit 0" ]; then
+  ok "behaviour: a fix on top of the catch-up is not a confirmation"
+else
+  ko "behaviour: the comparison prints nothing for a catch-up plus a fix"
+fi
+for setting in "color.diff always" "color.ui always" "diff.external true"; do
+  # shellcheck disable=SC2086 # the setting is a name and a value
+  gitq config $setting
+  out_catch=$(conf_run "$ident_cmd" "$reviewed" "$caught_up")
+  out_fix=$(conf_run "$ident_cmd" "$reviewed" "$fix_a")
+  gitq config --unset "${setting%% *}"
+  if [ "$out_catch" = "exit 0" ] && [ "$out_fix" != "exit 0" ]; then
+    ok "behaviour: the confirmation comparison tells a catch-up from a fix under $setting"
+  else
+    ko "behaviour: under $setting the confirmation comparison says '$out_catch' for a catch-up and '$out_fix' for a fix"
+  fi
+done
+# A catch-up that conflicts: the reviewed SHA changes the line main changed, the author
+# resolves it by hand in the merge.
+gitq checkout -q -b conflicting "$reviewed"
+sed -i.bak '39s/.*/pr39/' "$fixrepo/back/auth/a" && rm "$fixrepo/back/auth/a.bak"
+gitq commit -q -am "pr also changes line 39"
+reviewed_conflict=$(gitq rev-parse HEAD)
+gitq merge -q --no-edit main >/dev/null 2>&1
+seq 1 40 | sed '2s/.*/pr/;39s/.*/resolved/' >"$fixrepo/back/auth/a"
+gitq add -A && gitq commit -q -m "catch-up resolving a conflict"
+resolved=$(gitq rev-parse HEAD)
+out=$(conf_run "$merge_cmd" "$reviewed_conflict" "$resolved")
+if [ "$out" = "exit 1" ]; then
+  ok "behaviour: a catch-up that conflicts makes merge-tree exit 1, so it is not a confirmation"
+else
+  ko "behaviour: merge-tree on a catch-up with a conflict says: $out"
+fi
+case $step6 in
+  *'lighter confirmation'*'the reviewer decides how'*) ok "coordinator: step 6 lets a review owed after a catch-up become a confirmation, the reviewer's call" ;;
+  *) ko "coordinator: step 6 does not say a review owed after a catch-up may be a confirmation" ;;
+esac
+case $step7 in
+  *'a new head SHA needs a new review'*'a confirmation'*) ok "coordinator: step 7 says a catch-up that leaves the change intact is a confirmation" ;;
+  *) ko "coordinator: step 7 does not mention a confirmation for a new head SHA after a catch-up" ;;
 esac
 # No paths: said, so that a quiet result is not read as a clean one.
 case $integrated in
