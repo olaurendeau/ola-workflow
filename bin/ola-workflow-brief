@@ -293,31 +293,26 @@ ENFORCED
     ;;
 esac
 echo
-# Each element is read by jq, with jq's own truth: `.reason // …` keeps a reason of "", and
-# `if .allow_args` takes "" for true, which a test of the shell on an empty string would not.
-# -j and a final x, so that a value ending in a newline survives the substitution.
-element() { # element <index> <jq program on that element> → ELEMENT, its text as it is
-  ELEMENT=$(printf '%s' "$restricted" | jq -j --argjson i "$1" "[.[]][\$i] | $2"; printf x)
-  ELEMENT=${ELEMENT%x}
-}
+# Each element is read by one jq pass over all of them, with jq's own truth: `.reason // …`
+# keeps a reason of "", and `if .allow_args` takes "" for true, which a test of the shell on
+# an empty string would not. Three fields per element, each ended by a NUL, so that a value
+# ending in a newline survives. jq stops at the first element it cannot read and says so once
+# on stderr, as it did when it printed the lines itself; the elements before it are kept.
+# The reason comes last because jq evaluates an interpolation from its last part, and the
+# error it names is the first one it meets.
 restricted=$(get commands)
 commands_list=""
 if [ -n "$restricted" ]; then
-  count=$(printf '%s' "$restricted" | jq -r '[.[]] | length') || count=0
-  i=0
-  while [ "$i" -lt "$count" ]; do
-    element "$i" '"\(.cmd)"'
-    value cmd "$ELEMENT"
-    element "$i" '.reason // empty | "\(.)"'
-    value reason "$ELEMENT"
-    element "$i" 'if .reason then "given" elif .allow_args then "allowed" else "refused" end'
-    flag reason_given [ "$ELEMENT" = given ]
-    flag args_allowed [ "$ELEMENT" = allowed ]
-    flag args_refused [ "$ELEMENT" = refused ]
+  while IFS= read -r -d '' kind && IFS= read -r -d '' cmd && IFS= read -r -d '' reason; do
+    value cmd "$cmd"
+    value reason "$reason"
+    flag reason_given [ "$kind" = given ]
+    flag args_allowed [ "$kind" = allowed ]
+    flag args_refused [ "$kind" = refused ]
     item=$(render items/restricted-command && printf x) || exit 2
     commands_list="$commands_list${item%x}"
-    i=$((i + 1))
-  done
+  done < <(printf '%s' "$restricted" | jq -j '.[] |
+    "\(if .reason then "given" elif .allow_args then "allowed" else "refused" end)\u0000\(.cmd)\u0000\(.reason // "")\u0000"')
   commands_list=${commands_list%$'\n'}
 fi
 flag commands_none [ -z "$restricted" ]
