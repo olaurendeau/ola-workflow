@@ -368,108 +368,54 @@ echo "invitation to find out where the boundary is by walking into it."
 echo
 ui_kind=$(get verify_ui.kind)
 if [ -n "$ui_kind" ]; then
-  echo "## Seeing it run"
-  printf 'This project can be looked at (%s). Use it when looking is the only proof:\n' "$ui_kind"
-  for step in up test shot down; do
-    value=$(get "verify_ui.$step")
-    [ -n "$value" ] && printf '  %-5s %s\n' "$step" "$value"
+  # A step is a line of the section only when the profile gives it; the section itself, and
+  # the blank line that ends it, only when there is a kind to name.
+  for step in kind up test shot down; do
+    read_key "verify_ui.$step"
   done
-  echo "Run down whatever the result, and remember {slot} applies here too."
-  echo
+  render seeing-it-run; echo
 fi
 # What a change looks like is shown by a capture, and whether one can be taken is the
 # profile's to say: the roles cite this section for when to capture and the brief says how.
-echo "## Captures"
 if [ -n "$preview" ]; then
-  echo "This project can be photographed: its app starts on a slot and a headless browser"
-  echo "captures a page of it. Read each value with the slot already substituted, e.g."
-  echo "ola-profile get preview.url --slot <n>; {slot} applies to all three:"
   for step in up url down; do
-    printf '  %-5s %s\n' "$step" "$(get "preview.$step")"
+    read_key "preview.$step"
   done
-  echo "\`up\` hands the shell back once the app answers at \`url\`. Run \`down\` whatever the result,"
-  echo "or the slot stays taken."
-  echo
-  echo "Captures are expected of a request that changes what a user sees, and only of one."
-  echo "- Capture a page: ola-workflow-capture <url> <file.png>"
-  echo "- Show captures in a request, once it is open: ola-workflow-pr-assets <pr> <file.png>..."
-  echo "  It pushes them to the pr-assets branch and prints one markdown line per file, which go"
-  echo "  in the description."
-  echo "- Write captures outside the worktree: they are never committed."
-  echo "- pr-assets is readable by whoever can read the repository, so capture development data"
-  echo "  only: nothing real, nothing private."
-  [ "$mode" = integrated ] || echo "- In this mode, pushing \`pr-assets\` is a push like any other: the human confirms it first."
+  render captures.preview
 else
-  echo "No capture is expected: this project declares no preview. A request that changes what a"
-  echo "user sees says so in one line of its description."
+  render captures.none
 fi
 echo
 # Rules every role needs, so they are written here once rather than in each prompt. Static
 # on purpose: nothing in the profile changes them, and both modes print them.
-cat <<'CONTEXT_ECONOMY'
-## Keeping context small
-
-Everything you read or print stays in your context for the rest of the task.
-
-- No busy-waiting on CI: no `until … sleep`, no `watch`, no `--watch`. Read the state of a
-  check once. If it is still running, say so and carry on: whoever needs it green, the merge
-  check, will read it again.
-- Read a file by line range: Read with an interval, or find the lines with `grep -n` first.
-  Never a whole file through `cat`, nor through `git show <sha>:<file>` without a range.
-- Silence or bound noisy commands: `git fetch -q`, `git worktree list` filtered, and any
-  output that may run past a screen goes through `tail`, `grep` or `head`. From a test run,
-  keep the summary and the failures.
-- Short reports: the Status, the deliverables, one line per finding. Write the detail where
-  the memory lives (see Memory below) and point the report at it.
-
-CONTEXT_ECONOMY
-echo "## Context — read these before writing anything"
-found=0
+render keeping-context-small; echo
+# Whether any of the five is declared decides the line that says none is.
+context_found=
 for key in product architecture review_checklist security_precedents glossary; do
-  path=$(get "context.$key")
-  if [ -n "$path" ]; then
-    printf '%-18s %s\n' "$key:" "$path"
-    found=1
-  fi
+  read_key "context.$key"
+  [ -n "$(get "context.$key")" ] && context_found=1
 done
-[ "$found" = 0 ] && echo "(none declared — the repository itself is the only source)"
-echo
+flag context_none [ -z "$context_found" ]
+render context; echo
 
 # Visual work is published as a claude.ai artifact, which is the one thing that leaves the
 # machine on purpose — so where it is documented, where its page is written, and whether it
 # may be published at all are the mode's to say, not the product-designer's.
-echo "## Design — visual work"
 if [ "$mode" = integrated ]; then
   # The default is announced here rather than in the notice above: a project with no
   # interface has no reason to set it, and would otherwise open every brief on it.
-  if design_dir=$(ola_profile_get context.design "$dir" 2>/dev/null); then
-    design_note=""
-  else
-    design_dir=docs/design
-    design_note=" (not in the profile — my default)"
-  fi
-  design_dir=${design_dir%/}
+  read_key context.design
+  design_dir=$(ola_profile_get context.design "$dir" 2>/dev/null) || design_dir=docs/design
+  value design_dir "${design_dir%/}"
   # Not under TMPDIR: until a developer copies them, the page and its README are the only
   # record of the designer's decisions and of the review verdicts, and a reboot wipes TMPDIR.
   stage_id=$(ola_profile_id "$dir" 2>/dev/null) || stage_id=$(basename "$(ola_profile_toplevel "$dir" 2>/dev/null || printf '%s' "$dir")")
-  cat <<DESIGN
-Documented in:    $design_dir/<slug>/$design_note
-                  index.html, the page; README.md, its artifact URL, what it shows, its
-                  words, its decisions and its revisions.
-Written first in: ${HOME}/.claude/ola-workflow-design/$stage_id/<slug>/
-                  outside the repository. A developer's task copies it into
-                  $design_dir/<slug>/.
-Publishing:       allowed for visual work. One artifact per design: a design that already
-                  has a URL is republished at that URL, never published again.
-DESIGN
+  value stage_id "$stage_id"
+  value home "$HOME"
+  render design.integrated
 else
-  cat <<DESIGN
-Documented in:    $(ola_profile_dir "$dir")/runs/<slug>/design/
-                  nothing goes into the repository.
-Publishing:       only after the human has said yes to this design, relayed by the
-                  coordinator. An artifact sends the page to claude.ai, and this project
-                  did not ask for its contents to leave the machine.
-DESIGN
+  value profile_dir "$(ola_profile_dir "$dir")"
+  render design.discreet
 fi
 echo
 
@@ -525,42 +471,8 @@ review in, its findings verified, the suggestions sorted.
 The name is fixed; the profile has no key for it.
 INTEGRATED
 else
-  profile_dir=$(ola_profile_dir "$dir")
-  # Discreet mode gives no command a stronger token, so with the tokens on GitHub refuses a
-  # merge and a status to every role here.
-  if [ "$(with_default github_tokens keychain)" = off ]; then
-    discreet_stops="Nothing refuses any of it here: silence is not permission, you are the
-enforcement."
-  else
-    discreet_stops="GitHub refuses a merge and a commit status here to every role, the
-coordinator and the pr-reviewer included. The rest of this section — an issue, a comment,
-a label, a push, a pull request — nothing refuses: silence is not permission, you are the
-enforcement."
-  fi
-  cat <<DISCREET
-## Memory — discreet mode
-
-This project did not ask for the workflow, so the workflow leaves no trace in it. The
-memory is local, under:
-
-  $profile_dir/runs/<slug>/
-
-with epic.md, tasks/, reviews/<branch>/<sha>.md and security-reviews/<branch>/<sha>.md.
-Keep the repository itself clean: git status must be as you found it.
-
-## What discreet mode forbids
-
-- Changing anything on the forge, in any direction: creating, editing, deleting, closing,
-  reopening, labelling or unlabelling an issue, a comment, a review, a commit status, a
-  release. Reading is free — and that is the whole of what is free.
-- Merging. Nobody merges, the coordinator included.
-
-And two actions need the human to confirm, because they are the only ones other
-contributors see: pushing a branch, and opening a pull request. Propose them, explain what
-they will contain, and wait for an answer.
-
-Wait for it even if nothing interrupts you. $discreet_stops
-DISCREET
+  value profile_dir "$(ola_profile_dir "$dir")"
+  render memory.discreet
 fi
 
 exec 1>&3 3>&-
