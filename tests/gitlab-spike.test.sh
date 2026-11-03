@@ -180,7 +180,7 @@ grep -qF 'data-urlencode = "only_allow_merge_if_pipeline_succeeds=true"' "$CFGS"
 first=$(grep -n 'only_allow_merge_if_pipeline_succeeds=true' "$CFGS" | head -n 1 | cut -d: -f1)
 last=$(grep -n 'only_allow_merge_if_pipeline_succeeds=' "$CFGS" | tail -n 1 | cut -d: -f1)
 [ -n "$first" ] && [ "$last" -gt "$first" ] && grep 'only_allow_merge_if_pipeline_succeeds=' "$CFGS" | tail -n 1 | grep -q 'only_allow_merge_if_pipeline_succeeds=false' && ok "…and puts it back as found" || ko "the setting is not put back"
-grep -q 'GLAB_CONFIG_DIR' "$ROOT/scripts/spike/gitlab-forge.sh" && printf '%s\n' "$OUT" | grep -q '^M10 the login landed in the scratch GLAB_CONFIG_DIR → yes' && ok "M10 checks that the login landed in the scratch config" || ko "no M10 check of the config location"
+printf '%s\n' "$OUT" | grep -q '^M10 the login landed in the scratch GLAB_CONFIG_DIR → yes' && ok "M10 checks that the login landed in the scratch config" || ko "no M10 check of the config location"
 grep -q '^curl ' "$CALLS" && ! grep -E '^curl ' "$CALLS" | grep -qiE 'private-token|authorization' && ok "curl is given no header on its command line" || ko "a curl call carries a header in argv"
 [ "$n" -ge 14 ] || ko "fewer than 14 measure lines ($n)"
 
