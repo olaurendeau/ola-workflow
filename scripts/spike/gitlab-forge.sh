@@ -12,9 +12,13 @@
 # exists for a try-out, and a result on another host is not an Evidence.
 #
 # Needs a THROWAWAY project, because the script creates issues, branches, merge requests,
-# tags and commit statuses in it, MERGES one merge request into its default branch, and may
-# set the protection of that branch to "Maintainers". It deletes what can be deleted; commit
-# statuses, pipelines and the merged commit stay: delete the project afterwards.
+# tags and commit statuses in it and MERGES merge requests into its default branch: M08's on
+# purpose, and on gitlab.com's shared runners the two scheduled merges of M09 and the one of
+# M10 (glab mr merge) complete too, so up to four land there, with a .gitlab-ci.yml (two jobs,
+# one manual) that M12 then uses on the default branch. It may also set the protection of that
+# branch to "Maintainers", and for a minute requires a green pipeline to merge (M11), putting
+# the setting back. It deletes what can be deleted; commit statuses, pipelines and the merged
+# commits stay: delete the project afterwards.
 #   - the human is Owner (or Maintainer) of the project;
 #   - a second identity is a Developer member of it: a project access token's bot (Premium)
 #     or a dedicated account; the script adds nobody;
@@ -76,8 +80,8 @@ M07 a .gitlab-ci.yml job named agent-review in a pipeline the human's push trigg
 M08 merge: bot PUT merge, auto_merge and merge_when_pipeline_succeeds refused; human wrong sha, then right sha with squash=true; squash message
 M09 push options with the human's credentials: merge_request.merge_when_pipeline_succeeds and merge_request.auto_merge schedule a merge as the human
 M10 glab: version, GITLAB_TOKEN over the stored login, empty GITLAB_TOKEN, GITLAB_HOST, which remote :id resolves to, mr merge default, api -f typing
-M11 a status posted before any pipeline exists: separate pipeline? a failed external status: pipeline red, merge blocked?
-M12 bot: create a tag (unprotected and protected), play a manual job, create a pipeline
+M11 a status posted before any pipeline exists: separate pipeline? a failed external status posted last: pipeline red, merge blocked with and without "Pipelines must succeed" (set for a minute, then put back)
+M12 bot: create a tag (unprotected and protected), create a pipeline, play a manual job on a branch and on the protected default branch
 M13 expiry of the human PAT and of the bot token (GET /personal_access_tokens/self)
 M14 the PAT creation page pre-filled (/-/user_settings/personal_access_tokens?name=…&scopes=…), by hand
 EOF
@@ -109,8 +113,9 @@ for tool in curl jq git; do
 done
 
 banner
-echo "It will create and delete objects in that project, merge one merge request into its default"
-echo "branch and may set that branch's protection to Maintainers."
+echo "It will create and delete objects in that project, merge up to four merge requests into its"
+echo "default branch (with a .gitlab-ci.yml), may set that branch's protection to Maintainers and"
+echo "briefly require a green pipeline to merge."
 if [ "$YES" = 0 ]; then
   printf 'Type the project path to go on: '
   read -r answer || answer=""
@@ -128,6 +133,7 @@ EXPIRES=$(date -u -v+1d +%F 2>/dev/null || date -u -d tomorrow +%F)
 ENC=$(jq -rn --arg p "$PROJECT" '$p|@uri')
 GITURL="https://$HOST/$PROJECT.git"
 HTTP=000
+NAP=${SPIKE_NAP:-3} # seconds between two looks at GitLab; the test sets it to 0
 PID=""
 BASE=""
 
@@ -148,13 +154,25 @@ api() { # api <bot|human> <METHOD> <path> [key=value ...] → HTTP (code), BODY 
       for kv in "$@"; do
         printf 'data-urlencode = "%s"\n' "$(printf '%s' "$kv" | sed 's/\\/\\\\/g; s/"/\\"/g')"
       done
-    } | curl -sS -K - -o "$BODY" -w '%{http_code}' --max-time 60 2>>"$WORK/curl.err"
+    } | curl -sS -K - -o "$BODY" -w '%{http_code}' --max-time 60 2>"$WORK/curl.err"
   ) || HTTP=000
 }
 jb() { jq -r "$1" "$BODY" 2>/dev/null; }
+transport() { # the last line curl said, without a token in it
+  local l t
+  l=$(tail -n 1 "$WORK/curl.err" 2>/dev/null | cut -c1-160)
+  for t in "$SPIKE_BOT_TOKEN" "$SPIKE_HUMAN_TOKEN"; do
+    [ -z "$t" ] || l=${l//"$t"/***}
+  done
+  echo "${l:-curl said nothing}"
+}
 msg() { jq -r '(.message // .error // "no message") | tostring' "$BODY" 2>/dev/null | tr '\n' ' ' | cut -c1-140; }
 h() { # the code, and the reason when it is not a 2xx
-  case $HTTP in 2??) echo "HTTP $HTTP" ;; *) echo "HTTP $HTTP $(msg)" ;; esac
+  case $HTTP in
+    2??) echo "HTTP $HTTP" ;;
+    000) echo "HTTP 000 (no answer: $(transport))" ;;
+    *) echo "HTTP $HTTP $(msg)" ;;
+  esac
 }
 m() { printf 'M%02d %s → %s\n' "$1" "$2" "$3"; }
 pre() { printf 'Pre %s → %s\n' "$1" "$2"; }
@@ -194,6 +212,7 @@ cleanup() {
       tag) api human DELETE "/projects/$PID/repository/tags/$arg" ;;
       ptag) api human DELETE "/projects/$PID/protected_tags/$arg" ;;
       label) api human DELETE "/projects/$PID/labels/$arg" ;;
+      pipesetting) api human PUT "/projects/$PID" "only_allow_merge_if_pipeline_succeeds=$arg" ;;
       pat) api human DELETE "/personal_access_tokens/$arg" ;;
       *) continue ;;
     esac
@@ -338,7 +357,7 @@ m04() {
   iid=$(jb '.iid // empty')
   [ -z "$iid" ] || rec issue "$iid"
   res 4 "bot: create issue" "$(h)" '^HTTP 2' "2xx"
-  api bot POST "/projects/$PID/labels" name=RFR color=%23428BCA
+  api bot POST "/projects/$PID/labels" name=RFR color=#428BCA
   [ "$HTTP" != 201 ] || rec label RFR
   m 4 "bot: create label RFR (409 means it existed)" "$(h)"
   api bot PUT "/projects/$PID/issues/${iid:-0}" labels=RFR
@@ -447,7 +466,8 @@ m07() {
 m08() {
   local im sha st
   [ "$GIT_OK" = 1 ] || { m 8 "merge" "not measurable: no git clone"; return; }
-  mkbranch "ola-spike-$RUN-m" plain && pushb "ola-spike-$RUN-m" -o ci.skip
+  # a ci branch: once merged, the default branch carries manual-job, which M12 plays as the bot
+  mkbranch "ola-spike-$RUN-m" ci && pushb "ola-spike-$RUN-m" -o ci.skip
   open_mr "ola-spike-$RUN-m" "ola-spike $RUN M"
   im=$MR_IID; sha=$MR_SHA
   [ -n "$im" ] || { m 8 "merge" "not measurable: the merge request was not opened"; return; }
@@ -497,10 +517,13 @@ m09() {
 
 GLREPO=$WORK/glab-repo
 gl() { # gl <token|-|empty> <dir> <glab args...> — the token goes by environment, a subshell keeps it there
+  # stderr goes to a file, so a notice on it never reaches jq; GL_STDERR=merge puts it back in the output.
+  # HOME and XDG_CONFIG_HOME are the scratch ones too: a glab that ignored GLAB_CONFIG_DIR would
+  # write its login there, never into the human's own configuration.
   local tok=$1 dir=$2
   shift 2
   (
-    export GLAB_CONFIG_DIR=$WORK/glab-config NO_PROMPT=1
+    export GLAB_CONFIG_DIR=$WORK/glab-config NO_PROMPT=1 HOME=$WORK/glab-home XDG_CONFIG_HOME=$WORK/glab-home/.config
     unset GITLAB_TOKEN GITLAB_HOST
     [ -z "$GL_HOST_ENV" ] || export GITLAB_HOST=$GL_HOST_ENV
     case $tok in
@@ -508,7 +531,8 @@ gl() { # gl <token|-|empty> <dir> <glab args...> — the token goes by environme
       human) export GITLAB_TOKEN=$SPIKE_HUMAN_TOKEN ;;
       bot) export GITLAB_TOKEN=$SPIKE_BOT_TOKEN ;;
     esac
-    cd "$dir" && glab "$@" 2>&1
+    cd "$dir" || exit 1
+    if [ "${GL_STDERR:-}" = merge ]; then glab "$@" 2>&1; else glab "$@" 2>>"$WORK/glab.err"; fi
   )
 }
 who_glab() { gl "$1" "$2" api user | jq -r '.username // "no user"' 2>/dev/null || echo "no answer"; }
@@ -517,13 +541,18 @@ m10() {
   local im sq out
   if ! command -v glab >/dev/null; then m 10 "glab" "not measurable: glab is not on PATH"; return; fi
   m 10 "glab version" "$(glab --version 2>&1 | head -n 1)"
-  mkdir -p "$WORK/glab-config" "$WORK/norepo" "$GLREPO"
+  mkdir -p "$WORK/glab-config" "$WORK/glab-home" "$WORK/norepo" "$GLREPO"
   git -C "$GLREPO" init -q 2>/dev/null
   git -C "$GLREPO" remote add origin "$GITURL"
   git -C "$GLREPO" remote add upstream "https://$HOST/${PROJECT}-ola-spike-absent.git"
   GL_HOST_ENV=""
   printf '%s' "$SPIKE_HUMAN_TOKEN" | gl - "$WORK/norepo" auth login --hostname "$HOST" --stdin >"$WORK/glab-login.out"
   m 10 "glab auth login --stdin into a scratch config (the human's PAT)" "exit $?"
+  if [ -z "$(find "$WORK/glab-config" -type f 2>/dev/null | head -n 1)" ]; then
+    m 10 "the login landed in the scratch GLAB_CONFIG_DIR" "no file there: this glab ignores GLAB_CONFIG_DIR (scratch home: $(find "$WORK/glab-home" -type f 2>/dev/null | wc -l | tr -d ' ') file(s), the human's own configuration untouched) — the run stops"
+    exit 1
+  fi
+  m 10 "the login landed in the scratch GLAB_CONFIG_DIR" "yes — ok"
   res 10 "no GITLAB_TOKEN: the stored login acts as" "$(who_glab - "$GLREPO")" "^$HUM_U\$" "$HUM_U"
   res 10 "GITLAB_TOKEN=<bot> over the stored login acts as" "$(who_glab bot "$GLREPO")" "^$BOT_U\$" "$BOT_U (the environment wins)"
   res 10 "GITLAB_TOKEN empty: falls back to the stored login, acts as" "$(who_glab empty "$GLREPO")" "^$HUM_U\$" "$HUM_U (an empty variable falls back)"
@@ -544,25 +573,58 @@ m10() {
   gl human "$GLREPO" api -X PUT "projects/:id/merge_requests/$im" -F squash=false >/dev/null
   api human GET "/projects/$PID/merge_requests/$im"
   m 10 "glab api -F squash=false (a typed field) leaves it at" "$(jb .squash)"
-  out=$(gl human "$GLREPO" mr merge "$im" --yes | head -n 3 | tr '\n' ' ' | cut -c1-200)
+  out=$(GL_STDERR=merge gl human "$GLREPO" mr merge "$im" --yes | head -n 3 | tr '\n' ' ' | cut -c1-200)
   api human GET "/projects/$PID/merge_requests/$im"
   m 10 "glab mr merge $im --yes (pipeline pending): the default is" "state $(jb .state), scheduled $(jb '.merge_when_pipeline_succeeds // .auto_merge_enabled // false'); glab said: $out"
 }
 
+mr_state() { # the MR A, as the human reads it
+  api human GET "/projects/$PID/merge_requests/$IA"
+  echo "head pipeline $(jb '.head_pipeline.status // "none"'), detailed_merge_status $(jb '.detailed_merge_status // "?"'), merge_status $(jb '.merge_status // "?"')"
+}
+
 m11() {
+  local pl orig i=0 st
   [ -n "${SHA_A:-}" ] || { m 11 "statuses and pipelines" "not measurable: no merge request from M04"; return; }
   m 11 "pipelines of the SHA before any status" "$PL_BEFORE"
   m 11 "…after the bot's first status (success)" "$PL_AFTER"
   m 11 "…after the bot's failed status" "$PL_AFTER2"
+  # M05 and M06 have posted success again on every name: a failed status has to come last,
+  # on the pipeline the MR shows, and nothing may follow it.
   api human GET "/projects/$PID/merge_requests/$IA"
-  local mr
-  mr="head pipeline $(jb '.head_pipeline.status // "none"'), detailed_merge_status $(jb '.detailed_merge_status // "?"'), merge_status $(jb '.merge_status // "?"')"
+  pl=$(jb '.head_pipeline.id // empty')
   api human GET "/projects/$PID"
-  m 11 "the MR after a failed external status" "$mr; the project requires a green pipeline to merge: $(jb .only_allow_merge_if_pipeline_succeeds)"
+  orig=$(jb '.only_allow_merge_if_pipeline_succeeds // false')
+  post_status bot "$SHA_A" failed agent-review-m11 ${pl:+"pipeline_id=$pl"}
+  m 11 "bot: POST a last failed status (agent-review-m11) on the MR's head pipeline ${pl:-(none known yet)}" "$(h) pipeline $(jb '.pipeline_id // "?"')"
+  while [ $i -lt 10 ]; do
+    api human GET "/projects/$PID/merge_requests/$IA"
+    st=$(jb '.head_pipeline.status // "none"')
+    [ "$st" != failed ] || break
+    sleep "$NAP"
+    i=$((i + 1))
+  done
+  m 11 "the MR after that failed external status, 'Pipelines must succeed' = $orig (as found)" "$(wait_mergeable "$IA"); $(mr_state)"
+  rec pipesetting "$orig"
+  api human PUT "/projects/$PID" only_allow_merge_if_pipeline_succeeds=true
+  m 11 "human: require a green pipeline to merge (put back right after)" "$(h) now $(jb .only_allow_merge_if_pipeline_succeeds)"
+  sleep "$NAP"
+  m 11 "the same MR with 'Pipelines must succeed' on" "$(wait_mergeable "$IA"); $(mr_state)"
+  api human PUT "/projects/$PID" "only_allow_merge_if_pipeline_succeeds=$orig"
+  m 11 "human: put 'Pipelines must succeed' back to $orig" "$(h) now $(jb .only_allow_merge_if_pipeline_succeeds)"
+}
+
+play_in() { # play_in <label> <pipeline id> — the bot plays the manual job of that pipeline
+  local job
+  api bot GET "/projects/$PID/pipelines/$2/jobs"
+  job=$(jb '[.[]? | select(.name == "manual-job")][0].id // empty')
+  [ -n "$job" ] || { m 12 "bot: play the manual job $1" "not measurable: no manual-job in pipeline $2 ($(h))"; return; }
+  api bot POST "/projects/$PID/jobs/$job/play"
+  m 12 "bot: play the manual job $1" "$(h)"
 }
 
 m12() {
-  local t=ola-spike-$RUN-t
+  local t=ola-spike-$RUN-t pl
   [ "$GIT_OK" = 1 ] || { m 12 "tags and pipelines" "not measurable: no git clone"; return; }
   api bot POST "/projects/$PID/repository/tags" "tag_name=$t-1" "ref=$BASE"
   [ "$HTTP" != 201 ] || rec tag "$t-1"
@@ -575,18 +637,19 @@ m12() {
   res 12 "bot: create a protected tag" "$(h)" '^HTTP 40[13]' "401 or 403"
   api bot POST "/projects/$PID/pipeline" "ref=ola-spike-$RUN-ci"
   m 12 "bot: create a pipeline on the CI branch" "$(h)"
+  api bot GET "/projects/$PID/pipelines?ref=ola-spike-$RUN-ci"
+  pl=$(jb '.[0].id // empty')
+  if [ -n "$pl" ]; then play_in "of an unprotected branch" "$pl"; else m 12 "bot: play the manual job of an unprotected branch" "not measurable: no pipeline on the CI branch"; fi
+  # M08 merged a branch with a .gitlab-ci.yml into the default branch: it holds manual-job now
   api bot POST "/projects/$PID/pipeline" "ref=$BASE"
   m 12 "bot: create a pipeline on the protected branch" "$(h)"
-  api bot GET "/projects/$PID/pipelines?ref=ola-spike-$RUN-ci"
-  local pl job
-  pl=$(jb '.[0].id // empty')
-  [ -n "$pl" ] || { m 12 "bot: play a manual job" "not measurable: no pipeline on the CI branch"; return; }
-  api bot GET "/projects/$PID/pipelines/$pl/jobs"
-  job=$(jb '[.[]? | select(.name == "manual-job")][0].id // empty')
-  [ -n "$job" ] || { m 12 "bot: play a manual job" "not measurable: no manual-job in pipeline $pl"; return; }
-  api bot POST "/projects/$PID/jobs/$job/play"
-  m 12 "bot: play the manual job of an unprotected branch" "$(h)"
-  m 12 "bot: play a manual job on the protected branch" "not measurable: that needs a .gitlab-ci.yml on $BASE, which the script does not commit there"
+  pl=""
+  case $HTTP in 2??) pl=$(jb '.id // empty') ;; esac
+  if [ -z "$pl" ]; then
+    api human GET "/projects/$PID/pipelines?ref=$BASE"
+    pl=$(jb '.[0].id // empty')
+  fi
+  if [ -n "$pl" ]; then play_in "on the protected branch $BASE (pipeline $pl)" "$pl"; else m 12 "bot: play the manual job on the protected branch" "not measurable: no pipeline on $BASE (was the merge of M08 refused, or CI off?)"; fi
 }
 
 m13() {
