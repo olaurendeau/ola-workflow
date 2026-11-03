@@ -29,6 +29,7 @@
       ".claude/**",
       "hooks/**",
       "bin/**",
+      "brief/**",
       "agents/**",
       "skills/**",
       "schema/**",
@@ -40,6 +41,7 @@
     "paths": [
       "hooks/**",
       "bin/**",
+      "brief/**",
       ".github/**",
       ".claude-plugin/**"
     ]
