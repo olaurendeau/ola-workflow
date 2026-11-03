@@ -1,13 +1,21 @@
 # ola-workflow
 
-A team of Claude Code agents — a coordinator, a product designer and an independent design
-reviewer, an architect, developers working in isolated worktrees, an independent PR
-reviewer and, on the paths a project declares, a security reviewer — whose two irreversible
-acts, merging and setting the review status, GitHub itself keeps with the role that owns them.
+Describe a change in plain words, and a team of Claude Code agents takes it from there: it
+writes down what "done" means, splits the work into pull requests small enough to review,
+builds them test-first, has each one reviewed by an agent that did not write it, and merges
+what is safe to merge. You stay in charge of the decisions that are yours: scope,
+dependencies, releases.
 
-The workflow is **generic**: everything project-specific lives in a profile file, so the
-same plugin drives a project you own and a repository you contribute to twice a year
-**without committing anything to it**.
+Two things set it apart. **It is enforced where it can be:** merging belongs to the
+coordinator and the review status to the independent reviewer, and GitHub itself refuses both
+to every other role. Pushing to the base branch, tagging and publishing are rules the agents
+carry, not rules GitHub applies — the docs say which is which. And **it is generic:**
+everything specific to a project lives in a profile file, so the same plugin drives a project
+you own and a repository you contribute to twice a year, **without committing anything to
+it**.
+
+It is a Claude Code plugin. A project with no profile is unaffected: the plugin does nothing
+there, and your own GitHub login is left alone.
 
 ## How it works
 
@@ -46,8 +54,8 @@ The agents decide the rest alone, taking the option closest to existing code. Yo
 - Release: whether to release, and the version. The release is your act.
 
 Each role writes down what the next needs: on GitHub (issues, labels, the `agent-review` status) in
-your own project, in local files in a repository that is not yours. A project opts in with a profile
-file; without one, nothing happens. See [Configuration](docs/configuration.md).
+your own project, in local files in [a repository that is not yours](docs/discreet-mode.md). A
+project opts in with a profile file; without one, nothing happens: [Configuration](docs/configuration.md).
 
 GitHub refuses merging and setting the review status to the agents' token. The coordinator gets a
 stronger one for the merge command alone, the pr-reviewer for the status command alone. Pushing,
@@ -55,57 +63,73 @@ tags and releases rest on rules alone: see [GitHub tokens](docs/github-tokens.md
 
 A whole request, step by step, is in the [walkthrough](docs/walkthrough.md).
 
-## Install
+## Quickstart
+
+You need macOS for the GitHub tokens, and `gh`, `git`, `jq` and Claude Code
+([prerequisites](docs/getting-started.md#1-prerequisites)). Install the plugin, from a Claude
+Code session:
 
 ```
 /plugin install ola-workflow --marketplace olaurendeau/ola-workflow
 ```
 
-or, from a shell:
+or from a shell:
 
 ```bash
 claude plugin install ola-workflow --marketplace olaurendeau/ola-workflow
 ```
 
-User scope is the default, which is what you want: install once, use everywhere. Then, in a
-terminal, create the tokens the agents work with — see [GitHub tokens](docs/github-tokens.md):
+The plugin's commands are on the `PATH` of a session's Bash calls and nowhere else: in a
+terminal, first run the `export` line of [step 2](docs/getting-started.md#2-install-the-plugin),
+then create the three tokens the agents work with ([GitHub tokens](docs/github-tokens.md)):
 
 ```bash
 ola-workflow-tokens setup
 ```
 
+In the project, in a Claude Code session, write its profile. It asks whose project it is:
+yours (`integrated`) or someone else's (`discreet`).
+
+```
+/ola-workflow:workflow-init
+```
+
+Back in the terminal, in the project, check the profile, then talk to the coordinator:
+
+```bash
+ola-profile validate
+claude --agent ola-workflow:coordinator
+```
+
+Each step says what you should see, and what to do when you do not, in
+[Getting started](docs/getting-started.md).
+
+## Where to go next
+
+| If you want to… | Read |
+|---|---|
+| Install it and run a first request | [Getting started](docs/getting-started.md) |
+| See what happens between a request and a merged pull request | [Walkthrough](docs/walkthrough.md) |
+| Contribute to someone else's repository without committing anything to it | [Discreet mode](docs/discreet-mode.md) |
+| Configure a project | [Configuration](docs/configuration.md) |
+| Know what GitHub enforces and what it does not | [GitHub tokens](docs/github-tokens.md) |
+| Know which model each agent runs on | [Models](docs/models.md) |
+| Understand why a rule is what it is | [Decision log](docs/decisions/README.md) |
+| See how plugin agents are identified, as measured | [Agent identity](docs/agent-identity.md) |
+| Work on the plugin itself | [Contributing](docs/contributing.md) |
+
 ## Status
 
-**The team is complete, and GitHub refuses two things a role does not own.** Two, not all:
-merging belongs to the coordinator and the review status to the pr-reviewer, and every agent
-works with a token that can do neither. Pushing to the base branch, tagging, releasing,
-publishing and changing repository settings are **not refused by anything** — they are rules
-the prompts carry and nothing applies, which is a different thing from a rule. See
-[What it does not stop](docs/github-tokens.md#what-it-does-not-stop).
+GitHub refuses two things a role does not own: merging, and writing the review status. Two,
+not all. What follows is a rule the agents carry and nothing applies:
 
-In place: the manifests, the CI,
-the test harness, the answer to how a plugin agent is identified (see
-[Agent identity](docs/agent-identity.md)), the project profile with its schema and its
-`ola-profile` CLI, the **seven roles** (`agents/` also ships `probe`, a measuring tool that
-is no part of the flow) — a coordinator that frames and dispatches, a product
-designer that turns a request into criteria a test can prove and the words a user reads, and
-for visual work publishes the design as a claude.ai artifact it keeps at one URL, a design
-reviewer that judges that page against the epic, an architect that splits an
-epic into reviewable tasks, developers that build test-first in their own worktrees, an
-independent reviewer, and a security reviewer dispatched beside it when a change touches the
-paths the project declares, whose blocking findings each go to a second, cold reading before
-a developer sees them — and the **role tokens**.
+- Pushing to the base branch, tagging, releasing, publishing and changing repository settings
+  ([what it does not stop](docs/github-tokens.md#what-it-does-not-stop)).
+- In discreet mode, writes to the forge and `git push`
+  ([Discreet mode](docs/discreet-mode.md)).
+- The `commands` rules of a profile: the brief states them, nothing applies them
+  ([Configuration](docs/configuration.md)).
+- The merge gate: GitHub checks who merges, not whether the checks were green. The
+  coordinator reads them on the forge.
 
-A project with no profile is unaffected, which is the whole point of the design: both hooks
-exit before doing anything, and its sessions keep your own GitHub login.
-
-### What is not here yet
-
-| step | content |
-|---|---|
-| A3 | pushing to the base branch, tags, releases, repository settings |
-| A4 | declarative `commands[]` rules, discreet mode's prohibitions on the forge and on pushing (a merge and a review status are refused there too, by the tokens), the conditional merge gate |
-| A6 | the `verify-ui` skill, then 1.0.0 |
-
-Until the merge gate exists, the coordinator checks it by hand against the forge: GitHub
-checks *who* merges, not whether the checks were green.
+Not shipped: a `verify-ui` skill.
