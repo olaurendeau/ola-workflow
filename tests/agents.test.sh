@@ -1472,7 +1472,7 @@ for key in $(jq -r '.properties | keys[] | select(startswith("$") | not)' \
   if grep -q "\b$key\b" "$BRIEF"; then ok "schema key '$key' reaches the agents through the brief"; else ko "schema key '$key' is declared and no agent can ever see it"; fi
 done
 for key in $(grep -v '^[[:space:]]*#' "$BRIEF" |
-             perl -nle 'print $1 while /\$\(get\s+"?([a-z_]+)/g' | sort -u); do
+             perl -nle 'print $1 while /(?:\$\(get|^\s*read_key)\s+"?([a-z_]+)/g' | sort -u); do
   if jq -e --arg k "$key" '.properties | has($k)' \
       "$ROOT/schema/profile.schema.json" >/dev/null 2>&1; then
     ok "the brief reads '$key', which the schema declares"

@@ -153,8 +153,8 @@ run_brief() { # run_brief [env assignment...] → RC, $WORK/bout, $WORK/berr
   env HOME="$WORK/home" "$@" "$COPY/bin/ola-workflow-brief" "$REPO" >"$WORK/bout" 2>"$WORK/berr"
   RC=$?
 }
-broken() { # broken <label> <template file> → the brief refuses whole
-  if [ "$RC" = 2 ] && [ ! -s "$WORK/bout" ] && grep -qF "$2" "$WORK/berr"; then
+broken() { # broken <label> <template file> → the brief refuses whole, and says so in its own words
+  if [ "$RC" = 2 ] && [ ! -s "$WORK/bout" ] && grep -qxF "ola-workflow-brief: brief/$2 could not be rendered" "$WORK/berr"; then
     ok "$1"
   else
     ko "$1 (exit $RC; stdout $(wc -c <"$WORK/bout" | tr -d ' ') bytes; stderr: $(tr '\n' '|' <"$WORK/berr"))"
