@@ -16,6 +16,12 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=hooks/lib/profile.sh
 . "$SELF_DIR/../hooks/lib/profile.sh"
 
+# The templates in brief/ read their values from OLA_BRIEF_* and from nothing else. One this
+# script forgot to set must fail the render, not be supplied by the caller's environment.
+for inherited in $(compgen -e); do
+  case $inherited in OLA_BRIEF_*) unset "$inherited" ;; esac
+done
+
 dir=${1:-$PWD}
 
 # get <key> [default]
@@ -102,6 +108,60 @@ for pair in language.human=en language.artifacts=en language.agents=en \
 done
 [ -n "$base_note" ] && MISSING="$MISSING base_branch=$base"
 
+# A preview is usable only whole: one that cannot be stopped keeps its slot, and without a
+# url there is nothing to capture. A partial one — the schema check above says so — is
+# treated as absent, rather than printed with a blank where a command should be.
+preview=
+if [ -n "$(get preview.up)" ] && [ -n "$(get preview.url)" ] && [ -n "$(get preview.down)" ]; then
+  preview=1
+fi
+
+# Everything printed from here on is held back and written at the end: a template that
+# cannot be rendered leaves nothing on stdout, and the brief is read whole or not at all.
+OUT=$(mktemp "${TMPDIR:-/tmp}/ola-brief.XXXXXX") && [ -n "$OUT" ] || {
+  echo "ola-workflow-brief: cannot create a temporary file" >&2
+  exit 2
+}
+trap 'rm -f "$OUT"' EXIT
+exec 3>&1 >"$OUT"
+
+# The text of the brief is in brief/*.md. Bash decides what is true and what the values are;
+# the words are the templates'.
+value() { # value <name> <string> → OLA_BRIEF_<name>, exactly as given and never evaluated
+  export "OLA_BRIEF_$1=$2"
+}
+flag() { # flag <name> <command...> → 1 when the command succeeds, empty when it does not
+  local name=$1
+  shift
+  if "$@"; then value "$name" 1; else value "$name" ""; fi
+}
+read_key() { # read_key <dotted.key> [join] → <key, . as _> and <key>_absent; join: one line
+  local name=${1//./_} v
+  if v=$(ola_profile_get "$1" "$dir" ""); then
+    [ "${2-}" = join ] && v=${v//$'\n'/ }
+    value "$name" "$v"
+    value "${name}_absent" ""
+  else
+    value "$name" ""
+    value "${name}_absent" 1
+  fi
+}
+render() { # render <section> → brief/<section>.md, or the end of the brief
+  if ! awk -f "$SELF_DIR/../hooks/lib/brief-render.awk" "$SELF_DIR/../brief/$1.md"; then
+    echo "ola-workflow-brief: brief/$1.md could not be rendered" >&2
+    exit 2
+  fi
+}
+
+# What several sections share.
+value base "$base"
+flag integrated [ "$mode" = integrated ]
+flag discreet [ "$mode" != integrated ]
+flag preview [ -n "$preview" ]
+flag tokens_off [ "$(with_default github_tokens keychain)" = off ]
+flag tokens_on [ "$(with_default github_tokens keychain)" != off ]
+value language_artifacts "$(with_default language.artifacts en)"
+
 echo "# ola-workflow — the rules for this project"
 echo
 echo "Profile: $profile"
@@ -130,34 +190,17 @@ fi
 echo "Base branch: $base$base_note — nobody pushes to it, every change arrives by"
 echo "pull request."
 echo
-echo "## Languages"
-echo "To the human:        $(with_default language.human en)"
-echo "Issues, PRs, commits, reviews: $(with_default language.artifacts en)"
-echo "Agent to agent:      $(with_default language.agents en)"
-echo
-echo "## Commands"
-printf 'Everything CI runs:  %s\n' "$(get check.full '(none declared — ask the human what proves this project works)')"
-if affected=$(ola_profile_get check.affected "$dir" 2>/dev/null); then
-  printf 'The affected subset: %s\n' "$affected"
-else
-  printf 'The affected subset: %s — the same command: this project declares no subset.\n' \
-    "$(get check.full '(none declared)')"
-fi
-cleanup=$(get check.cleanup)
-[ -n "$cleanup" ] && printf 'After a check:        %s\n' "$cleanup"
-echo
-echo "Any {slot} in those commands is replaced by the slot you were given. Read a value"
-echo "with the slot already substituted: ola-profile get check.affected --slot <n>"
-echo
-echo "## Slots"
-printf 'Variable: %s · developers: %s · reviewers: %s\n' \
-  "$(with_default slots.var SLOT)" \
-  "$(get slots.developers '(none declared)' | tr '\n' ' ')" \
-  "$(get slots.reviewer '(none declared)' | tr '\n' ' ')"
-echo "A slot is what keeps parallel work from colliding on ports, databases and containers."
-echo "Never run a command with another agent's slot. One agent per slot: never more"
-echo "developers at once than developer slots, nor more reviewers than reviewer slots."
-echo
+value language_human "$(with_default language.human en)"
+value language_agents "$(with_default language.agents en)"
+render languages; echo
+read_key check.full
+read_key check.affected
+read_key check.cleanup
+render commands; echo
+value slots_var "$(with_default slots.var SLOT)"
+read_key slots.developers join
+read_key slots.reviewer join
+render slots; echo
 # Which changes are worth a security review is the project's to say, and whether a change
 # touches one is git's: the same pathspec dialect as every other glob here, matched by the
 # command that reads the diff rather than by an agent reading a list.
@@ -195,13 +238,6 @@ else
   echo "is the only security review)"
 fi
 echo
-# A preview is usable only whole: one that cannot be stopped keeps its slot, and without a
-# url there is nothing to capture. A partial one — the schema check above says so — is
-# treated as absent, rather than printed with a blank where a command should be.
-preview=
-if [ -n "$(get preview.up)" ] && [ -n "$(get preview.url)" ] && [ -n "$(get preview.down)" ]; then
-  preview=1
-fi
 echo "## A reviewable pull request"
 printf 'At most %s changed lines' "$(with_default pr.max_lines 1000)"
 excluded=$(get pr.exclude)
@@ -526,3 +562,6 @@ they will contain, and wait for an answer.
 Wait for it even if nothing interrupts you. $discreet_stops
 DISCREET
 fi
+
+exec 1>&3 3>&-
+cat "$OUT"
