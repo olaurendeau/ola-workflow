@@ -150,6 +150,7 @@ flag preview [ -n "$preview" ]
 flag tokens_off [ "$(with_default github_tokens keychain)" = off ]
 flag tokens_on [ "$(with_default github_tokens keychain)" != off ]
 value language_artifacts "$(with_default language.artifacts en)"
+value review_status "$(with_default merge.review_status agent-review)"
 
 # The header: the problems are indented here, the words around them are the template's.
 schema_mismatch=""
@@ -186,40 +187,15 @@ render slots; echo
 # Which changes are worth a security review is the project's to say, and whether a change
 # touches one is git's: the same pathspec dialect as every other glob here, matched by the
 # command that reads the diff rather than by an agent reading a list.
-echo "## Security review"
 security_paths=$(get security.paths)
+pathspec=""
 if [ -n "$security_paths" ]; then
-  pathspec=""
   while IFS= read -r glob; do pathspec="$pathspec ':(glob)$glob'"; done <<<"$security_paths"
-  echo "A pull request whose change touches one of these paths gets a security review beside"
-  echo "the code review. Dispatch the security-reviewer when this prints a file:"
-  echo
-  printf '    git diff --name-only origin/%s...<SHA> --%s
-' "$base" "$pathspec"
-  echo
-  echo "A fix owes a new one only when this prints something: it compares what the pull"
-  echo "request changes against $base, in those paths, at the SHA last reviewed and at the new"
-  echo "one, each read against its own merge base with origin/$base — so what a catch-up"
-  echo "brought in does not count, nor does where a change sits in its file. The limit: a fix"
-  echo "that moves an identical change between two places with identical context is not seen"
-  echo "by this command; the pr-reviewer's diff of diffs still sees it:"
-  echo
-  printf '    diff <(git diff --no-color --no-ext-diff origin/%s...<reviewed SHA> --%s | git patch-id --verbatim) <(git diff --no-color --no-ext-diff origin/%s...<SHA> --%s | git patch-id --verbatim)
-' \
-    "$base" "$pathspec" "$base" "$pathspec"
-  echo
-  cat <<'SECURITY'
-It reads at the SHA and runs nothing, so it takes no slot, nor does a verifier. Each blocking
-finding it reports is pending verification until a second security-reviewer, dispatched on
-that one finding, confirms it. Its verdict is advice the coordinator relays: it sets no
-commit status, and the merge gate does not read it — the coordinator waits for it all the
-same.
-SECURITY
-else
-  echo "(none declared — the security-reviewer is not dispatched; the pr-reviewer's checklist"
-  echo "is the only security review)"
 fi
-echo
+value pathspec "$pathspec"
+flag security_declared [ -n "$security_paths" ]
+flag security_none [ -z "$security_paths" ]
+render security-review; echo
 value pr_max_lines "$(with_default pr.max_lines 1000)"
 read_key pr.exclude join
 flag title_conventional [ "$(with_default pr.title conventional)" = conventional ]
@@ -233,64 +209,12 @@ render escalation; echo
 # whether a rule it is about to break will stop it: told it will be refused and seeing no
 # refusal, it reads the silence as sanction — which is why this section exists and why
 # tests/agents.test.sh ties what it says to the key.
-echo "## What stops you"
-review_status=$(with_default merge.review_status agent-review)
 tokens=$(with_default github_tokens keychain)
 [ "$tokens" = off ] || [ "$mode" = integrated ] || tokens=discreet
 case $tokens in
-  discreet)
-    cat <<'DISCREET_STOPS'
-GitHub refuses merging a pull request and writing a commit status to every role in this
-project, however the command is written: every Bash command runs with a GitHub token that can
-do neither, and in discreet mode no command gets a stronger one. What else this mode forbids
-is in its own section below, and nothing refuses that.
-DISCREET_STOPS
-    ;;
-  off)
-    cat <<'NOTHING'
-Nothing. This project's profile turns the role tokens off, so you work with the human's own
-GitHub login and every right it has. Every rule above is a rule you apply yourself, and
-silence is not permission — it only means nobody switched the refusals on.
-NOTHING
-    ;;
-  *)
-    cat <<ENFORCED
-GitHub refuses **two** operations to every role but the one that owns them, however the
-command is written — \`gh\`, \`gh api\`, a script, \`curl\`:
-- merging a pull request, to anyone but the coordinator;
-- writing a commit status, to anyone but the pr-reviewer.
-
-Every Bash command runs with a GitHub token that can do neither. Two commands, in one exact
-form each, run with a stronger one — nothing may come before, after or around them, and the
-SHA is the full 40 characters:
-
-    coordinator  gh pr merge <N> --squash --match-head-commit <SHA>
-    pr-reviewer  gh api repos/{owner}/{repo}/statuses/<SHA> -f state=<success|failure> -f context=$review_status -f description='<one line>'
-
-- A 403 on one of these means you are not the role that owns it, or the form is not exactly
-  this one. Report it; do not look for another way or another token.
-- A 401 on every gh call means the human has not created the tokens yet. Say so: they run
-  \`ola-workflow-tokens setup\`.
-- \`gh pr checks\`, and anything else that reads check runs, fails with "Resource not
-  accessible by personal access token". GitHub gives check runs to no fine-grained token;
-  it is not your role being refused. Read a SHA's checks as its Actions jobs and its
-  statuses:
-
-      gh api "repos/{owner}/{repo}/actions/runs?head_sha=<SHA>" --jq '.workflow_runs[] | "\(.id) \(.name) \(.status) \(.conclusion)"'
-      gh run view <run id> --json jobs --jq '.jobs[] | "\(.name) \(.status) \(.conclusion)"'
-      gh api repos/{owner}/{repo}/commits/<SHA>/status --jq '.statuses[] | "\(.context) \(.state)"'
-
-  A check is a job of that name or a status of that context. When several runs of one
-  workflow are on that SHA, the most recent counts, as it does on GitHub. A check run by an
-  app other than GitHub Actions is in neither list: a required check found nowhere is not
-  green, ask the human.
-
-**Everything else above is a rule nothing applies.** Pushing to the base branch — \`git push\`
-uses the human's own credentials — tagging, releasing, publishing, changing repository
-settings: they hold only as far as you hold them. Do not read the absence of a refusal as
-permission; on those, you are the enforcement.
-ENFORCED
-    ;;
+  discreet) render what-stops-you.discreet ;;
+  off) render what-stops-you.off ;;
+  *) render what-stops-you.keychain ;;
 esac
 echo
 # Each element is read by one jq pass over all of them, with jq's own truth: `.reason // …`
@@ -373,56 +297,22 @@ fi
 echo
 
 if [ "$mode" = integrated ]; then
-  # With the role tokens gh pr checks cannot read check runs; What stops you says what can.
-  checks_how=""
-  [ "$tokens" = off ] || checks_how=$'\n— read as What stops you says, since `gh pr checks` cannot'
-  cat <<INTEGRATED
-## Memory — integrated mode
-
-The forge is the memory. An epic is a GitHub issue labelled \`epic\`, a task is an issue
-labelled \`task\`, a review is a PR comment plus a commit status. Nothing important lives
-only in an agent's report: if it matters tomorrow, it is written on an issue or a PR today.
-
-## Merging — integrated mode
-
-Checked on the forge for the PR's current head SHA, never taken from a report${checks_how}:
-$(req=$(get merge.required_checks '(none declared)'); printf '%s' "$req" | sed 's/^/- check: /')
-- status $(with_default merge.review_status agent-review) successful on that same SHA
-- the branch is not behind $base
-- no file touched under: $(get merge.sensitive_paths '(none declared)' | tr '\n' ' ')
-- no sensitive pattern in the patch
-
-Then, in exactly this form, with the full SHA you checked:
-
-    gh pr merge <N> --squash --match-head-commit <SHA>
-
-A file in a sensitive path, or a sensitive pattern in the patch, means the human merges.
-Say so and stop; do not look for a way around it.
-
-### The RFR label
-
-\`RFR\` — ready for review, by the human — is how the human sees at a glance which pull
-requests they can merge. The coordinator owns it. A pull request is ready when the gate
-above holds for its current head SHA, the sensitive paths and patterns aside — they only
-decide who merges — and what the coordinator already waits for as well: the security
-review in, its findings verified, the suggestions sorted.
-
-- Ready: add it, then merge, or tell the human the merge is theirs. It goes on a pull
-  request that returns to the human as much as on one the coordinator merges next.
-
-      gh pr edit <N> --add-label RFR
-
-  If the repository has no such label, create it first, once:
-
-      gh label create RFR
-
-- No longer ready: remove it at once — a new head SHA, a branch behind $base, a review that
-  blocks. A label left on an old SHA would have the human merge code nobody read.
-
-      gh pr edit <N> --remove-label RFR
-
-The name is fixed; the profile has no key for it.
-INTEGRATED
+  # Each required check is one line of the list; declared empty is a blank line, not a
+  # "(none declared)", and an absent one is the template's to say.
+  read_key merge.required_checks
+  required=$(get merge.required_checks)
+  required_checks_list=""
+  if [ -n "$required" ]; then
+    while IFS= read -r check; do
+      value check "$check"
+      item=$(render items/required-check && printf x) || exit 2
+      required_checks_list="$required_checks_list${item%x}"
+    done <<<"$required"
+    required_checks_list=${required_checks_list%$'\n'}
+  fi
+  value required_checks_list "$required_checks_list"
+  read_key merge.sensitive_paths join
+  render memory.integrated
 else
   value profile_dir "$(ola_profile_dir "$dir")"
   render memory.discreet

@@ -9,7 +9,7 @@
 # two refusals and what nothing enforces, and links "What it does not stop" rather than
 # copying a run of its words; an interrupted step has its section; and nothing in a code
 # block is invented — a block opens with a line saying "Example", or each of its lines is
-# found in agents/, bin/ or skills/.
+# found in agents/, bin/, brief/ or skills/.
 #
 # The checks on the page's content (roles, sections, code blocks) are functions proved first
 # on a throwaway file, where they can fail; the probe, link and agents/ file checks are inline
@@ -44,7 +44,7 @@ step_roles() {
 }
 
 # check_blocks <root> <page> → one BLOCK line per fenced block read, one ERR line per line of a
-# block that is neither under an "Example" opener nor found in agents/, bin/ or skills/.
+# block that is neither under an "Example" opener nor found in agents/, bin/, brief/ or skills/.
 # A fence is ``` or ~~~, indented or not, closed by the same mark. A line is found as a fixed
 # string, leading blanks aside: the page quotes, it does not match patterns. Two things are
 # defects of their own, because the check would not read what they hold: a fence never
@@ -78,7 +78,7 @@ check_blocks() {
       case $text in Example*) exempt=1 ;; esac
     fi
     [ "$exempt" = 1 ] && continue
-    grep -rqF -- "$text" "$root/agents" "$root/bin" "$root/skills" 2>/dev/null ||
+    grep -rqF -- "$text" "$root/agents" "$root/bin" "$root/brief" "$root/skills" 2>/dev/null ||
       echo "ERR $n: $text"
   done <"$page"
   [ "$inblock" = 0 ] || echo "ERR $n: a fenced block is never closed"
@@ -349,7 +349,7 @@ blocks=$(printf '%s\n' "$out" | grep -c '^BLOCK ')
 [ "$blocks" -ge 1 ] && ok "witness: $blocks code block(s) of the page were read" ||
   ko "witness: the check read no code block of the page"
 errs=$(printf '%s\n' "$out" | grep '^ERR ')
-[ -z "$errs" ] && ok "every code block is marked Example or quoted from agents/, bin/ or skills/" ||
+[ -z "$errs" ] && ok "every code block is marked Example or quoted from agents/, bin/, brief/ or skills/" ||
   ko "invented lines in code blocks: $errs"
 
 if [ "$failures" -gt 0 ]; then

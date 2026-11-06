@@ -887,7 +887,7 @@ else
   ok "security-reviewer: takes no reviewer slot"
 fi
 # The brief is what the coordinator dispatches from, so it says so too.
-if grep -q '## Security review' "$BRIEF" && grep -q 'takes no slot' "$BRIEF"; then
+if grep -q '## Security review' "$ROOT/brief/security-review.md" && grep -q 'takes no slot' "$ROOT/brief/security-review.md"; then
   ok "the brief says the security review takes no slot"
 else
   ko "the brief does not say the security review takes no slot"
