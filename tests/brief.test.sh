@@ -219,7 +219,7 @@ printf '%s\n' '{"mode":"integrated"}' >"$REPO/.claude/workflow.json"
 # --- No text in the script ---------------------------------------------------------------
 # Once the words are in brief/, nothing stops one from coming back into the script a line at
 # a time. Four rules, read on the script with its comments removed:
-#   1. no heredoc;
+#   1. no heredoc, and no here-string whose word is a literal rather than one variable;
 #   2. an `echo` is bare (an empty line) or goes to stderr;
 #   3. a `printf` format is a literal with no ASCII letter outside its conversions (%s…),
 #      its escapes (\n…) and the `:(glob)` pathspec syntax;
@@ -227,13 +227,21 @@ printf '%s\n' '{"mode":"integrated"}' >"$REPO/.claude/workflow.json"
 #      `render` names a file that exists.
 # Each counts what it examined and fails on zero, so that a pattern that stops finding
 # anything cannot pass for a script with nothing to find.
-# Known limit: a string of text in a jq program of the script is not seen.
+# What these rules see is the three ways of printing text, and the files. They do not see
+# text anywhere else: in a jq program, in an awk program, in an argument of `printf` after
+# its format, or in a `value x 'phrase'`. Chasing every spelling does not end, so review
+# reads what the rules cannot.
 text_problems() { # text_problems <script> <brief dir> → one line per problem, none when clean
   local script=$1 briefdir=$2 found name file
   found=$(sed -e '/^[[:space:]]*#/d' -e 's/[[:space:]]#.*$//' "$script" | perl -e '
     local $/; my $s = <STDIN>;
     $s =~ s/\\\n/ /g;
     print "problem: R1 a heredoc in the script\n" while $s =~ /(?<!<)<<(?!<)/g;
+    while ($s =~ /<<<\s*(\S+)/g) {
+      my $w = $1;
+      print "problem: R1 a here-string with a literal word: <<<$w\n"
+        unless $w =~ /^"?\$(?:\w+|\{\w+\})"?$/;
+    }
     for my $l (split /\n/, $s) {
       while ($l =~ /(?<![\w-])echo(?![\w-])((?:>&2|[^;|)&])*)/g) {
         my $rest = $1;
@@ -241,7 +249,7 @@ text_problems() { # text_problems <script> <brief dir> → one line per problem,
         print "problem: R2 an echo with text: echo$rest\n"
           unless $rest =~ /^\s*$/ || $rest =~ />&2\s*$/;
       }
-      if ($l =~ /(?<![\w-])printf(?![\w-])\s*(.*)$/) {
+      while ($l =~ /(?<![\w-])printf(?![\w-])\s*((?:>&2|[^;|)&])*)/g) {
         my $rest = $1;
         print "printf\n";
         $rest =~ s/^(?:-v\s+\S+|--)\s+// while $rest =~ /^(?:-v\s+\S+|--)\s+/;
@@ -279,7 +287,7 @@ text_problems() { # text_problems <script> <brief dir> → one line per problem,
 
 problems=$(text_problems "$ROOT/bin/ola-workflow-brief" "$ROOT/brief")
 if [ -z "$problems" ]; then
-  ok "the script holds no text: no heredoc, bare or stderr echo, literal printf formats, every template rendered"
+  ok "the script passes the four rules: no heredoc, bare or stderr echo, literal printf formats, every template rendered"
 else
   ko "the script holds text: $(printf '%s' "$problems" | tr '\n' '|')"
 fi
@@ -304,6 +312,10 @@ mutant "rule 2 fails on an echo with text added to the script" "R2 an echo with 
 echo "Never do this"'
 mutant "rule 2 fails on an echo to stdout that follows a bare one" "R2" '$a\
 echo; echo "Never do this"'
+mutant "rule 1 fails on a here-string with a literal word added to the script" "R1 a here-string" '$a\
+cat <<<'"'"'Never do this'"'"''
+mutant "rule 3 fails on a second printf with text on the same line" "R3 a printf format with text: Never" '$a\
+printf '"'"'%s'"'"' x; printf '"'"'Never'"'"''
 mutant "rule 3 fails on a printf with text added to the script" "R3 a printf format with text: Never do this" '$a\
 printf "Never do this\\n"'
 mutant "rule 3 fails on a printf whose format is not a literal" "R3 a printf format that is not a literal" '$a\

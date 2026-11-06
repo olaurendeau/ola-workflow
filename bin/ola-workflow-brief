@@ -11,7 +11,8 @@
 # The words of the brief are not in this script: they are the templates of brief/, one file
 # per section, and this script keeps the logic — which section is printed, which value each
 # template reads, in what order. A sentence for the reader is edited in brief/, and
-# tests/brief.test.sh fails on one that comes back here.
+# tests/brief.test.sh fails on text that comes back through a heredoc, an echo or a printf
+# (its Known limit lists what it does not see: a jq or awk program, a printf argument).
 #
 # Exit 1 and say so when no profile applies: a project that has not opted into the workflow
 # must get a clear refusal, not a set of guessed defaults.

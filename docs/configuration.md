@@ -171,7 +171,8 @@ printed, and the value each template reads.
 To change a rule, edit the Markdown. `scripts/brief-equivalence.sh` renders fifteen
 profiles with your branch and with `origin/main`, and shows exactly what the change does to
 each; for a rewrite that should change nothing, it must show nothing. `tests/brief.test.sh`
-fails on a sentence that comes back into the script.
+fails on text that comes back into the script through a heredoc, an `echo` or a `printf`;
+review reads what it cannot see (a jq or awk program, a `printf` argument).
 
 That is not tidiness. Seven prompts restating the same facts drift apart one justified edit
 at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
