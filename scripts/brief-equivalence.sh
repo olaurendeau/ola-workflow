@@ -4,9 +4,9 @@
 # Usage: scripts/brief-equivalence.sh [<rev>]      (default origin/main; run from the worktree)
 #
 # The brief used to be one bash script and is becoming templates in brief/. A refactor owes
-# one thing: the same output. This renders 14 profiles (C01 to C14) with the brief of the
+# one thing: the same output. This renders 15 profiles (C01 to C15) with the brief of the
 # worktree it is run from, and with the brief of <rev> extracted by git archive, and compares
-# stdout, stderr and the exit status, once in the caller's locale and once in LC_ALL=C: 28
+# stdout, stderr and the exit status, once in the caller's locale and once in LC_ALL=C: 30
 # comparisons. The reference is rendered every time and no expected output is committed, so
 # there is nothing here to go stale or to be edited into agreement.
 #
@@ -92,7 +92,7 @@ read -r -d '' TRAPS <<'JSON'
 JSON
 
 # --- The cases ----------------------------------------------------------------------------
-IDS=()      # C01 ... C14
+IDS=()      # C01 ... C15
 SLUGS=()    # integrated-defaults ...
 DIRS=()
 
@@ -145,6 +145,11 @@ mkrepo C13 no-profile
 rmdir "$REPO_DIR/.claude"
 mkrepo C14 unreadable
 profile '[1,2]'
+# C15: an element of commands that is not an object. A good one before the bad one, because
+# both versions fail at the same first jq on a lone "make"; it is what comes out between
+# the good element and the stop that tells them apart.
+mkrepo C15 commands-non-object
+profile '{"mode":"integrated","commands":[{"cmd":"a"},"make",{"cmd":"b"}]}'
 
 # --- Rendering and comparing ----------------------------------------------------------------
 # render <brief> <dir> <locale: caller|C> <prefix> → <prefix>.out, .err, .rc
