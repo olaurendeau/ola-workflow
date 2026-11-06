@@ -817,6 +817,21 @@ case $coord in
   *'<repo-url>/pull/<N>'*'<repo-url>/issues/<N>'*'<repo-url>/-/merge_requests/<N>'*'<repo-url>/-/issues/<N>'*) ok "coordinator: builds the link for GitHub and for GitLab" ;;
   *) ko "coordinator: does not build the link for both GitHub and GitLab" ;;
 esac
+# The remote is `upstream` first, as `gh` resolves it: in a fork, `origin` is another
+# repository, whose pull request of the same number is another page. The forge is asked
+# first, since it resolves the fork, the SSH alias and the subgroup.
+case $coord in
+  *'Ask the forge for the URL'*'gh pr view <N> --json url'*'gh issue view <N> --json url'*) ok "coordinator: asks the forge for the URL first" ;;
+  *) ko "coordinator: does not ask the forge for the URL of a pull request or an issue" ;;
+esac
+case $coord in
+  *'git remote get-url upstream || git remote get-url origin'*) ok "coordinator: the fallback takes upstream before origin, as gh does" ;;
+  *) ko "coordinator: the fallback does not take upstream before origin" ;;
+esac
+case $coord in
+  *'the web host'*'ssh.github.com'*'the whole path'*'subgroup'*) ok "coordinator: the fallback uses the web host and the whole path" ;;
+  *) ko "coordinator: the fallback does not say web host and whole path, so an alias or a subgroup gives a dead link" ;;
+esac
 case $coord in
   *'posts no comment and changes nothing there'*) ok "coordinator: the link rule writes nothing on the forge" ;;
   *) ko "coordinator: the link rule does not say it writes nothing on the forge" ;;

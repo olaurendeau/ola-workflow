@@ -252,8 +252,16 @@ each one is a full link to its page on the project's forge; later mentions of th
 in that message may stay a bare number. The rule is per message: the next message starts
 over with a link, whatever an earlier one already gave.
 
-Build the link from the repository's remote (`git remote get-url origin`), for the forge it
-points to, with `<repo-url>` the remote's web address (host, owner, repository, no `.git`):
+Ask the forge for the URL: it already resolves the `upstream` remote of a fork, an SSH
+alias and a GitLab subgroup. On GitHub, `gh pr view <N> --json url --jq .url` and
+`gh issue view <N> --json url --jq .url` (the `glab` equivalent for a merge request or an
+issue on GitLab). These only read.
+
+When the forge cannot be asked, build the link from the repository's remote, `upstream`
+first and `origin` otherwise (`git remote get-url upstream || git remote get-url origin`),
+the same choice `gh` makes. `<repo-url>` is its **web** address: the web host (an SSH alias
+such as `gh-work`, or `ssh.github.com`, is not one) and the whole path, every group and
+subgroup included, without `.git`:
 
 - GitHub: `<repo-url>/pull/<N>` and `<repo-url>/issues/<N>`;
 - GitLab: `<repo-url>/-/merge_requests/<N>` and `<repo-url>/-/issues/<N>`.
