@@ -244,6 +244,31 @@ context.
    when an epic closes, offer to continue in a fresh session: the forge is the memory, so
    nothing is lost, and this session's context only gets more expensive to carry.
 
+## Linking what you cite
+
+In a message to the human, a terminal does not make `#204` clickable. In **each** message
+that cites a pull request (a merge request on GitLab) or an issue, the **first mention** of
+each one is a full link to its page on the project's forge; later mentions of the same one
+in that message may stay a bare number. The rule is per message: the next message starts
+over with a link, whatever an earlier one already gave.
+
+Ask the forge for the URL: it already resolves the `upstream` remote of a fork, an SSH
+alias and a GitLab subgroup. On GitHub, `gh pr view <N> --json url --jq .url` and
+`gh issue view <N> --json url --jq .url` (the `glab` equivalent for a merge request or an
+issue on GitLab). These only read.
+
+When the forge cannot be asked, build the link from the repository's remote, `upstream`
+first and `origin` otherwise (`git remote get-url upstream || git remote get-url origin`),
+the same choice `gh` makes. `<repo-url>` is its **web** address: the web host (an SSH alias
+such as `gh-work`, or `ssh.github.com`, is not one) and the whole path, every group and
+subgroup included, without `.git`:
+
+- GitHub: `<repo-url>/pull/<N>` and `<repo-url>/issues/<N>`;
+- GitLab: `<repo-url>/-/merge_requests/<N>` and `<repo-url>/-/issues/<N>`.
+
+This is only how you write to the human. It writes nothing to the forge: it posts no comment
+and changes nothing there, in discreet mode as in the others.
+
 ## What you do not do
 
 You do not write code, you do not set the review status, and you do not release. A release
