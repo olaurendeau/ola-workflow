@@ -1508,8 +1508,27 @@ for key in $(jq -r '.properties | keys[] | select(startswith("$") | not)' \
               "$ROOT/schema/profile.schema.json"); do
   if grep -q "\b$key\b" "$BRIEF"; then ok "schema key '$key' reaches the agents through the brief"; else ko "schema key '$key' is declared and no agent can ever see it"; fi
 done
-for key in $(grep -v '^[[:space:]]*#' "$BRIEF" |
-             perl -nle 'print $1 while /(?:\$\(get|^\s*read_key)\s+"?([a-z_]+)/g' | sort -u); do
+# A key is read where `read_key` or `$(get` is followed by its name, wherever on the line the
+# call stands: `cond && read_key a.b` and `if read_key a.b` count, a comment does not. The
+# definition `read_key() {` and the usage comment `# read_key <dotted.key>` name no key.
+KEY_RE='(?:\$\(get|\bread_key)\s+"?([a-z_]+)'
+keys_of() { grep -v '^[[:space:]]*#' | perl -nle 'BEGIN { $re = shift } print $1 while /$re/g' "$KEY_RE" | sort -u; }
+found=$(printf '%s\n' 'cond && read_key aa.b' 'if read_key "cc.$x"; then' 'v=$(get dd)' \
+  'read_key() { # read_key <dotted.key> [join] → ee' '# read_key ff' | keys_of | tr '\n' ' ')
+if [ "$found" = 'aa cc dd ' ]; then
+  ok "the key reader finds a call anywhere on a line, and not a definition or a comment"
+else
+  ko "the key reader found '$found' where aa cc dd was expected"
+fi
+brief_keys=$(keys_of <"$BRIEF")
+# The witness: a pattern that finds nothing proves no key is declared, and passes.
+n_keys=$(printf '%s\n' "$brief_keys" | grep -c .)
+if [ "$n_keys" -ge 11 ]; then
+  ok "the brief reads at least 11 schema keys ($n_keys)"
+else
+  ko "the brief reads fewer than 11 keys: '$brief_keys'"
+fi
+for key in $brief_keys; do
   if jq -e --arg k "$key" '.properties | has($k)' \
       "$ROOT/schema/profile.schema.json" >/dev/null 2>&1; then
     ok "the brief reads '$key', which the schema declares"
