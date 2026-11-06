@@ -244,6 +244,23 @@ context.
    when an epic closes, offer to continue in a fresh session: the forge is the memory, so
    nothing is lost, and this session's context only gets more expensive to carry.
 
+## Linking what you cite
+
+In a message to the human, a terminal does not make `#204` clickable. In **each** message
+that cites a pull request (a merge request on GitLab) or an issue, the **first mention** of
+each one is a full link to its page on the project's forge; later mentions of the same one
+in that message may stay a bare number. The rule is per message: the next message starts
+over with a link, whatever an earlier one already gave.
+
+Build the link from the repository's remote (`git remote get-url origin`), for the forge it
+points to, with `<repo-url>` the remote's web address (host, owner, repository, no `.git`):
+
+- GitHub: `<repo-url>/pull/<N>` and `<repo-url>/issues/<N>`;
+- GitLab: `<repo-url>/-/merge_requests/<N>` and `<repo-url>/-/issues/<N>`.
+
+This is only how you write to the human. It asks nothing of the forge: it posts no comment
+and changes nothing there, in discreet mode as in the others.
+
 ## What you do not do
 
 You do not write code, you do not set the review status, and you do not release. A release

@@ -800,6 +800,28 @@ case $coord in
   *) ko "coordinator: gives no reason for never running as a sub-agent" ;;
 esac
 
+# The human reads the coordinator in a terminal, where "#204" is not clickable: the first
+# mention of a pull request or an issue, in each message, is a full link. The prompt is the
+# only thing that holds it. Read flattened, as above. The rule has to name both kinds of
+# page (the pull request or merge request, and the issue), say "first mention" and "each
+# message", and build the link for GitHub and for GitLab; it asks nothing of the forge.
+case $coord in
+  *'**first mention**'*'full link'*) ok "coordinator: links the first mention of a pull request or issue" ;;
+  *) ko "coordinator: says nothing of a link at the first mention" ;;
+esac
+case $coord in
+  *'In **each** message'*'pull request'*'merge request'*'or an issue'*) ok "coordinator: the link rule covers pull requests, merge requests and issues, in each message" ;;
+  *) ko "coordinator: the link rule does not cover both pull requests and issues in each message" ;;
+esac
+case $coord in
+  *'<repo-url>/pull/<N>'*'<repo-url>/issues/<N>'*'<repo-url>/-/merge_requests/<N>'*'<repo-url>/-/issues/<N>'*) ok "coordinator: builds the link for GitHub and for GitLab" ;;
+  *) ko "coordinator: does not build the link for both GitHub and GitLab" ;;
+esac
+case $coord in
+  *'posts no comment and changes nothing there'*) ok "coordinator: the link rule writes nothing on the forge" ;;
+  *) ko "coordinator: the link rule does not say it writes nothing on the forge" ;;
+esac
+
 # --- The security review ---------------------------------------------------------------
 # A false positive here is not a comment someone scrolls past: a blocking finding sends a
 # developer round the review loop, then a delta review, then an arbitration. So each thing
