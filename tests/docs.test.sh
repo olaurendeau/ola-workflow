@@ -406,6 +406,17 @@ tokens_need "what it does not stop" '## What it does not stop'
 tokens_need "the wiring of the session hook" '[`hooks/session.sh`](../hooks/session.sh)'
 tokens_need "the wiring of the elevating hook" '[`hooks/elevate.sh`](../hooks/elevate.sh)'
 tokens_need "the way out when the tokens are off" '"github_tokens": "off"'
+# The draft and its ready mark (#179): the section is where "publish": "draft" (#177) finds out
+# whether the base token may do both, so it must name the two commands it measured.
+tokens_need "the section on draft pull requests" '## Draft pull requests and the ready mark'
+tokens_section=$(sed -n '/^## Draft pull requests and the ready mark$/,/^## /p' "$TOKENS_PAGE" 2>/dev/null)
+for cmd in 'gh pr create --draft' 'gh pr ready'; do
+  if printf '%s\n' "$tokens_section" | grep -qF -- "$cmd"; then
+    ok "tokens page: the draft section names '$cmd'"
+  else
+    ko "tokens page: the draft section does not name '$cmd'"
+  fi
+done
 if grep -qE '^#{1,3} (GitHub tokens|Setting them up|What it does not stop)$' "$ROOT/README.md"; then
   ko "tokens page: the README still holds a section that moved to docs/github-tokens.md"
 else
