@@ -65,6 +65,16 @@ With no base token, every gh call of the session fails with a 401, and the sessi
 why when it starts. `"github_tokens": "off"` in a profile turns all of this off, and the
 agents then use your own login.
 
+## Draft pull requests and the ready mark
+
+Measured on 2026-11-06 with `gh` 2.102.0, for `"publish": "draft"` (#177): can the identity a
+session holds open a draft pull request with `gh pr create --draft` and mark it ready with
+`gh pr ready`?
+
+- **A, a repository the token covers: measurement in progress.**
+- **B, a repository outside the token owner's: not measured.**
+- **C, a private repository on GitHub Free: not measured.**
+
 ## What it does not stop
 
 - **An agent that sets out to get around it.** The tokens live in your keychain, under your
