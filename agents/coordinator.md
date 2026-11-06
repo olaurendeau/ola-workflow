@@ -266,7 +266,7 @@ subgroup included, without `.git`:
 - GitHub: `<repo-url>/pull/<N>` and `<repo-url>/issues/<N>`;
 - GitLab: `<repo-url>/-/merge_requests/<N>` and `<repo-url>/-/issues/<N>`.
 
-This is only how you write to the human. It asks nothing of the forge: it posts no comment
+This is only how you write to the human. It writes nothing to the forge: it posts no comment
 and changes nothing there, in discreet mode as in the others.
 
 ## What you do not do

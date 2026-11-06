@@ -804,7 +804,7 @@ esac
 # mention of a pull request or an issue, in each message, is a full link. The prompt is the
 # only thing that holds it. Read flattened, as above. The rule has to name both kinds of
 # page (the pull request or merge request, and the issue), say "first mention" and "each
-# message", and build the link for GitHub and for GitLab; it asks nothing of the forge.
+# message", and build the link for GitHub and for GitLab; it writes nothing to the forge.
 case $coord in
   *'**first mention**'*'full link'*) ok "coordinator: links the first mention of a pull request or issue" ;;
   *) ko "coordinator: says nothing of a link at the first mention" ;;
