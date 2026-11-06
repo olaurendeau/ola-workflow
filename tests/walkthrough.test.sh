@@ -152,9 +152,10 @@ copied_run() {
 
 # --- Fixtures ---------------------------------------------------------------------------
 fx=$WORK/fx
-mkdir -p "$fx/agents" "$fx/bin" "$fx/skills"
+mkdir -p "$fx/agents" "$fx/bin" "$fx/brief" "$fx/skills"
 echo 'Status: done | blocked | needs-decision' >"$fx/agents/a.md"
 echo '    coordinator  gh pr merge <N> --squash' >"$fx/bin/b"
+echo 'GitHub refuses a merge here' >"$fx/brief/c.md"
 
 printf '%s\n' '# t' '```' 'Example' 'anything at all' '```' >"$fx/exempt.md"
 got=$(check_blocks "$fx" "$fx/exempt.md")
@@ -165,6 +166,11 @@ printf '%s\n' '```' 'Status: done | blocked | needs-decision' '  gh pr merge <N>
 got=$(check_blocks "$fx" "$fx/sourced.md")
 [ "$got" = "BLOCK 1" ] && ok "a block whose every line is found in agents/ or bin/ passes" ||
   ko "a sourced block answered '$got'"
+
+printf '%s\n' '```' 'GitHub refuses a merge here' '```' >"$fx/briefed.md"
+got=$(check_blocks "$fx" "$fx/briefed.md")
+[ "$got" = "BLOCK 1" ] && ok "a block whose line is found only in brief/ passes" ||
+  ko "a block quoted from brief/ answered '$got'"
 
 printf '%s\n' '```' 'Status: done | blocked | needs-decision' 'Merged in 3 seconds, all green' '```' >"$fx/invented.md"
 got=$(check_blocks "$fx" "$fx/invented.md")

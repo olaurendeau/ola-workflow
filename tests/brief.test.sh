@@ -202,6 +202,129 @@ else
   ko "the brief depends on the directory it is run from"
 fi
 
+# A NUL in a value of a restricted command is dropped, so that the NUL-separated fields the
+# script reads from jq are not shifted: one in `cmd` or `reason` used to invent a rule line
+# and swallow the element after it.
+printf '%s\n' '{"mode":"integrated","commands":[{"cmd":"first\u0000x","reason":"why\u0000y"},{"cmd":"second","allow_args":true},{"cmd":"third"}]}' >"$REPO/.claude/workflow.json"
+run_brief
+nul=$(sed -n '/^## Restricted commands$/,/^Anything else is out of bounds/p' "$WORK/bout")
+want=$'## Restricted commands\n- firstx: whyy\n- second: only some arguments are allowed\n- third: some arguments are refused\nAnything else is out of bounds. Knowing it in advance saves a cycle; it is not an'
+if [ "$RC" = 0 ] && [ "$nul" = "$want" ]; then
+  ok "a NUL in a cmd or a reason invents no rule line and drops no element"
+else
+  ko "a NUL in a restricted command shifted the fields (exit $RC): $(printf '%s' "$nul" | tr '\n' '|')"
+fi
+printf '%s\n' '{"mode":"integrated"}' >"$REPO/.claude/workflow.json"
+
+# --- No text in the script ---------------------------------------------------------------
+# Once the words are in brief/, nothing stops one from coming back into the script a line at
+# a time. Four rules, read on the script with its comments removed:
+#   1. no heredoc;
+#   2. an `echo` is bare (an empty line) or goes to stderr;
+#   3. a `printf` format is a literal with no ASCII letter outside its conversions (%s…),
+#      its escapes (\n…) and the `:(glob)` pathspec syntax;
+#   4. every file of brief/ is named by a literal `render` of the script, and every literal
+#      `render` names a file that exists.
+# Each counts what it examined and fails on zero, so that a pattern that stops finding
+# anything cannot pass for a script with nothing to find.
+# Known limit: a string of text in a jq program of the script is not seen.
+text_problems() { # text_problems <script> <brief dir> → one line per problem, none when clean
+  local script=$1 briefdir=$2 found name file
+  found=$(sed -e '/^[[:space:]]*#/d' -e 's/[[:space:]]#.*$//' "$script" | perl -e '
+    local $/; my $s = <STDIN>;
+    $s =~ s/\\\n/ /g;
+    print "problem: R1 a heredoc in the script\n" while $s =~ /(?<!<)<<(?!<)/g;
+    for my $l (split /\n/, $s) {
+      while ($l =~ /(?<![\w-])echo(?![\w-])((?:>&2|[^;|)&])*)/g) {
+        my $rest = $1;
+        print "echo\n";
+        print "problem: R2 an echo with text: echo$rest\n"
+          unless $rest =~ /^\s*$/ || $rest =~ />&2\s*$/;
+      }
+      if ($l =~ /(?<![\w-])printf(?![\w-])\s*(.*)$/) {
+        my $rest = $1;
+        print "printf\n";
+        $rest =~ s/^(?:-v\s+\S+|--)\s+// while $rest =~ /^(?:-v\s+\S+|--)\s+/;
+        my $fmt;
+        if ($rest =~ /^\x27([^\x27]*)\x27/ || $rest =~ /^"((?:[^"\\\x24\x60]|\\.)*)"/
+            || $rest =~ /^([^\s\x27"\x24\x60;&|()]+)/) { $fmt = $1 }
+        else { print "problem: R3 a printf format that is not a literal: printf $rest\n" }
+        if (defined $fmt) {
+          $fmt =~ s/\\.//g;
+          $fmt =~ s/%[-+ #0-9.*]*[a-zA-Z%]//g;
+          $fmt =~ s/:\(glob\)//g;
+          print "problem: R3 a printf format with text: $fmt\n" if $fmt =~ /[A-Za-z]/;
+        }
+      }
+      while ($l =~ /(?<![\w-])render(?!\()\s+([^\s;&|)]+)/g) {
+        my $n = $1;
+        if ($n =~ /^[a-z][a-z0-9._\/-]*$/) { print "render:$n\n" }
+        else { print "problem: R4 a render whose file is not a literal: render $n\n" }
+      }
+    }')
+  printf '%s\n' "$found" | grep '^problem: '
+  for name in echo printf; do
+    printf '%s\n' "$found" | grep -qx "$name" || echo "problem: witness: no $name examined"
+  done
+  printf '%s\n' "$found" | grep -q '^render:' || echo "problem: witness: no render examined"
+  for name in $(printf '%s\n' "$found" | sed -n 's/^render://p' | sort -u); do
+    [ -f "$briefdir/$name.md" ] || echo "problem: R4 render $name names brief/$name.md, which does not exist"
+  done
+  while IFS= read -r file; do
+    name=${file#"$briefdir"/}
+    name=${name%.md}
+    printf '%s\n' "$found" | grep -qx "render:$name" || echo "problem: R4 brief/$name.md is named by no render"
+  done < <(find "$briefdir" -type f -name '*.md' | sort)
+}
+
+problems=$(text_problems "$ROOT/bin/ola-workflow-brief" "$ROOT/brief")
+if [ -z "$problems" ]; then
+  ok "the script holds no text: no heredoc, bare or stderr echo, literal printf formats, every template rendered"
+else
+  ko "the script holds text: $(printf '%s' "$problems" | tr '\n' '|')"
+fi
+
+mutant() { # mutant <label> <expected problem prefix> <script mutation, as a sed program> [brief file to add]
+  local label=$1 want=$2 prog=$3 extra=${4-} out
+  rm -rf "$WORK/mut" && mkdir -p "$WORK/mut" && cp -R "$ROOT/brief" "$WORK/mut/brief"
+  sed -e "$prog" "$ROOT/bin/ola-workflow-brief" >"$WORK/mut/script"
+  [ -n "$extra" ] && printf 'orphan\n' >"$WORK/mut/brief/$extra"
+  out=$(text_problems "$WORK/mut/script" "$WORK/mut/brief")
+  if printf '%s\n' "$out" | grep -q "^problem: $want"; then
+    ok "$label"
+  else
+    ko "$label (got: $(printf '%s' "$out" | tr '\n' '|'))"
+  fi
+}
+mutant "rule 1 fails on a heredoc added to the script" "R1" '$a\
+cat <<EOF\
+Never do this\
+EOF'
+mutant "rule 2 fails on an echo with text added to the script" "R2 an echo with text: echo \"Never do this\"" '$a\
+echo "Never do this"'
+mutant "rule 2 fails on an echo to stdout that follows a bare one" "R2" '$a\
+echo; echo "Never do this"'
+mutant "rule 3 fails on a printf with text added to the script" "R3 a printf format with text: Never do this" '$a\
+printf "Never do this\\n"'
+mutant "rule 3 fails on a printf whose format is not a literal" "R3 a printf format that is not a literal" '$a\
+printf "$x"'
+mutant "rule 4 fails on a brief/x.md that no render names" "R4 brief/x.md is named by no render" 's/^x$/x/' x.md
+mutant "rule 4 fails on a render of a file that does not exist" "R4 render nowhere names" '$a\
+render nowhere'
+mutant "rule 4 fails on a render whose file is not a literal" "R4 a render whose file is not a literal" '$a\
+render "$section"'
+
+# The witnesses: a script with nothing to examine is not a clean script.
+: >"$WORK/empty.sh"
+out=$(text_problems "$WORK/empty.sh" "$ROOT/brief")
+for what in echo printf render; do
+  if printf '%s\n' "$out" | grep -qx "problem: witness: no $what examined"; then
+    ok "witness: a script with no $what fails the rule that would have examined it"
+  else
+    ko "witness: a script with no $what passes (got: $(printf '%s' "$out" | tr '\n' '|'))"
+  fi
+done
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total brief test(s) failed"
   exit 1

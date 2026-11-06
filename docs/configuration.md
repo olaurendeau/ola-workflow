@@ -153,6 +153,26 @@ branch, commands, slots, escalation, restricted commands, where the memory goes,
 merge gate requires. Each agent starts by running it, and each prompt holds only what is
 specific to its role.
 
+The words of those rules are not in the script. They are Markdown templates in `brief/`,
+one file per section, and `bin/ola-workflow-brief` keeps the logic: which section is
+printed, and the value each template reads.
+
+- `brief/<section>.md` is a section; `brief/<section>.<variant>.md` when the whole text
+  changes with the mode or the profile (`memory.integrated.md`, `memory.discreet.md`).
+  `brief/items/` holds one element of a list, `brief/refusals/` the refusals printed when
+  there is no profile to read.
+- A template has two syntaxes and no others: `{{name}}` prints a value, and
+  `{{#name}}…{{/name}}` keeps what it encloses when the value is not empty. A name the script
+  never declares stops the brief whole, naming the file.
+- A new value is computed in `bin/ola-workflow-brief`, never in a template.
+- A change to `brief/` is merged by the human, like a change to `bin/`: it is what every
+  agent is told.
+
+To change a rule, edit the Markdown. `scripts/brief-equivalence.sh` renders fifteen
+profiles with your branch and with `origin/main`, and shows exactly what the change does to
+each; for a rewrite that should change nothing, it must show nothing. `tests/brief.test.sh`
+fails on a sentence that comes back into the script.
+
 That is not tidiness. Seven prompts restating the same facts drift apart one justified edit
 at a time, and `tests/agents.test.sh` holds the line from the other side: no agent may
 name a base branch, a check command, a review status, a slot value or a line budget, since

@@ -151,6 +151,10 @@ for q in "${QUOTED[@]}"; do printf '%s\n' "$q" >>"$fx/root/bin/all"; done
 printf 'x\n' >"$fx/page.md"
 [ -z "$(quoted_problems "$REAL" "$fx/root")" ] && ok "quoted check: passes when the code prints every output" ||
   ko "quoted check should pass on a root that prints everything"
+mkdir -p "$fx/briefonly/brief"
+for q in "${QUOTED[@]}"; do printf '%s\n' "$q" >>"$fx/briefonly/brief/all.md"; done
+[ -z "$(quoted_problems "$REAL" "$fx/briefonly")" ] && ok "quoted check: an output printed only from brief/ is found" ||
+  ko "quoted check should find an output that only brief/ holds"
 : >"$fx/root/bin/all"
 out=$(quoted_problems "$REAL" "$fx/root")
 printf '%s\n' "$out" | grep -q 'printed by nothing' && ok "quoted check: refuses an output the code does not print" ||

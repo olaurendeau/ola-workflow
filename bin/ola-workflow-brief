@@ -8,6 +8,11 @@
 # edit at a time. So each agent starts by running this, and the prompts hold only what is
 # specific to their role.
 #
+# The words of the brief are not in this script: they are the templates of brief/, one file
+# per section, and this script keeps the logic — which section is printed, which value each
+# template reads, in what order. A sentence for the reader is edited in brief/, and
+# tests/brief.test.sh fails on one that comes back here.
+#
 # Exit 1 and say so when no profile applies: a project that has not opted into the workflow
 # must get a clear refusal, not a set of guessed defaults.
 set -uo pipefail
@@ -223,7 +228,8 @@ echo
 # ending in a newline survives. jq stops at the first element it cannot read and says so once
 # on stderr, as it did when it printed the lines itself; the elements before it are kept.
 # The reason comes last because jq evaluates an interpolation from its last part, and the
-# error it names is the first one it meets.
+# error it names is the first one it meets. A NUL inside a cmd or a reason would end its field
+# early and shift every one after it, so it is dropped there, by jq, before it is emitted.
 restricted=$(get commands)
 commands_list=""
 if [ -n "$restricted" ]; then
@@ -233,10 +239,10 @@ if [ -n "$restricted" ]; then
     flag reason_given [ "$kind" = given ]
     flag args_allowed [ "$kind" = allowed ]
     flag args_refused [ "$kind" = refused ]
-    item=$(render items/restricted-command && printf x) || exit 2
-    commands_list="$commands_list${item%x}"
-  done < <(printf '%s' "$restricted" | jq -j '.[] |
-    "\(if .reason then "given" elif .allow_args then "allowed" else "refused" end)\u0000\(.cmd)\u0000\(.reason // "")\u0000"')
+    item=$(render items/restricted-command && printf .) || exit 2
+    commands_list="$commands_list${item%.}"
+  done < <(printf '%s' "$restricted" | jq -j 'def clean: tostring | gsub("\u0000"; ""); .[] |
+    "\(if .reason then "given" elif .allow_args then "allowed" else "refused" end)\u0000\(.cmd | clean)\u0000\(.reason // "" | clean)\u0000"')
   commands_list=${commands_list%$'\n'}
 fi
 flag commands_none [ -z "$restricted" ]
@@ -305,8 +311,8 @@ if [ "$mode" = integrated ]; then
   if [ -n "$required" ]; then
     while IFS= read -r check; do
       value check "$check"
-      item=$(render items/required-check && printf x) || exit 2
-      required_checks_list="$required_checks_list${item%x}"
+      item=$(render items/required-check && printf .) || exit 2
+      required_checks_list="$required_checks_list${item%.}"
     done <<<"$required"
     required_checks_list=${required_checks_list%$'\n'}
   fi
@@ -315,6 +321,9 @@ if [ "$mode" = integrated ]; then
   render memory.integrated
 else
   value profile_dir "$(ola_profile_dir "$dir")"
+  # Discreet mode gives no command a stronger token, so with the tokens on GitHub refuses a
+  # merge and a status to every role here: that is what the tokens_on paragraph of the
+  # template says, and tokens_off is the one that says nothing refuses.
   render memory.discreet
 fi
 
