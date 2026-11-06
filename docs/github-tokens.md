@@ -69,11 +69,33 @@ agents then use your own login.
 
 Measured on 2026-11-06 with `gh` 2.102.0, for `"publish": "draft"` (#177): can the identity a
 session holds open a draft pull request with `gh pr create --draft` and mark it ready with
-`gh pr ready`?
+`gh pr ready`? **The base token opens the draft and cannot mark it ready.**
 
-- **A, a repository the token covers: measurement in progress.**
-- **B, a repository outside the token owner's: not measured.**
-- **C, a private repository on GitHub Free: not measured.**
+- **A, a repository the token covers: opening works, the ready mark is refused.** The
+  session's `GH_TOKEN` was a fine-grained token (`github_pat_…`), the base one the session
+  hook sets, and `gh api user --jq .login` answered with the human's own login, the token's
+  owner. Neither command was elevated: `hooks/elevate.sh` rewrites only the merge and the
+  review status. Pull request 185 was opened and then refused its mark, on itself:
+
+  ```
+  $ gh pr create --draft --base main --head docs/tokens-draft-ready --title … --body …
+  https://github.com/olaurendeau/ola-workflow/pull/185
+  $ gh pr ready 185
+  API call failed: GraphQL: Resource not accessible by personal access token (markPullRequestReadyForReview)
+  $ gh pr view 185 --json isDraft,state
+  {"isDraft":true,"state":"OPEN"}
+  ```
+
+- **B, a repository outside the token owner's: not measured.** It is the human's to run, from
+  a terminal.
+- **C, a private repository on GitHub Free: not measured.** The exact message of a refused
+  draft is not known.
+
+What follows for `"publish": "draft"`: with the base token, the coordinator cannot mark a
+request ready, so the request stays a draft and the refusal above is what it reports. Opening
+the draft works on a covered repository. Letting the coordinator mark it ready means giving it
+a token that may, which changes what a token may do: that is the human's decision, and no
+token was changed here.
 
 ## What it does not stop
 
