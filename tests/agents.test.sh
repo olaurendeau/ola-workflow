@@ -1042,6 +1042,139 @@ case $prr in
   *) ko "pr-reviewer: the delta command is gone" ;;
 esac
 
+# The review opens on the verdict and the problems; the proof is folded away at the end. The
+# template of the comment is a section of its own, so that its order, its titles and its
+# words are looked for there and nowhere else. The witness first: the section is found and
+# holds the `<details>` — every absence below is looked for in text that is there.
+prr_file=$ROOT/agents/pr-reviewer.md
+prr_comment=$(awk '/^## The comment/{on=1; next} /^## /{on=0} on' "$prr_file")
+prr_step3=$(awk '/^3\. /{on=1} /^4\. /{on=0} on' "$prr_file" | tr '\n' ' ' | tr -s ' ')
+prr_step6=$(awk '/^6\. /{on=1} /^7\. /{on=0} on' "$prr_file" | tr '\n' ' ' | tr -s ' ')
+prr_step8=$(awk '/^8\. /{on=1} /^9\. /{on=0} on' "$prr_file" | tr '\n' ' ' | tr -s ' ')
+prr_line() { printf '%s\n' "$prr_comment" | grep -n -m1 -- "$1" | cut -d: -f1; } # line of the first match in the section
+prr_line_from() { # prr_line_from <line> <pattern> — first match of the pattern after that line (empty if none)
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$prr_comment" | FROM=$1 RE=$2 awk 'NR > ENVIRON["FROM"] && $0 ~ ENVIRON["RE"] { print NR; exit }'
+}
+case $prr_comment in
+  *'<details>'*'</details>'*) ok "witness: pr-reviewer has a comment section with its <details>" ;;
+  *) ko "witness: pr-reviewer has no comment section with a <details>, the checks below look at nothing" ;;
+esac
+# One form per language: its title, its verdict line, its blocking group, its proof summary.
+for form in 'fr@^    ## Relecture de@^    \*\*(Changements|Approuvé)@^### Bloquant$@<summary>Vérifié' \
+            'en@^    ## Review of@^    \*\*(Changes|Approved)@^### Blocking$@<summary>Checked'; do
+  IFS='@' read -r f_lang f_title f_verdict f_block f_proof <<<"$form"
+  # Each line is looked for after the one before it, so the other form's lines are not taken:
+  # the titles and the verdict lines come first, then the body of the form.
+  t=$(prr_line "$f_title"); v=$(prr_line_from "$t" "$f_verdict"); b=$(prr_line_from "$t" "$f_block")
+  s=$(prr_line_from "$b" '^### Suggestions$'); d=$(prr_line_from "$s" '^<details>'); p=$(prr_line_from "$b" "$f_proof")
+  # The proof's word, anywhere in the section: its first appearance is the <details>, not a line above.
+  w=$(prr_line "${f_proof#<summary>}")
+  # `-lt` on an empty value is an error, not a false: a missing line must fail, not pass.
+  if [ -n "$t" ] && [ -n "$v" ] && [ -n "$b" ] && [ -n "$s" ] && [ -n "$d" ] &&
+     [ "$t" -lt "$v" ] && [ "$v" -lt "$b" ] && [ "$b" -lt "$s" ] && [ "$s" -lt "$d" ]; then
+    ok "pr-reviewer ($f_lang): the comment is title, verdict line, blocking, suggestions, then the <details>"
+  else
+    ko "pr-reviewer ($f_lang): the comment does not run title ($t), verdict ($v), blocking ($b), suggestions ($s), <details> ($d)"
+  fi
+  if [ -n "$p" ] && [ -n "$d" ] && [ -n "$b" ] && [ -n "$w" ] && [ "$p" -ge "$d" ] && [ "$p" -gt "$b" ] && [ "$w" -ge "$d" ]; then
+    ok "pr-reviewer ($f_lang): the proof is in the <details>, never before the findings"
+  else
+    ko "pr-reviewer ($f_lang): the proof is not after the <details> opens ($p / $d), or comes before the blocking group ($b)"
+  fi
+done
+# The only headings a comment has. Two spellings of the same three, one per language.
+h3=$(printf '%s\n' "$prr_comment" | grep -E '^### ' | sort -u | tr '\n' '|')
+if [ "$h3" = '### Blocking|### Bloquant|### Bloquants précédents|### Previous blocking findings|### Suggestions|' ]; then
+  ok "pr-reviewer: the comment has the groups blocking and suggestions, and the previous blocking findings, no other level"
+else
+  ko "pr-reviewer: the headings of the comment are not the expected ones: $h3"
+fi
+case $prr_comment in
+  *'Aucun.'*|*'None.'*) ko "pr-reviewer: the template has a placeholder line for an empty group" ;;
+  *'A group with no finding is left out, its heading too'*) ok "pr-reviewer: an empty group is left out, no placeholder stands in for it" ;;
+  *) ko "pr-reviewer: nothing says an empty group is left out" ;;
+esac
+case $prr_comment in
+  *'---'*) ko "pr-reviewer: the template has a --- line" ;;
+  *) ok "pr-reviewer: the template has no --- line" ;;
+esac
+case $prr_comment in
+  *'Prochaine relecture'*|*'Next review'*) ko "pr-reviewer: the template has a line announcing the next review" ;;
+  *) ok "pr-reviewer: the template has no line announcing the next review" ;;
+esac
+# Where the previous review is found again: by its title, the old ones too, and by the line
+# that carries the full SHA.
+for t in '## Relecture de `<SHA 7>`' '## Relecture de `<SHA 7>` (delta depuis `<SHA 7>`)' '## Relecture de `<SHA 7>` (confirmation de `<SHA 7>`)' \
+         '## Review of `<SHA 7>`' '## Review of `<SHA 7>` (delta from `<SHA 7>`)' '## Review of `<SHA 7>` (confirmation of `<SHA 7>`)'; do
+  case $prr_comment in
+    *"    $t"$'\n'*) ok "pr-reviewer: the comment has the title: $t" ;;
+    *) ko "pr-reviewer: the comment lacks the title: $t" ;;
+  esac
+done
+case $prr_comment in
+  *'SHA relu : `<40'*'Reviewed SHA: `<40'*) ok "pr-reviewer: the full SHA is on a line of the <details>, in both forms" ;;
+  *) ko "pr-reviewer: the <details> has no line carrying the full SHA" ;;
+esac
+case $prr_step3 in
+  *'**Find your previous review**'*'**confirmation**'*) ok "witness: pr-reviewer step 3 is readable" ;;
+  *) ko "witness: pr-reviewer step 3 is not where the checks below look" ;;
+esac
+case $prr_step3 in
+  *'starts with `## Relecture de` or `## Review of`'*) ok "pr-reviewer: step 3 finds its previous review by the titles of the comment" ;;
+  *) ko "pr-reviewer: step 3 does not find its previous review by its titles" ;;
+esac
+for ex in 'Security review of' '## Revue de sécurité de' 'Verification of'; do
+  case $prr_step3 in
+    *'your own, not one starting'*"\`$ex\`"*) ok "pr-reviewer: step 3 does not take a comment starting '$ex' for its own" ;;
+    *) ko "pr-reviewer: step 3 does not exclude '$ex'" ;;
+  esac
+done
+case $prr_step3 in
+  *'`SHA relu : `'*'`Reviewed SHA: `'*'git rev-parse'*) ok "pr-reviewer: step 3 reads the SHA on its line and resolves it with git rev-parse" ;;
+  *) ko "pr-reviewer: step 3 does not say where the reviewed SHA is read, nor how it is resolved" ;;
+esac
+case $prr_step3 in
+  *'names, in its title, the SHA it is a delta or a confirmation of'*) ok "pr-reviewer: step 3 has the title name the SHA of a delta or a confirmation" ;;
+  *) ko "pr-reviewer: step 3 does not have the title name the SHA of a delta or a confirmation" ;;
+esac
+case $prr_comment in
+  *'`corrigé`'*'`contesté : <raison>`'*'`toujours ouvert`'*'`fixed`'*'`disputed: <reason>`'*'`still open`'*)
+    ok "pr-reviewer: a previous blocking finding is fixed, disputed with its reason, or still open" ;;
+  *) ko "pr-reviewer: the previous blocking findings have no corrigé / contesté / toujours ouvert" ;;
+esac
+# Step 6: the finding keeps its scenario, gets a form, an order, a numbering, and three bans.
+case $prr_step6 in
+  *'**Judge**'*'concrete scenario'*'**blocking** or **suggestion**'*) ok "pr-reviewer: a finding still names a concrete scenario and is blocking or suggestion" ;;
+  *) ko "pr-reviewer: step 6 lost the concrete scenario or the blocking/suggestion tag" ;;
+esac
+case $prr_step6 in
+  *'3 lines at most'*'`file:line` —'*'("with X, Y happens")'*'then the fix or a lead'*) ok "pr-reviewer: a finding is 3 lines, from file:line, a scenario and a fix" ;;
+  *) ko "pr-reviewer: step 6 gives no form to a finding" ;;
+esac
+case $prr_step6 in
+  *'Order each group by the gravity of its consequence: lost data, security, a test that cannot fail'*'before the docs'*) ok "pr-reviewer: each group runs from the gravest consequence to the docs" ;;
+  *) ko "pr-reviewer: step 6 does not order a group by gravity" ;;
+esac
+case $prr_step6 in
+  *'Number the findings 1, 2, 3 without restarting between the two groups'*) ok "pr-reviewer: findings are numbered across both groups" ;;
+  *) ko "pr-reviewer: step 6 does not number the findings across both groups" ;;
+esac
+case $prr_step6 in
+  *'Do not restate a finding in other words'*'do not tell how you found it'*'do not list the leads you dropped anywhere but in the folded block of the comment'*)
+    ok "pr-reviewer: step 6 bans the restatement, the story of the search and the dropped leads outside the <details>" ;;
+  *) ko "pr-reviewer: step 6 misses one of its three bans" ;;
+esac
+case $prr_step8 in
+  *'the review as a comment, in the form of *The comment*'*'write the review, with the same text, to `reviews/<branch>/<sha>.md`'*)
+    ok "pr-reviewer: step 8 publishes the form of the comment, the same text in discreet mode" ;;
+  *) ko "pr-reviewer: step 8 does not publish the form of the comment, or changes the discreet text" ;;
+esac
+case $(printf '%s' "$prr_comment" | tr '\n' ' ' | tr -s ' ') in
+  *'When it is `fr`, write the French form below; for any other language, the English form'*) ok "pr-reviewer: the comment is French when the language is fr, English otherwise" ;;
+  *) ko "pr-reviewer: nothing says which form follows which language" ;;
+esac
+
 # --- One source, cited by all ---------------------------------------------------------
 # The pair that matters: the brief is stated once and needed by every agent. Each agent
 # citing it is what makes "once" reachable rather than stranded.
@@ -1341,7 +1474,19 @@ esac
 # The brief states it once, the developer writes it and the pr-reviewer judges it. An agent
 # that restates the shape is the second copy this file exists to prevent, so the markup of
 # the folded block is not written in any agent file. Not a schema key, hence `forbid`.
-forbid '<details>|<summary>' 'the folded block of a description'
+# A review comment has a folded block of its own, which is not a description's: the reviewers
+# write it in their `## The comment` section, and only there. Everything else is looked at.
+folded_hits=""
+for f in "${AGENTS[@]}"; do
+  if awk '/^## The comment/{skip=1; next} /^## /{skip=0} !skip' "$f" | grep -qE '<details>|<summary>'; then
+    folded_hits="$folded_hits ${f##*/}"
+  fi
+done
+if [ -z "$folded_hits" ]; then
+  ok "no agent hard-codes the folded block of a description"
+else
+  ko "the folded block of a description is hard-coded in:$folded_hits"
+fi
 # The step is read between its number and the next section, so that a sentence elsewhere in
 # the file cannot satisfy it.
 dev_step5=$(awk '/^5\. /{on=1} /^## /{on=0} on' "$ROOT/agents/developer.md")
