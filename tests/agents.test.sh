@@ -1124,7 +1124,7 @@ case $prr_step3 in
   *'starts with `## Relecture de` or `## Review of`'*) ok "pr-reviewer: step 3 finds its previous review by the titles of the comment" ;;
   *) ko "pr-reviewer: step 3 does not find its previous review by its titles" ;;
 esac
-for ex in 'Security review of' '## Revue de sécurité de' 'Verification of'; do
+for ex in 'Security review of' '## Security review of' '## Revue de sécurité de' 'Verification of'; do
   case $prr_step3 in
     *'your own, not one starting'*"\`$ex\`"*) ok "pr-reviewer: step 3 does not take a comment starting '$ex' for its own" ;;
     *) ko "pr-reviewer: step 3 does not exclude '$ex'" ;;
@@ -1478,7 +1478,7 @@ esac
 # write it in their `## The comment` section, and only there. Everything else is looked at.
 folded_hits=""
 for f in "${AGENTS[@]}"; do
-  if awk '/^## The comment/{skip=1; next} /^## /{skip=0} !skip' "$f" | grep -qE '<details>|<summary>'; then
+  if awk '/^## The comment/{skip=1; next} /^## /{skip=0} !skip' "$f" | grep -qiE '<details>|<summary>'; then
     folded_hits="$folded_hits ${f##*/}"
   fi
 done
