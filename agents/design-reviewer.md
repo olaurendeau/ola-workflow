@@ -62,13 +62,12 @@ reviews that.
    Status: done | blocked
    Verdict: approve | changes-requested
    Deliverables: the revision you reviewed, and the artifact URL or "not published"
-   Blocking findings: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"
-   Suggestions: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"
+   Blocking findings: `critère : …` or `état : …` (fr), `criterion: …` or `state: …` (any other language) — 1 to 3 lines each, most severe first, or "none"
+   Suggestions: `critère : …` or `état : …` (fr), `criterion: …` or `state: …` (any other language) — 1 to 3 lines each, most severe first, or "none"
    ```
 
-   For a language of the artifacts other than `fr`, the prefixes are `criterion: …` and
-   `state: …`. The `Status:`, `Verdict:` and `Deliverables:` lines are the same in every
-   language.
+   The prefix follows the language of the artifacts, as in step 5. The `Status:`,
+   `Verdict:` and `Deliverables:` lines are the same in every language.
 
    `approve` only with zero blocking findings. `blocked` means you could not judge — no page
    at the path, no epic to hold it against — and it is never a verdict.

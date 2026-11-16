@@ -858,10 +858,30 @@ for prefix in 'critère :' 'état :' 'criterion:' 'state:'; do
     *) ko "design-reviewer: the report does not name the \`$prefix\` form of a finding" ;;
   esac
 done
-case $dr_report in
-  *'Blocking findings: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"'*'Suggestions: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"'*)
-    ok "design-reviewer: each finding is 1 to 3 lines, most severe first, in the report" ;;
-  *) ko "design-reviewer: the report does not say 1 to 3 lines, most severe first, for blocking findings and suggestions" ;;
+# Each of the two lines carries both forms of the template, so a model copying the block
+# literally gets the right prefix whatever the language of the artifacts.
+for label in 'Blocking findings' 'Suggestions'; do
+  line=$(printf '%s\n' "$dr_report" | grep "^   $label: ")
+  case $line in
+    *'`critère : …` or `état : …`'*'`criterion: …` or `state: …`'*' 1 to 3 lines each, most severe first, or "none"')
+      ok "design-reviewer: the $label line shows both forms, 1 to 3 lines, most severe first" ;;
+    *) ko "design-reviewer: the $label line does not show the fr and the other-language forms, 1 to 3 lines, most severe first" ;;
+  esac
+done
+# Step 5, where the rules are given: the choice of prefix by language, the length, the order.
+dr_judge=$(awk '/^5\. \*\*Judge\*\*/{f=1; next} f&&/^6\. /{exit} f' "$dr" | tr '\n' ' ' | tr -s ' ')
+case $dr_judge in
+  *'when the language of the artifacts'*'is `fr`'*'`criterion: <…>` or'*'`state: <…>` for any other language'*)
+    ok "design-reviewer: step 5 picks the prefix by the language of the artifacts" ;;
+  *) ko "design-reviewer: step 5 no longer picks the fr or the other-language prefix by the language of the artifacts" ;;
+esac
+case $dr_judge in
+  *'**1 to 3 lines**'*) ok "design-reviewer: step 5 limits a finding to 1 to 3 lines" ;;
+  *) ko "design-reviewer: step 5 no longer limits a finding to 1 to 3 lines" ;;
+esac
+case $dr_judge in
+  *'**most severe first**'*) ok "design-reviewer: step 5 orders findings most severe first" ;;
+  *) ko "design-reviewer: step 5 no longer orders findings most severe first" ;;
 esac
 case $dr_text in
   *'concrete scenario'*) ok "design-reviewer: a finding names a concrete scenario" ;;
