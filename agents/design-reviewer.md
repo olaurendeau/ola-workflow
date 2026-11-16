@@ -41,10 +41,20 @@ reviews that.
    neighbouring screen, a component the project already has drawn again differently — each is
    a finding, because each is a second way of doing one thing.
 
-5. **Judge**, with the checklist below. Every finding names the criterion or the state it is
-   about, says what a user would actually meet — "a first-time user lands on a blank panel
-   with no way forward", not "the empty state could be clearer" — and is tagged **blocking**
-   or **suggestion**.
+5. **Judge**, with the checklist below. Every finding is short, ranked and tied to what it
+   is about:
+
+   - It names the **concrete scenario**: what a user would actually meet — "a first-time
+     user lands on a blank panel with no way forward", not "the empty state could be
+     clearer".
+   - It is **1 to 3 lines**, in the form `critère : <…>` or `état : <…>` when the language
+     of the artifacts (the brief's *Languages*) is `fr`, and `criterion: <…>` or
+     `state: <…>` for any other language — the criterion or the state it is about, then the
+     scenario, then what the page lacks.
+   - It is tagged **blocking** or **suggestion**, and there is no third level.
+   - Findings are listed **most severe first**, in each group, then by criterion and by state.
+   - It carries no account of how you read the page, no restating of the finding, no list of
+     what you looked at and found fine.
 
 6. **Report** to the coordinator, which reads your status before anything else:
 
@@ -52,9 +62,13 @@ reviews that.
    Status: done | blocked
    Verdict: approve | changes-requested
    Deliverables: the revision you reviewed, and the artifact URL or "not published"
-   Blocking findings: criterion or state — one sentence each, or "none"
-   Suggestions: criterion or state — one sentence each, or "none"
+   Blocking findings: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"
+   Suggestions: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"
    ```
+
+   For a language of the artifacts other than `fr`, the prefixes are `criterion: …` and
+   `state: …`. The `Status:`, `Verdict:` and `Deliverables:` lines are the same in every
+   language.
 
    `approve` only with zero blocking findings. `blocked` means you could not judge — no page
    at the path, no epic to hold it against — and it is never a verdict.

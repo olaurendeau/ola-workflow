@@ -837,6 +837,51 @@ case $coord in
   *) ko "coordinator: the link rule does not say it writes nothing on the forge" ;;
 esac
 
+# --- The design-reviewer's findings -----------------------------------------------------
+# What the coordinator and the human read from this role is a short list of findings, each
+# tied to a criterion or a state, most severe first. Prose, not proof: what these catch is the
+# sentence deleted in a rewrite. The text is read with its line breaks folded, so a sentence
+# wrapped across two lines is still one sentence.
+dr=$ROOT/agents/design-reviewer.md
+dr_text=$(tr '\n' ' ' < "$dr" | tr -s ' ')
+# The witness: every check below reads the report block, so one that is not found would let
+# the absences pass on a file with no report.
+dr_report=$(awk '/^6\. \*\*Report\*\*/{f=1} f&&/^## Checklist/{exit} f' "$dr")
+if printf '%s' "$dr_report" | grep -q '^   Verdict: approve | changes-requested$'; then
+  ok "design-reviewer: the report block is found, with its verdict line unchanged"
+else
+  ko "design-reviewer: no report block with 'Verdict: approve | changes-requested'"
+fi
+for prefix in 'critère :' 'état :' 'criterion:' 'state:'; do
+  case $dr_report in
+    *"\`$prefix"*) ok "design-reviewer: the report names the \`$prefix\` form of a finding" ;;
+    *) ko "design-reviewer: the report does not name the \`$prefix\` form of a finding" ;;
+  esac
+done
+case $dr_report in
+  *'Blocking findings: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"'*'Suggestions: `critère : …` or `état : …` — 1 to 3 lines each, most severe first, or "none"'*)
+    ok "design-reviewer: each finding is 1 to 3 lines, most severe first, in the report" ;;
+  *) ko "design-reviewer: the report does not say 1 to 3 lines, most severe first, for blocking findings and suggestions" ;;
+esac
+case $dr_text in
+  *'concrete scenario'*) ok "design-reviewer: a finding names a concrete scenario" ;;
+  *) ko "design-reviewer: no longer says a finding names a concrete scenario" ;;
+esac
+case $dr_text in
+  *'no third level'*) ok "design-reviewer: only blocking and suggestion exist" ;;
+  *) ko "design-reviewer: no longer says there is no level beyond blocking and suggestion" ;;
+esac
+case $dr_text in
+  *'no account of how you read the page'*) ok "design-reviewer: forbids the account of the reading" ;;
+  *) ko "design-reviewer: no longer forbids the account of how the page was read" ;;
+esac
+# No level other than blocking and suggestion is introduced in the report.
+if printf '%s' "$dr_report" | grep -qiE '^   (nit|info|minor|major|critical|warning)'; then
+  ko "design-reviewer: the report introduces a level beyond blocking and suggestion"
+else
+  ok "design-reviewer: the report has no level beyond blocking and suggestion"
+fi
+
 # --- The security review ---------------------------------------------------------------
 # A false positive here is not a comment someone scrolls past: a blocking finding sends a
 # developer round the review loop, then a delta review, then an arbitration. So each thing
