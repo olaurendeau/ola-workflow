@@ -1303,6 +1303,12 @@ forbid_key verify_ui '(playwright|maestro|simctl|ios-simulator|--width [0-9])' \
 # What a prompt that hard-codes a preview would write: a dev server command or its address.
 forbid_key preview '(npm run dev|yarn dev|pnpm dev|rails server|https?://localhost)' \
   'a way of starting a preview'
+# Which forge a project is on is the profile's, and what each forge is told is the brief's:
+# a prompt that runs glab, passes a merge_request push option or names its token has chosen for
+# everyone. A `glab` command is `glab <subcommand>`: the coordinator's "the `glab` equivalent"
+# (agents/coordinator.md, on reading a link) names the tool and runs nothing.
+forbid_key forge '\bglab (api|mr|issue|label|auth|repo|release)\b|merge_request\.|GITLAB_TOKEN' \
+  'a GitLab command or token'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
 # The paths that get a security review, and the command that matches them, are the brief's:
 # a prompt that lists them has decided for every project which files are worth a look.
@@ -2647,6 +2653,31 @@ case $out in
   *trunk*|*"just check"*) ko "no profile: the refusal leaked another project's values" ;;
   *) ok "no profile: nothing is guessed" ;;
 esac
+
+# A GitLab project is stopped before any rule is printed: until the brief has a GitLab text,
+# it would dictate gh commands and promise refusals nobody applies. Nothing on stdout, the
+# refusal on stderr, exit 1; and the same profile on GitHub still gets its brief.
+mkdir -p "$WORK/gitlab/.claude"
+git -C "$WORK/gitlab" -c init.defaultBranch=main init -q 2>/dev/null
+printf '{"mode":"integrated","forge":"gitlab"}\n' >"$WORK/gitlab/.claude/workflow.json"
+glout=$("$BRIEF" "$WORK/gitlab" 2>"$WORK/gitlab.err")
+glstatus=$?
+if [ "$glstatus" = 1 ] && [ -z "$glout" ]; then
+  ok "forge gitlab: the brief exits 1 and prints nothing on stdout"
+else
+  ko "forge gitlab: exit $glstatus, stdout '${glout:-nothing}'"
+fi
+case $(cat "$WORK/gitlab.err") in
+  *'GitLab is not supported by this version yet'*'remove the key.'*)
+    ok "forge gitlab: the refusal is on stderr, with the way out" ;;
+  *) ko "forge gitlab: the refusal is not on stderr" ;;
+esac
+printf '{"mode":"integrated","forge":"github"}\n' >"$WORK/gitlab/.claude/workflow.json"
+if "$BRIEF" "$WORK/gitlab" >/dev/null 2>&1; then
+  ok "forge github: the brief is printed"
+else
+  ko "forge github: the brief is refused"
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total agent test(s) failed"

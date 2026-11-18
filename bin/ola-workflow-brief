@@ -63,6 +63,14 @@ profile=$(ola_profile_path "$dir") || {
 ola_profile_readable "$profile" || unreadable
 mode=$(ola_profile_mode "$dir")
 
+# A GitLab project is stopped here, before anything is printed: the rest of the brief is
+# written in GitHub's commands, and it promises refusals that only GitHub gives. A profile
+# without the key is a GitHub one, always.
+if [ "$(ola_profile_get forge "$dir" "" github 2>/dev/null)" = gitlab ]; then
+  render refusals/forge-unsupported >&2
+  exit 1
+fi
+
 # A value the profile does not state is a plugin default, and it must say so. Unmarked, a
 # reviewer rejects an 1,100-line change on a budget nobody set, and a developer branches
 # from main in a repository whose branch is master.

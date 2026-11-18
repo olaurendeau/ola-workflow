@@ -68,6 +68,7 @@ is also what validates it — point your editor at it:
 | `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
 | `security` | `paths`: the globs whose change gets a security review beside the code review; none, and nobody is dispatched |
 | `commands` | per-command `allow_args` / `deny_args` rules the brief states — nothing applies them yet |
+| `forge` | `github` (the default) or `gitlab`: the forge that hosts the remote. This version does not support GitLab yet: `ola-workflow-brief` refuses a profile that says `gitlab` and prints why |
 | `github_tokens` | `keychain` (the default) or `off` — see [GitHub tokens](github-tokens.md) |
 | `db_hosts_allowed` | the databases an agent may connect to |
 | `context` | the documents the agents read: product, architecture, review checklist, security precedents, glossary; and `design`, where each design is documented (`docs/design` by default, integrated mode only) |
