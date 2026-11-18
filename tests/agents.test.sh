@@ -2225,8 +2225,13 @@ case $integrated in
   *) ko "integrated: the brief gives no command to create the RFR label" ;;
 esac
 # The one RFR the discreet brief has is the word the read-only `gh pr list` prints for a label
-# somebody else put there: that line is set aside, anything else naming RFR is a trace.
-case $(printf '%s\n' "$discreet" | grep -vE '^ +gh pr list ') in
+# somebody else put there: only that exact line is set aside, anything else naming RFR is a trace
+# (another `gh pr list`, or a command chained after it, included).
+reader_line=$(cat <<'LINE'
+    gh pr list --state open --json number,headRefOid,labels,closingIssuesReferences --jq '.[] | "PR #\(.number) \(.headRefOid) \(if any(.labels[]; .name == "RFR") then "RFR" else "-" end) closes \([.closingIssuesReferences[].number | "#\(.)"] | join(","))"'
+LINE
+)
+case $(printf '%s\n' "$discreet" | grep -vxF -- "$reader_line") in
   *RFR*) ko "discreet: the brief mentions the RFR label, and the workflow leaves no trace there" ;;
   *) ok "discreet: the brief says nothing of the RFR label" ;;
 esac
