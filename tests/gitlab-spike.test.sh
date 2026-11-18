@@ -31,6 +31,10 @@ FAKES=$WORK/bin
 CALLS=$WORK/calls
 CFGS=$WORK/cfgs
 GLAB_ENV=$WORK/glab-env
+GITENV=$WORK/git-env
+: >"$GITENV"
+export GITENV
+unset GIT_TERMINAL_PROMPT # the fetch is proved to set it itself
 mkdir -p "$FAKES"
 cat >"$FAKES/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -51,17 +55,25 @@ case $cfg in *"$FAKE_BOT"*) user=bot ;; esac
 url=$(printf '%s\n' "$cfg" | sed -n 's/^url = "\(.*\)"$/\1/p')
 case $url in
   */api/v4/user) body="{\"id\":$([ $user = bot ] && echo 2 || echo 1),\"username\":\"$user\",\"bot\":$([ $user = bot ] && echo true || echo false)}" ;;
+  # an empty project, as GitLab says it: a default branch that exists nowhere, and empty_repo
+  */api/v4/projects/group%2Fthrowaway) body="{\"id\":7,\"default_branch\":\"main\",\"empty_repo\":${FAKE_EMPTY:-false}}" ;;
   *) body='{"id":7,"iid":3,"username":"x","default_branch":"main","sha":"0123456789abcdef0123456789abcdef01234567","message":"nope"}' ;;
 esac
 [ -z "$out" ] || printf '%s' "$body" >"$out"
 printf 200
 EOF
 # git: a repository that accepts everything (the script then reaches M04 to M12), unless
-# FAKE_GIT=down, where it answers nothing.
+# FAKE_GIT=down, where it answers nothing, or FAKE_GIT=nocommit, where it clones but cannot commit.
+# It records the GIT_TERMINAL_PROMPT each call was given, in $GITENV.
 cat >"$FAKES/git" <<'EOF'
 #!/usr/bin/env bash
 printf 'git %s\n' "$*" >>"$CALLS"
-[ "${FAKE_GIT:-up}" = up ] || exit 1
+printf 'prompt=%s %s\n' "${GIT_TERMINAL_PROMPT-unset}" "$*" >>"$GITENV"
+case "${FAKE_GIT:-up}" in
+  up) ;;
+  nocommit) case " $* " in *" commit "*) exit 1 ;; esac ;;
+  *) exit 1 ;;
+esac
 for a in "$@"; do last=$a; done
 case " $* " in
   *" clone "*) mkdir -p "$last/.git" ;;
@@ -179,11 +191,11 @@ no_secret "full run"
 # '%23428BCA' on the config line would become %2523428BCA on the wire, and a 400
 grep -qF 'data-urlencode = "color=#428BCA"' "$CFGS" && ok "the label colour is sent as #428BCA, encoded once by curl" || ko "no color=#428BCA in what curl was given: $(grep color "$CFGS")"
 ! grep -qF 'color=%23' "$CFGS" && ok "the label colour is not encoded by hand" || ko "color=%23… is given to curl, which would encode the % again"
-# M11: a failed status posted last, the project setting put on then back, M12 plays on the default branch.
+# M11: a failed status posted last, the project setting put on then back, M12 tries the default branch.
 # $CFGS holds blocks cut by "--": the last status posted must be the failed one; M12 must create a
 # pipeline on the default branch (the fake's "main") and try its manual job.
 awk -v RS='--\n' '/\/statuses\// { last = $0 } END { exit !(last ~ /state=failed/ && last ~ /name=agent-review-m11/) }' "$CFGS" && ok "M11's failed status is the last one posted" || ko "the last status posted is not agent-review-m11 failed"
-awk -v RS='--\n' '/\/pipeline"/ && /ref=main"/ { f = 1 } END { exit !f }' "$CFGS" && printf '%s\n' "$OUT" | grep -q '^M12 bot: play the manual job on the protected branch' && ok "M12 plays on the default branch" || ko "M12 never created a pipeline on main nor played its manual job"
+awk -v RS='--\n' '/\/pipeline"/ && /ref=main"/ { f = 1 } END { exit !f }' "$CFGS" && printf '%s\n' "$OUT" | grep -q '^M12 bot: play the manual job on the protected branch' && ok "M12 tries the default branch" || ko "M12 never created a pipeline on main nor played its manual job"
 printf '%s\n' "$OUT" | grep -q '^M11 bot: POST a last failed status' && ok "M11 posts a last failed status itself" || ko "no M11 line for the last failed status"
 printf '%s\n' "$OUT" | grep -q "^M11 the same MR with 'Pipelines must succeed' on" && ok "M11 reads the MR with the setting on" || ko "no M11 line with the setting on"
 grep -qF 'data-urlencode = "only_allow_merge_if_pipeline_succeeds=true"' "$CFGS" && ok "M11 turns 'Pipelines must succeed' on" || ko "M11 never sets only_allow_merge_if_pipeline_succeeds"
@@ -193,6 +205,45 @@ last=$(grep -n 'only_allow_merge_if_pipeline_succeeds=' "$CFGS" | tail -n 1 | cu
 printf '%s\n' "$OUT" | grep -q '^M10 the login landed in the scratch GLAB_CONFIG_DIR → yes' && ok "M10 checks that the login landed in the scratch config" || ko "no M10 check of the config location"
 grep -q '^curl ' "$CALLS" && ! grep -E '^curl ' "$CALLS" | grep -qiE 'private-token|authorization' && ok "curl is given no header on its command line" || ko "a curl call carries a header in argv"
 [ "$n" -ge 14 ] || ko "fewer than 14 measure lines ($n)"
+# a fetch, like a push, must never wait for a password nobody will type
+grep -q ' fetch ' "$GITENV" && ! grep ' fetch ' "$GITENV" | grep -qv '^prompt=0 ' && ok "every git fetch runs with GIT_TERMINAL_PROMPT=0" || ko "a git fetch may prompt: $(grep ' fetch ' "$GITENV" | grep -v '^prompt=0 ' | head -n 1)"
+# a project that is not empty gets no first commit
+! grep -q 'ola-spike init' "$CALLS" && ok "a project with a repository gets no first commit" || ko "a first commit was made on a project that is not empty"
+
+# --- an empty project: GitLab still says default_branch main, and says empty_repo true
+: >"$CALLS"
+FAKE_EMPTY=true run --yes --project group/throwaway
+grep -q 'commit -q -m ola-spike init' "$CALLS" && grep -q 'push -q origin main' "$CALLS" && ok "an empty project (empty_repo true, default_branch main) gets its first commit on main" || ko "no first commit on an empty project: $(grep '^git' "$CALLS" | head -n 5)"
+printf '%s\n' "$OUT" | grep -q '^Pre first commit of an empty project → pushed to main' && ok "…and the run says so" || ko "no 'first commit' line: $(printf '%s\n' "$OUT" | grep '^Pre')"
+no_secret "empty project"
+
+# --- M07 when the branch cannot be made: not measurable, and the run goes on
+: >"$CALLS"
+FAKE_GIT=nocommit run --yes --project group/throwaway
+missing=""
+for i in 07 08 09 10 11 12 13 14; do
+  printf '%s\n' "$OUT" | grep -q "^M$i " || missing="$missing M$i"
+done
+printf '%s\n' "$OUT" | grep -q '^M07 .*not measurable' && [ -z "$missing" ] && [ "$STATUS" = 0 ] && ok "M07 says not measurable when its branch cannot be made, and M08 to M14 still run" || ko "no branch: status $STATUS, missing:$missing, $(printf '%s\n' "$OUT" | grep -E 'M07|unbound' | head -n 3)"
+! printf '%s\n' "$OUT" | grep -q 'unbound variable' && ok "…with no unbound variable" || ko "an unbound variable: $(printf '%s\n' "$OUT" | grep 'unbound')"
+
+# --- the plan: lines that fit a terminal, and nothing lost where they are cut
+run --dry-run
+long=$(printf '%s\n' "$OUT" | awk 'length($0) > 100' | head -n 1)
+[ -z "$long" ] && ok "--dry-run prints no line longer than 100 columns, so no terminal cuts one" || ko "a plan line is longer than 100 columns: $long"
+unwrapped=$(printf '%s\n' "$OUT" | awk '/^ +/ { sub(/^ +/, ""); line = line " " $0; next } { if (line != "") print line; line = $0 } END { print line }')
+for phrase in 'remove an MR label, note' 'success then failed, author recorded' 'which query gives the latest by name' 'merge blocked with and without'; do
+  printf '%s\n' "$unwrapped" | grep -qF "$phrase" && ok "--dry-run, once the cut lines are joined, still says '$phrase'" || ko "the plan lost a space where it is cut: '$phrase' not found"
+done
+n=$(printf '%s\n' "$OUT" | grep -cE '^M(0[1-9]|1[0-4]) ')
+[ "$n" = 14 ] && ok "…and each measure still starts its own line" || ko "$n lines start with a measure number in the plan"
+
+# --- SPIKE_NAP refused before anything is created: no scratch directory is left behind
+LEFT=$WORK/left-tmp
+mkdir -p "$LEFT"
+TMPDIR=$LEFT SPIKE_NAP=soon PATH="$FAKES:$PATH" "$SCRIPT" --yes --project group/throwaway >/dev/null 2>&1 </dev/null
+STATUS=$?
+[ "$STATUS" = 2 ] && [ -z "$(ls "$LEFT")" ] && ok "a refused SPIKE_NAP leaves no ola-gitlab-spike directory in TMPDIR" || ko "status $STATUS, left in TMPDIR: $(ls "$LEFT")"
 
 # --- no usable git: M04 to M12 say so, and the run still reports every measure
 : >"$CALLS"
