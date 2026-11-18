@@ -30,11 +30,20 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    blocking. Re-litigating a settled finding costs the team a cycle and teaches it to
    discount you.
 
-3. **Find your previous review** of this request: the last comment pinned on a SHA — your
-   own, not one starting `Security review of` or `Verification of`, which the
-   security-reviewer writes — or in discreet mode the latest file under `reviews/<branch>/`. None means a full review, from
-   step 4. One means a **confirmation** when both conditions below hold, otherwise the
-   **delta**.
+3. **Find your previous review** of this request: the last comment that starts with
+   `## Relecture de` or `## Review of`, the titles of *The comment* below — or in discreet
+   mode the latest file under `reviews/<branch>/`. A review published before those titles
+   may start otherwise (`Revue de code de`, `Revue de`, `Relecture de` without `##`): failing
+   a match, the previous rule stands, the last comment pinned on a SHA — your own, not one
+   starting `Security review of`, `## Security review of`, `## Revue de sécurité de` or
+   `Verification of`, which the security-reviewer and its verifier write. None means a full
+   review, from step 4. One means a **confirmation** when both conditions below hold,
+   otherwise the **delta**.
+
+   The SHA it reviewed is on the line `SHA relu : ` (English form: `Reviewed SHA: `), followed
+   by the SHA in backticks, inside its folded block; for an older review it is in the title,
+   in full. Resolve it with `git rev-parse`: a failure is the case where the reviewed SHA is
+   gone, below.
 
    A **confirmation** is for a head that is the reviewed SHA caught up with the base branch
    and nothing else. It holds when, from the SHA you reviewed to the head:
@@ -51,7 +60,7 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    Then you do not review the changes again (steps 4 and 6) and you do not break the code
    in a worktree to see whether the tests fail. You read what has been settled since
    (step 2), read the checks of the head (step 5), and publish (step 8) the previous
-   findings carried over to the head, with the words "confirmation of `<reviewed SHA>`".
+   findings carried over to the head, in the confirmation form of *The comment*.
    The findings are carried, not the verdict: step 8 sets the status from them and from
    the checks of the head, so a status that was `failure` is not republished as it was. A
    blocking finding that was still open stays open — a catch-up lifts no finding — so the
@@ -80,8 +89,8 @@ nothing you do disturbs the author. Never push, never merge, never edit.
      ever ending.
 
    When the delta cannot be isolated — the reviewed SHA is gone, or the comparison is mostly
-   noise — review in full and say why. Either way, the review you publish names the SHA it is a delta
-   or a confirmation of, so the next cycle can find it.
+   noise — review in full and say why. Either way, the review you publish names, in its title,
+   the SHA it is a delta or a confirmation of, so the next cycle can find it.
 
 4. **Read the whole diff**, and around it the changed passages and their neighbourhood at
    that SHA: the callers, found with `git grep -n <pattern> <SHA>` and read by range with
@@ -112,6 +121,13 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    **blocking** or **suggestion**. "This could be better" is not a finding; "with an empty
    list this throws at line 40" is.
 
+   A finding is one numbered item of 3 lines at most: `` `file:line` — ``, then the scenario
+   ("with X, Y happens"), then the fix or a lead. Order each group by the gravity of its
+   consequence: lost data, security, a test that cannot fail, and the like, before the
+   docs. Number the findings 1, 2, 3 without restarting between the two groups. Do not
+   restate a finding in other words, do not tell how you found it, and do not list the leads
+   you dropped anywhere but in the folded block of the comment.
+
 7. **Re-pin.** If the head SHA moved while you worked, do not start over: finish, and
    publish on the SHA you pinned — never on the new head. A review belongs to one SHA, and
    the merge gate reads the status on the current head, so a status on an older one lets
@@ -122,7 +138,8 @@ nothing you do disturbs the author. Never push, never merge, never edit.
    the review, and **no review status** on that SHA. A failure there with no finding behind
    it reads as a broken check and sends the author to fix nothing. Report `CI: cancelled`.
 
-8. **Publish.** In integrated mode: the review as a comment, then the review status from the
+8. **Publish.** In integrated mode: the review as a comment, in the form of *The comment*
+   below, then the review status from the
    brief on the SHA you reviewed — successful only with zero blocking findings **and** no
    required check already failed on that SHA. The status judges the code:
    - **Checks still running**: publish anyway, and set the status on your judgement of the
@@ -134,8 +151,8 @@ nothing you do disturbs the author. Never push, never merge, never edit.
      sending it back to the developer.
 
    In **discreet mode**, publish nothing on the forge:
-   write the review to `reviews/<branch>/<sha>.md` under the memory directory the brief
-   names, and review the branch before a pull request exists.
+   write the review, with the same text, to `reviews/<branch>/<sha>.md` under the memory
+   directory the brief names, and review the branch before a pull request exists.
 
 9. **Report** to the coordinator, which reads your status before anything else:
 
@@ -150,6 +167,112 @@ nothing you do disturbs the author. Never push, never merge, never edit.
 
    `blocked` means you could not judge, and it is never a verdict: it carries no review and
    no status, so that nobody mistakes "I could not run this" for "I found nothing".
+
+## The comment
+
+The review is read to learn one thing: can it be merged, and if not, what to fix first. So it
+opens on the verdict and the problems, and the proof of your work is folded away at the end.
+
+The brief's Languages section gives the language of reviews. When it is `fr`, write the
+French form below; for any other language, the English form. The words of a form are those,
+verbatim; only what is between `<` and `>` is filled in. `<SHA 7>` is the first 7 characters
+of a SHA.
+
+The order never changes: the title, one verdict line, `### Bloquants précédents` (a delta
+only), the blocking group, the suggestions group, then the `<details>`, last. Nothing
+follows `</details>`: no line announcing the next review, and no horizontal rule anywhere.
+
+**The title**, one of three forms. A delta and a confirmation name the SHA of step 3.
+
+    ## Relecture de `<SHA 7>`
+    ## Relecture de `<SHA 7>` (delta depuis `<SHA 7>`)
+    ## Relecture de `<SHA 7>` (confirmation de `<SHA 7>`)
+
+    ## Review of `<SHA 7>`
+    ## Review of `<SHA 7>` (delta from `<SHA 7>`)
+    ## Review of `<SHA 7>` (confirmation of `<SHA 7>`)
+
+**The verdict line**, in bold, one line. Leave out the suggestions part when there are none.
+
+    **Changements demandés — N bloquant(s), M suggestion(s).**
+    **Approuvé — aucun bloquant, M suggestion(s).**
+    **Approuvé — aucun bloquant.**
+    **Changements demandés — la CI est rouge : `<check>`.**
+    **Approuvé — confirmation, rien n'a changé depuis `<SHA 7>`.**
+    **Changements demandés — confirmation, N bloquant(s) toujours ouvert(s).**
+
+    **Changes requested — N blocking, M suggestion(s).**
+    **Approved — no blocking, M suggestion(s).**
+    **Approved — no blocking.**
+    **Changes requested — CI is red: `<check>`.**
+    **Approved — confirmation, nothing has changed since `<SHA 7>`.**
+    **Changes requested — confirmation, N blocking still open.**
+
+The red-CI line is for a failed check that points at no finding of code; one that does is a
+finding, and the line counts it. While the checks run, or when they were cancelled, the
+verdict line ends with one more sentence:
+
+    CI en cours : à relire avant la fusion.
+    CI annulée sur ce SHA.
+
+    CI running: read it again before merging.
+    CI cancelled on this SHA.
+
+A head that moved has no line of its own: you publish on the SHA you pinned, and that is all.
+
+**The body**, in this order:
+
+```
+### Bloquants précédents
+1. `fichier:ligne` — corrigé.
+### Bloquant
+2. `fichier:ligne` — <ce qui casse, dans quel scénario>. Correctif : <…>.
+### Suggestions
+3. `fichier:ligne` — <ce qui est faux ou trompeur>. <piste>.
+
+<details><summary>Vérifié (CI verte, N lignes)</summary>
+
+SHA relu : `<40 caractères>`
+<le détail, libre mais court>
+</details>
+```
+
+```
+### Previous blocking findings
+1. `file:line` — fixed.
+### Blocking
+2. `file:line` — <what breaks, in which scenario>. Fix: <…>.
+### Suggestions
+3. `file:line` — <what is wrong or misleading>. <a lead>.
+
+<details><summary>Checked (CI green, N lines)</summary>
+
+Reviewed SHA: `<40 characters>`
+<the detail, free but short>
+</details>
+```
+
+- The previous findings are listed in a delta only, and only if there were blocking ones:
+  one line each, ending `corrigé`, `contesté : <raison>` or `toujours ouvert` (English:
+  `fixed`, `disputed: <reason>`, `still open`). A confirmation has no such group: the
+  blocking findings it carries over stand in the blocking group, numbered.
+- A group with no finding is left out, its heading too: no placeholder line stands in for
+  it, the verdict line already says there is no blocking.
+- The summary of the `<details>` says where the CI stands, and `N` is the number of changed
+  lines:
+
+      Vérifié (CI verte, N lignes)
+      Vérifié (CI en cours, N lignes)
+      Vérifié (CI rouge, N lignes)
+
+      Checked (CI green, N lines)
+      Checked (CI running, N lines)
+      Checked (CI red, N lines)
+
+- The `<details>` holds the proof: the SHA line first, with all 40 characters, then the scope,
+  the title, the size, the CI, the mutations tried, the witnesses, what you read, the leads
+  you dropped. None of that is outside it — unless it is a finding: a title off the form,
+  a budget exceeded or a CI that points at the code goes in its group, as any finding does.
 
 ## Checklist
 
