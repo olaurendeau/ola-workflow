@@ -143,9 +143,13 @@ if [ "${FAKE_API:-}" = 1 ] && [ "$1" = api ]; then
         esac ;;
     esac
   fi
+  # FAKE_REFUSE_READ=1: a granular PAT without the read permissions is refused 403 on the two reads
+  [ "${FAKE_REFUSE_READ:-}" != 1 ] || [ $kind != granular ] || case "$method $url" in
+    "GET "*/statuses\?*|"GET "*/merge_requests/[0-9]) code=403; body='{"message":"403 Forbidden"}' ;;
+  esac
   # FAKE_ECHO_TOKEN=1: a GitLab whose 404 message repeats the token too, in the body
   [ "${FAKE_ECHO_TOKEN:-}" != 1 ] || [ $code != 404 ] || body="{\"message\":\"404 Not found ${PAD:-}(token $GITLAB_TOKEN)\"}"
-  case $code in 200) w=OK ;; 201) w=Created ;; 401) w=Unauthorized ;; 409) w=Conflict ;; *) w="Not Found" ;; esac
+  case $code in 200) w=OK ;; 201) w=Created ;; 401) w=Unauthorized ;; 403) w=Forbidden ;; 409) w=Conflict ;; *) w="Not Found" ;; esac
   if [ $inc = 1 ]; then printf 'HTTP/2.0 %s %s\r\nContent-Type: application/json\r\n\r\n%s\n' "$code" "$w" "$body"; else printf '%s\n' "$body"; fi
   # FAKE_ECHO_TOKEN=1: a glab whose message repeats the token it was given, after PAD characters
   [ "${FAKE_ECHO_TOKEN:-}" != 1 ] || tail=" ${PAD:-}(token $GITLAB_TOKEN)"
@@ -385,6 +389,7 @@ unwrapped=$(printf '%s\n' "$OUT" | awk '/^ +/ { sub(/^ +/, ""); line = line " " 
 for phrase in '-F squash=true' 'per_page=100' 'a dummy token' 'not measurable' 'Commit statuses' 'Merge requests' 'pick a project that does not matter' 'cannot remove it' 'reads the statuses list'; do
   printf '%s\n' "$unwrapped" | grep -qF -e "$phrase" && ok "--only forms plan says '$phrase'" || ko "the forms plan does not say '$phrase': $OUT"
 done
+! printf '%s\n' "$OUT" | grep -q 'EOF' && printf '%s\n' "$unwrapped" | grep '^M18 ' | grep -q 'not measurable$' && ok "--only forms plan: the M18 line ends on its own words, no heredoc delimiter glued to it" || ko "the M18 plan line is glued to something: $(printf '%s\n' "$OUT" | grep -n 'EOF\|^M18')"
 long=$(printf '%s\n' "$OUT" | awk 'length($0) > 100' | head -n 1)
 [ -z "$long" ] && ok "--only forms plan has no line longer than 100 columns" || ko "a forms plan line is longer than 100 columns: $long"
 
@@ -435,6 +440,16 @@ printf '%s\n' "$M18" | grep -q 'granular: list, glab api --include .*statuses?na
 printf '%s\n' "$M18" | grep -q 'granular: the merge request, glab api --include .*merge_requests/<N>.*HTTP/2.0 200 OK.* — ok$' && grep -qF 'glab api --include projects/group%2Fthrowaway/merge_requests/3' "$CALLS" && ok "M18: the granular token reads the merge request" || ko "M18 MR read line: $(printf '%s\n' "$M18" | grep 'merge request')"
 grep 'TOKEN=granular' "$GLAB_ENV" | grep -q ' api ' && ok "the granular token reaches glab by the environment" || ko "no glab call ran with the granular token"
 grep -c 'TOKEN=other' "$GLAB_ENV" | grep -qx 1 && ok "a dummy token is used once, for M16's 401" || ko "the dummy token ran $(grep -c 'TOKEN=other' "$GLAB_ENV") times"
+
+# a granular PAT refused on the two reads: the answer to "are the read permissions needed" is the body
+: >"$CALLS"
+rm -f "$CALLS.n"
+SPIKE_GRANULAR_TOKEN=$GRAN FAKE_API=1 FAKE_REFUSE_READ=1 run --yes --only forms --project group/throwaway --other-project group/other
+M18=$(printf '%s\n' "$OUT" | grep '^M18 ')
+printf '%s\n' "$M18" | grep -q 'granular: list, .*HTTP/2.0 403 Forbidden.*; body: 403 Forbidden' && ok "M18: a refused list prints the body's message" || ko "M18 refused list: $(printf '%s\n' "$M18" | grep 'list')"
+printf '%s\n' "$M18" | grep 'granular: list, ' | grep -q 'entries' && ko "M18: a refused list reports an entry count" || ok "M18: a refused list reports no entry count"
+printf '%s\n' "$M18" | grep -q 'granular: the merge request, .*HTTP/2.0 403 Forbidden.*; body: 403 Forbidden' && ok "M18: a refused merge request read prints the body's message" || ko "M18 refused MR read: $(printf '%s\n' "$M18" | grep 'merge request')"
+no_secret "M18 with refused reads"
 
 # without a granular token: said, and M15 to M17 still measured
 : >"$CALLS"

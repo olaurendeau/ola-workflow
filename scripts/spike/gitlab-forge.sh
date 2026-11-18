@@ -132,7 +132,7 @@ plan_forms() { # M15 to M18, the same text the run prints in front of its observ
 M15 status by glab api -X POST projects/<path>/statuses/<sha> -f state -f name -f description: as the human, as the bot, as the human again (201, author.id); then the list statuses?name=<n>&per_page=100, with and without all=true: order, author.id, is the largest id the last posted
 M16 glab api --include projects/<path>/jobs/<id> with the bot token: a CI job (200 expected), an external status (404 expected), a dummy token (401 expected): glab's exit code, the state line and message it prints
 M17 merge by glab api -X PUT projects/<path>/merge_requests/<N>/merge -F squash=true -f sha=<sha>: human with a wrong sha (409 expected), bot (401 expected, MR not scheduled), human with the right sha (merged, squash_commit_sha, title = the MR's)
-M18 with SPIKE_GRANULAR_TOKEN: granular, scopes and user_id at /personal_access_tokens/self, GET /user, M15 and M17 again with it, and it reads the statuses list and the merge request once (are the two "read" permissions needed?); on --other-project a read and a status, both expected refused, with the message of their body; without the token or the project: not measurableEOF
+M18 with SPIKE_GRANULAR_TOKEN: granular, scopes and user_id at /personal_access_tokens/self, GET /user, M15 and M17 again with it, and it reads the statuses list and the merge request once (are the two "read" permissions needed?); on --other-project a read and a status, both expected refused, with the message of their body; without the token or the project: not measurable
 EOF
 }
 
@@ -935,7 +935,7 @@ m18() {
     res 18 "granular: glab api --include -X POST …/statuses/<sha>" "$(gl_seen); author.id $(jb '.author.id // "none"')" "^exit 0; HTTP/[0-9.]+ 201.*author.id $HUM_ID\$" "a 201 and the human as author.id"
     # the read side of "Commit statuses": only the granular token reads, so a refusal says it is needed
     glx granular api --include "projects/$ENC/repository/commits/$FA_SHA/statuses?name=ola-spike-m18&per_page=100"
-    res 18 "granular: list, glab api --include projects/<project>/repository/commits/<sha>/statuses?name=ola-spike-m18&per_page=100" "$(gl_seen); $(jb '[.[]?] | "\(length) entries"')" '^exit 0; HTTP/[0-9.]+ 200' "a 200 (a refusal means 'Commit statuses: read' is not enough or not ticked)"
+    res 18 "granular: list, glab api --include projects/<project>/repository/commits/<sha>/statuses?name=ola-spike-m18&per_page=100" "$(gl_seen); $(if jq -e 'type == "array"' "$BODY" >/dev/null 2>&1; then jb '"\(length) entries"'; else echo "body: $(gl_body)"; fi)" '^exit 0; HTTP/[0-9.]+ 200' "a 200 (a refusal means 'Commit statuses: read' is not enough or not ticked)"
   else
     m 18 "granular: a status" "not measurable: no SHA from M15"
   fi
@@ -943,7 +943,7 @@ m18() {
     m 18 "merge request ready?" "$(wait_mergeable "$MR_IID")"
     # the read side of "Merge requests", before the update
     glx granular api --include "projects/$ENC/merge_requests/$MR_IID"
-    res 18 "granular: the merge request, glab api --include projects/<project>/merge_requests/<N>" "$(gl_seen); state $(jb '.state // "?"')" '^exit 0; HTTP/[0-9.]+ 200' "a 200"
+    res 18 "granular: the merge request, glab api --include projects/<project>/merge_requests/<N>" "$(gl_seen); $(if [ "$GLRC" = 0 ]; then echo "state $(jb '.state // "?"')"; else echo "body: $(gl_body)"; fi)" '^exit 0; HTTP/[0-9.]+ 200' "a 200 (a refusal means 'Merge requests: read' is not enough or not ticked)"
     gl_merge granular "$MR_IID" "$MR_SHA"
     res 18 "granular, right sha: glab api --include -X PUT …/merge -F squash=true -f sha=<sha>" "$(gl_seen); $(merged_line)" 'state merged' "merged: the PAT acts as the human"
   else
