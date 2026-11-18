@@ -38,3 +38,4 @@ number of the entry that replaces it), Date, Context, Decision, Consequences, Ev
 | [0011](0011-only-the-coordinator-has-a-browser.md) | Only the coordinator declares the browser tools | accepted | 2026-10-23 |
 | [0012](0012-writing-convention-by-whitelist.md) | The prompts follow a writing convention enforced with a whitelist | accepted | 2026-10-14 |
 | [0013](0013-globs-are-git-pathspecs.md) | Every glob of a profile is a git pathspec | accepted | 2026-10-12 |
+| [0014](0014-gitlab-identities-measured.md) | GitLab's identities, statuses and merge are measured on gitlab.com: A1 is false, the model stands | accepted | 2026-11-12 |
