@@ -131,6 +131,7 @@ if [ "${FAKE_API:-}" = 1 ] && [ "$1" = api ]; then
         code=201; body="{\"id\":$n,\"status\":\"success\",\"author\":{\"id\":$([ $kind = bot ] && echo 2 || echo 1)}}" ;;
       "GET "*/statuses\?*) code=200; body='[{"id":10,"author":{"id":1}},{"id":11,"author":{"id":2}},{"id":12,"author":{"id":1}}]' ;;
       "GET "*/jobs/111) code=200; body='{"id":111}' ;;
+      "GET "*/merge_requests/[0-9]) code=200; body='{"iid":3,"state":"opened"}' ;;
       "PUT "*/merge)
         case " $* " in
           *"sha=0000"*) code=409; body='{"message":"SHA does not match HEAD of source branch"}' ;;
@@ -142,6 +143,8 @@ if [ "${FAKE_API:-}" = 1 ] && [ "$1" = api ]; then
         esac ;;
     esac
   fi
+  # FAKE_ECHO_TOKEN=1: a GitLab whose 404 message repeats the token too, in the body
+  [ "${FAKE_ECHO_TOKEN:-}" != 1 ] || [ $code != 404 ] || body="{\"message\":\"404 Not found ${PAD:-}(token $GITLAB_TOKEN)\"}"
   case $code in 200) w=OK ;; 201) w=Created ;; 401) w=Unauthorized ;; 409) w=Conflict ;; *) w="Not Found" ;; esac
   if [ $inc = 1 ]; then printf 'HTTP/2.0 %s %s\r\nContent-Type: application/json\r\n\r\n%s\n' "$code" "$w" "$body"; else printf '%s\n' "$body"; fi
   # FAKE_ECHO_TOKEN=1: a glab whose message repeats the token it was given, after PAD characters
@@ -379,7 +382,7 @@ n=$(printf '%s\n' "$OUT" | grep -cE '^M1[5-8] ')
 [ ! -s "$CALLS" ] && ok "--dry-run --only forms calls neither curl, git nor glab" || ko "--dry-run --only forms called: $(cat "$CALLS")"
 no_secret "--dry-run --only forms"
 unwrapped=$(printf '%s\n' "$OUT" | awk '/^ +/ { sub(/^ +/, ""); line = line " " $0; next } { if (line != "") print line; line = $0 } END { print line }')
-for phrase in '-F squash=true' 'per_page=100' 'a dummy token' 'not measurable' 'Commit statuses' 'Merge requests'; do
+for phrase in '-F squash=true' 'per_page=100' 'a dummy token' 'not measurable' 'Commit statuses' 'Merge requests' 'pick a project that does not matter' 'cannot remove it' 'reads the statuses list'; do
   printf '%s\n' "$unwrapped" | grep -qF -e "$phrase" && ok "--only forms plan says '$phrase'" || ko "the forms plan does not say '$phrase': $OUT"
 done
 long=$(printf '%s\n' "$OUT" | awk 'length($0) > 100' | head -n 1)
@@ -413,18 +416,23 @@ printf '%s\n' "$M15" | grep -q 'per_page=100 → 3 entries (id/author.id): 10/1,
 printf '%s\n' "$M15" | grep -q 'all=true → 3 entries' && ok "M15: the same list is read with all=true" || ko "no all=true list in M15"
 M16=$(printf '%s\n' "$OUT" | grep '^M16 ')
 printf '%s\n' "$M16" | grep -q 'bot: glab api --include projects/<project>/jobs/<id> (a CI job) → exit 0; HTTP/2.0 200 OK; stderr: nothing — ok$' && ok "M16: a CI job is 200 for the bot" || ko "M16 job line: $(printf '%s\n' "$M16" | grep 'CI job')"
-printf '%s\n' "$M16" | grep -q '(an external status) → exit 1; HTTP/2.0 404 Not Found; stderr: glab: 404 Not Found — ok$' && ok "M16: an external status is 404, with glab's exit code and message" || ko "M16 status line: $(printf '%s\n' "$M16" | grep 'external')"
-printf '%s\n' "$M16" | grep -q '(a dummy token) → exit 1; HTTP/2.0 401 Unauthorized; stderr: glab: 401 Unauthorized — ok$' && ok "M16: a dummy token is 401" || ko "M16 dummy line: $(printf '%s\n' "$M16" | grep 'dummy')"
+printf '%s\n' "$M16" | grep -q '(an external status) → exit 1; HTTP/2.0 404 Not Found; stderr: glab: 404 Not Found; body: 404 Not found — ok$' && ok "M16: an external status is 404, with glab's exit code and message" || ko "M16 status line: $(printf '%s\n' "$M16" | grep 'external')"
+printf '%s\n' "$M16" | grep -q '(an external status) .*; body: 404 Not found — ok$' && ok "M16: the body's own message is printed, to tell 404 Not found from 404 Project Not Found" || ko "M16 status body: $(printf '%s\n' "$M16" | grep 'external')"
+printf '%s\n' "$M16" | grep -q '(a dummy token) → exit 1; HTTP/2.0 401 Unauthorized; stderr: glab: 401 Unauthorized; body: 401 Unauthorized — ok$' && ok "M16: a dummy token is 401" || ko "M16 dummy line: $(printf '%s\n' "$M16" | grep 'dummy')"
 M17=$(printf '%s\n' "$OUT" | grep '^M17 ')
 printf '%s\n' "$M17" | grep -q 'wrong sha.*HTTP/2.0 409 Conflict.*body: SHA does not match.* — ok$' && ok "M17: a wrong sha is 409 with GitLab's message" || ko "M17 wrong sha line: $(printf '%s\n' "$M17" | grep 'wrong')"
 printf '%s\n' "$M17" | grep -q 'bot, right sha.*HTTP/2.0 401 Unauthorized.* — ok$' && ok "M17: the bot's merge is 401" || ko "M17 bot line: $(printf '%s\n' "$M17" | grep 'bot')"
 printf '%s\n' "$M17" | grep -q 'human, right sha.*state merged, squash_commit_sha 5ca1ab1e' && ok "M17: the right sha merges, squash_commit_sha is not null" || ko "M17 merged line: $(printf '%s\n' "$M17" | grep 'right sha')"
 printf '%s\n' "$M17" | grep -qE "the squash commit's title against the MR's → .*(equal|different)" && ok "M17: the title of the squash commit is compared with the MR's" || ko "no M17 title line: $M17"
+printf '%s\n' "$OUT" | grep -B1 -A3 -m1 'pick a project that does not matter' | grep -q 'ola-spike-other-refused' && ok "the live run warns, before it asks, that a status may stay on the other project" || ko "no warning about the other project in the live run: $(printf '%s\n' "$OUT" | head -n 12)"
 M18=$(printf '%s\n' "$OUT" | grep '^M18 ')
 printf '%s\n' "$M18" | grep -q 'GET /personal_access_tokens/self → HTTP 200; granular true, scopes read_repository, user_id 1' && ok "M18: the granular token's own fields are read" || ko "M18 self line: $(printf '%s\n' "$M18" | grep 'self')"
 printf '%s\n' "$M18" | grep -q 'granular: glab api --include -X POST .*statuses.* HTTP/2.0 201 Created.*author.id 1 — ok$' && ok "M18: a status written with the granular token is the human's" || ko "M18 status line: $(printf '%s\n' "$M18" | grep 'POST')"
 printf '%s\n' "$M18" | grep -q 'granular, right sha.*state merged' && ok "M18: the merge is redone with the granular token" || ko "M18 merge line: $(printf '%s\n' "$M18" | grep 'merge')"
 printf '%s\n' "$M18" | grep -q 'other project: read.*HTTP/2.0 404 Not Found.* — ok$' && printf '%s\n' "$M18" | grep -q 'other project: a status.*HTTP/2.0 404 Not Found.* — ok$' && ok "M18: on the other project a read and a status are refused, with their code" || ko "M18 other project lines: $(printf '%s\n' "$M18" | grep 'other')"
+printf '%s\n' "$M18" | grep -q 'other project: read.*; body: 404 Project Not Found — ok$' && printf '%s\n' "$M18" | grep -q 'other project: a status.*; body: 404 Project Not Found — ok$' && ok "M18: the other project's refusals print the body's message" || ko "M18 other project bodies: $(printf '%s\n' "$M18" | grep 'other')"
+printf '%s\n' "$M18" | grep -q 'granular: list, glab api --include .*statuses?name=ola-spike-m18.*HTTP/2.0 200 OK.* — ok$' && ok "M18: the granular token reads the statuses list" || ko "M18 list line: $(printf '%s\n' "$M18" | grep 'list')"
+printf '%s\n' "$M18" | grep -q 'granular: the merge request, glab api --include .*merge_requests/<N>.*HTTP/2.0 200 OK.* — ok$' && grep -qF 'glab api --include projects/group%2Fthrowaway/merge_requests/3' "$CALLS" && ok "M18: the granular token reads the merge request" || ko "M18 MR read line: $(printf '%s\n' "$M18" | grep 'merge request')"
 grep 'TOKEN=granular' "$GLAB_ENV" | grep -q ' api ' && ok "the granular token reaches glab by the environment" || ko "no glab call ran with the granular token"
 grep -c 'TOKEN=other' "$GLAB_ENV" | grep -qx 1 && ok "a dummy token is used once, for M16's 401" || ko "the dummy token ran $(grep -c 'TOKEN=other' "$GLAB_ENV") times"
 
