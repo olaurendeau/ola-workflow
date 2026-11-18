@@ -1,4 +1,4 @@
-# GitLab's identities, statuses and merge are measured on gitlab.com: A1 is false, the epic stops for a revision
+# GitLab's identities, statuses and merge are measured on gitlab.com: A1 is false, the model stands
 
 ## Status
 
@@ -48,8 +48,10 @@ one of the four that stop the epic. On the plan measured a Developer project acc
 available (M02, HTTP 201, `bot=true`); on Free it is not measured.
 
 The rule of the epic: if A1, A2, A3 or A6 is false, the epic stops and asks the architect for a
-revision before #162. **A1 is false. The epic stops for an architect revision.** A2, A3 and A6
-hold.
+revision before #162. **A1 is false as written** (granular PATs exist); A2, A3 and A6 hold. What
+the falsity of A1 changes is stated below, with the human's observation of 2026-11-18: the model
+stands, and an architect revision folds the measured details into the tasks. Whether the epic
+stops is the architect's call in that revision, not this record's.
 
 ### What A1 being false says, and what it does not
 
@@ -58,12 +60,17 @@ hold.
   runs). At the first run the human's answer was: "granular: oui, par projet ; MR autorisable
   sans commit status : oui": a granular PAT can be limited to one project, and one that may open
   merge requests without being allowed to write commit statuses can be made in the form.
-- **Not measured, and open: whether merge is a permission a granular PAT can be denied.** The
-  run created no granular token and used none. Whether such a token, once made, is refused a
-  commit status, or the merge, was never exercised. If both can be refused, the base token can be
-  permission-based on GitLab as it is on GitHub (decision 0001), and the identity-based author
-  check of section 1 (D1 = A) is replaced, not completed. If merge cannot be refused to it, the
-  author check stays. This is the question the revision starts from.
+- **Observed, not measured: merge is not a separate permission of a granular PAT.** Asked on
+  2026-11-18 "in gitlab.com's granular PAT UI, can one grant MR creation or edit while denying
+  merge?", the human answered no: whoever may create or edit merge requests may merge them. This
+  is the human's reading of the interface. No granular token was created or used, by the run or
+  after it, so no refusal or success of a merge by a granular token was ever exercised. The
+  consequence, on that observation: a granular PAT acting as the human cannot serve as the
+  agents' base token, since the protected branch does not refuse the human's own merge. The base
+  token stays a Developer identity (a project access token's bot, or a dedicated account), the
+  review and the merge tokens stay the human's own, and the author check stays: the model of
+  section 1 stands. What a granular PAT could still be is a narrower form of the human's own
+  review or merge token, which is a matter for #167.
 - `POST /user/personal_access_tokens` (read_api, one day) answered 400 "scopes does not have a
   valid value": the API route to create one was not explored, only the interface was seen.
 - Whether the Free tier and self-managed CE have granular PATs: not measured.
@@ -118,12 +125,12 @@ The `glab api` spelling of these two forms is **not settled**: M10 could not mea
 
 ## Consequences
 
-- **The epic stops before #162.** A1 is false: the architect revises section 1 and decides, from M03 and what is open above, whether the base token is a granular PAT that cannot merge nor write a status (permission-based, as on GitHub), or stays a Developer identity with the author check. The question that decides it, not measured: can merge be denied to a granular PAT, and does a granular PAT limited to MRs get refused a commit status. It needs one more run, with a granular token made on purpose.
-- A2, A3, A6 hold, so the identity-based model of section 1 works on gitlab.com as designed, on the plan measured, if the revision keeps it.
+- **The model stands, per the human's observation; an architect revision folds the measured details into the tasks.** A1 is false as written, but a granular PAT cannot be denied the merge it could otherwise be given (observation of 2026-11-18, no granular token created or used), so it cannot be the agents' base token. One Developer bot as base, the human's tokens for review and merge, and the author check stay. Whether the epic stops is the architect's call in that revision.
+- A2, A3, A6 hold, so the identity-based model of section 1 works on gitlab.com as designed, on the plan measured. The revision still has to take in what differs from the design (the 401, the `glab api` forms not settled, the inconclusive measures).
 - #165 (the review status): the query for the latest by name and the job-against-status signal are above. The author recorded cannot be forged by a field (A2). A CI job named `agent-review` has the human as author: the check reads the job signal as well. The `glab api` spelling has to be re-measured.
 - #166 (the merge): refusal is 401 for the bot; a wrong `sha` is 409; `squash=true` gives the MR title. The pending pipeline default of `glab mr merge` is not measured: the form never relies on it. The gate does not count on "Pipelines must succeed" (M11 inconclusive).
 - #164 (the session): `GITLAB_TOKEN` overrides the stored login, empty falls back, `GITLAB_HOST` works outside a repository (A5).
-- #167 (tokens): `GET /personal_access_tokens/self` gives the expiry of both kinds (M13); the PAT page pre-fills (M14); whether the pre-fill carries granular permissions is not measured. If the revision chooses a granular PAT, #167 pre-fills it instead of `api`.
+- #167 (tokens): `GET /personal_access_tokens/self` gives the expiry of both kinds (M13); the PAT page pre-fills (M14); whether the pre-fill carries granular permissions is not measured. If the revision keeps a granular PAT as a narrower review or merge token of the human, #167 pre-fills it instead of `api`.
 - The hook of section 3.5 (the push options): M09 confirms the hole (D2): both options schedule a merge as the human and GitLab refuses neither.
 - #172 (the docs) says what this entry says is not measured: the Free tier, self-managed GitLab, and everything inconclusive above.
 - To re-measure before #165 and #166: M10 with `origin` as the only remote, `-F squash=true` on a merge request, `glab mr merge`'s message in full. The script is left as it is for it.
