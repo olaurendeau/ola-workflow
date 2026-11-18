@@ -51,7 +51,10 @@ The rule of the epic: if A1, A2, A3 or A6 is false, the epic stops and asks the 
 revision before #162. **A1 is false as written** (granular PATs exist); A2, A3 and A6 hold. What
 the falsity of A1 changes is stated below, with the human's observation of 2026-11-18: the model
 stands, and an architect revision folds the measured details into the tasks. Whether the epic
-stops is the architect's call in that revision, not this record's.
+stops is settled: the coordinator decided that it does not, published in revision 3 on #160
+(2026-11-18), because the human observed that merging is not a separate permission of a granular
+PAT, so the settled model stands. The human still has to confirm that reading, since the letter
+of the rule says "stops".
 
 ### What A1 being false says, and what it does not
 
@@ -60,10 +63,13 @@ stops is the architect's call in that revision, not this record's.
   runs). At the first run the human's answer was: "granular: oui, par projet ; MR autorisable
   sans commit status : oui": a granular PAT can be limited to one project, and one that may open
   merge requests without being allowed to write commit statuses can be made in the form.
-- **Observed, not measured: merge is not a separate permission of a granular PAT.** Asked on
-  2026-11-18 "in gitlab.com's granular PAT UI, can one grant MR creation or edit while denying
-  merge?", the human answered no: whoever may create or edit merge requests may merge them. This
-  is the human's reading of the interface. No granular token was created or used, by the run or
+- **Observed, not measured: merge is not a separate permission of a granular PAT.** The human
+  was asked on 2026-11-18 whether gitlab.com's granular PAT interface can grant the creation or
+  the edit of merge requests while denying their merge, and answered no: whoever may create or
+  edit merge requests may merge them. (The forge records the meaning of the question, not its
+  exact words; the answer is item 13 of
+  [revision 3 on #160](https://github.com/olaurendeau/ola-workflow/issues/160#issuecomment-6975562802).)
+  This is the human's reading of the interface. No granular token was created or used, by the run or
   after it, so no refusal or success of a merge by a granular token was ever exercised. The
   consequence, on that observation: a granular PAT acting as the human cannot serve as the
   agents' base token, since the protected branch does not refuse the human's own merge. The base
@@ -96,8 +102,8 @@ stops is the architect's call in that revision, not this record's.
 
 ### The two answers section 1 asked for
 
-- **The latest status of a name on a SHA** (M06): `GET /projects/:id/repository/commits/:sha/statuses?name=<name>&all=true`, sorted by `id`, the last one. Without `all=true` GitLab returns one entry per `ref`, so a status of the same name on another ref hides the one on the branch.
-- **A CI job against an external status** (M07, M11): a job is in `GET /pipelines/:id/jobs` of a pipeline of the SHA, and `GET /projects/:id/jobs/:id` answers 200 for its status id; an external status makes a pipeline of source `external` with no job. The converse, `GET /jobs/:id` answering 404 for an external status, was not observed in this run: the only status read there was the job's.
+- **The latest status of a name on a SHA** (M06): `GET /projects/:id/repository/commits/:sha/statuses?name=<name>&all=true`, sorted by `id`, the last one. Without `all=true` GitLab returns only the latest entry of each `ref` (M06: 2 entries of 3 posts): the older success of the branch (#…827) is dropped, while the branch's latest (#…417) and the one on `main` (#…155) are there. The default list is one entry per ref, so it does not say which is the latest overall; `all=true` lists every entry and the highest `id` is the latest. The list is paged, and past one page the highest `id` may be on another page: this run never held more than 3 entries, so the paging was not exercised. Revision 3 of #160 plans `per_page=100` and a refusal when the page comes back full.
+- **A CI job against an external status** (M07, M11): a job is in `GET /pipelines/:id/jobs` of a pipeline of the SHA, and `GET /projects/:id/jobs/:id` answers 200 for its status id; an external status creates a pipeline of source `external` (M11). Whether that pipeline holds a job was not measured: M11 lists the pipelines of the SHA, never the jobs of pipeline 3060366310. The converse, `GET /jobs/:id` answering 404 for an external status, was not observed in this run: the only status read there was the job's.
 - A CI job named like the review status carries the human's name as author (M07). It would pass an author check alone: the check has to read the job signal too.
 
 ### The forms, as far as they are settled
@@ -125,7 +131,7 @@ The `glab api` spelling of these two forms is **not settled**: M10 could not mea
 
 ## Consequences
 
-- **The model stands, per the human's observation; an architect revision folds the measured details into the tasks.** A1 is false as written, but a granular PAT cannot be denied the merge it could otherwise be given (observation of 2026-11-18, no granular token created or used), so it cannot be the agents' base token. One Developer bot as base, the human's tokens for review and merge, and the author check stay. Whether the epic stops is the architect's call in that revision.
+- **The model stands, per the human's observation; the epic does not stop.** A1 is false as written, but a granular PAT cannot be denied the merge it could otherwise be given (observation of 2026-11-18, no granular token created or used), so it cannot be the agents' base token. One Developer bot as base, the human's tokens for review and merge, and the author check stay. The coordinator decided not to stop the epic, published in revision 3 on #160 (2026-11-18), for that reason: merging is not a separate permission of a granular PAT, so the settled model stands. The human has yet to confirm it. The architect's revision folds the measured details into the tasks.
 - A2, A3, A6 hold, so the identity-based model of section 1 works on gitlab.com as designed, on the plan measured. The revision still has to take in what differs from the design (the 401, the `glab api` forms not settled, the inconclusive measures).
 - #165 (the review status): the query for the latest by name and the job-against-status signal are above. The author recorded cannot be forged by a field (A2). A CI job named `agent-review` has the human as author: the check reads the job signal as well. The `glab api` spelling has to be re-measured.
 - #166 (the merge): refusal is 401 for the bot; a wrong `sha` is 409; `squash=true` gives the MR title. The pending pipeline default of `glab mr merge` is not measured: the form never relies on it. The gate does not count on "Pipelines must succeed" (M11 inconclusive).

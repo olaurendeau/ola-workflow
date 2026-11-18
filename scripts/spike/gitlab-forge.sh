@@ -452,21 +452,26 @@ m06() {
 m07() {
   local sha pl id i=0 ids line
   [ "$GIT_OK" = 1 ] || { m 7 "a CI job named agent-review" "not measurable: no git clone"; return; }
-  if ! mkbranch "ola-spike-$RUN-ci" ci; then
+  mkbranch "ola-spike-$RUN-ci" ci
+  sha=$LAST_SHA # empty when the branch was not made: mkbranch clears it first
+  if [ -z "$sha" ]; then
     m 7 "a CI job named agent-review" "not measurable: the branch could not be made"
     return
   fi
   pushb "ola-spike-$RUN-ci"
-  sha=$LAST_SHA
   m 7 "push a branch with a .gitlab-ci.yml job named agent-review, as the human" "$(push_result)"
-  while [ $i -lt 12 ]; do
+  if [ "$PUSH_RC" != 0 ]; then
+    m 7 "the pipeline of that push" "not measurable: the push failed, so no pipeline can come of it"
+    return
+  fi
+  while [ $i -lt 20 ]; do # 20 looks, NAP seconds apart: 60 s at the default
     api human GET "/projects/$PID/pipelines?sha=$sha"
     [ "$(jb 'length')" != 0 ] && break
-    sleep 5
+    sleep "$NAP"
     i=$((i + 1))
   done
   pl=$(jb '.[0].id // empty')
-  [ -n "$pl" ] || { m 7 "the pipeline of that push" "not measurable: none within 60 s (CI disabled, no runner, or the account not verified)"; return; }
+  [ -n "$pl" ] || { m 7 "the pipeline of that push" "not measurable: none within $((20 * NAP)) s (CI disabled, no runner, or the account not verified)"; return; }
   m 7 "the pipeline of that push" "$(pipelines_of "$sha")"
   api human GET "/projects/$PID/pipelines/$pl/jobs"
   m 7 "jobs of the pipeline (GET /pipelines/:id/jobs)" "$(jb '[.[]? | "\(.name):\(.status)"] | join(", ")')"

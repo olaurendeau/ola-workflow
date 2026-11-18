@@ -34,6 +34,8 @@ GLAB_ENV=$WORK/glab-env
 GITENV=$WORK/git-env
 : >"$GITENV"
 export GITENV
+COMMITS=$WORK/commits
+export COMMITS
 unset GIT_TERMINAL_PROMPT # the fetch is proved to set it itself
 mkdir -p "$FAKES"
 cat >"$FAKES/curl" <<'EOF'
@@ -54,6 +56,8 @@ user=human
 case $cfg in *"$FAKE_BOT"*) user=bot ;; esac
 url=$(printf '%s\n' "$cfg" | sed -n 's/^url = "\(.*\)"$/\1/p')
 case $url in
+  # a SHA that has no pipeline, ever (FAKE_NOPIPE=1)
+  */pipelines\?sha=*) body=$([ "${FAKE_NOPIPE:-}" = 1 ] && echo '[]' || echo '[{"id":9,"source":"push","status":"pending"}]') ;;
   */api/v4/user) body="{\"id\":$([ $user = bot ] && echo 2 || echo 1),\"username\":\"$user\",\"bot\":$([ $user = bot ] && echo true || echo false)}" ;;
   # an empty project, as GitLab says it: a default branch that exists nowhere, and empty_repo
   */api/v4/projects/group%2Fthrowaway) body="{\"id\":7,\"default_branch\":\"main\",\"empty_repo\":${FAKE_EMPTY:-false}}" ;;
@@ -63,7 +67,8 @@ esac
 printf 200
 EOF
 # git: a repository that accepts everything (the script then reaches M04 to M12), unless
-# FAKE_GIT=down, where it answers nothing, or FAKE_GIT=nocommit, where it clones but cannot commit.
+# FAKE_GIT=down, where it answers nothing, FAKE_GIT=nocommit, where it clones but cannot commit,
+# FAKE_GIT=onecommit, where only the first commit works, or FAKE_GIT=nopush, where nothing is pushed.
 # It records the GIT_TERMINAL_PROMPT each call was given, in $GITENV.
 cat >"$FAKES/git" <<'EOF'
 #!/usr/bin/env bash
@@ -72,6 +77,9 @@ printf 'prompt=%s %s\n' "${GIT_TERMINAL_PROMPT-unset}" "$*" >>"$GITENV"
 case "${FAKE_GIT:-up}" in
   up) ;;
   nocommit) case " $* " in *" commit "*) exit 1 ;; esac ;;
+  nopush) case " $* " in *" push "*) exit 1 ;; esac ;;
+  # onecommit: the first commit works (M04's), every later one fails
+  onecommit) case " $* " in *" commit "*) echo x >>"$COMMITS"; [ "$(wc -l <"$COMMITS")" -le 1 ] || exit 1 ;; esac ;;
   *) exit 1 ;;
 esac
 for a in "$@"; do last=$a; done
@@ -226,6 +234,33 @@ for i in 07 08 09 10 11 12 13 14; do
 done
 printf '%s\n' "$OUT" | grep -q '^M07 .*not measurable' && [ -z "$missing" ] && [ "$STATUS" = 0 ] && ok "M07 says not measurable when its branch cannot be made, and M08 to M14 still run" || ko "no branch: status $STATUS, missing:$missing, $(printf '%s\n' "$OUT" | grep -E 'M07|unbound' | head -n 3)"
 ! printf '%s\n' "$OUT" | grep -q 'unbound variable' && ok "…with no unbound variable" || ko "an unbound variable: $(printf '%s\n' "$OUT" | grep 'unbound')"
+
+# --- M07 when the branch cannot be made, the message says so (and not another reason), even
+# when an earlier branch was made: LAST_SHA is the previous one's unless mkbranch clears it
+: >"$CALLS"
+: >"$COMMITS"
+FAKE_GIT=onecommit run --yes --project group/throwaway
+printf '%s\n' "$OUT" | grep -qx 'M07 a CI job named agent-review → not measurable: the branch could not be made' && ok "M07 names the branch, not the CI, when it cannot be made after an earlier branch was" || ko "M07 line: $(printf '%s\n' "$OUT" | grep '^M07' | head -n 3)"
+! printf '%s\n' "$OUT" | grep -q '^M07 push a branch' && ok "…and pushes nothing for it" || ko "M07 pushed on a stale SHA"
+
+# --- M07 when the push fails: it says so at once, it does not wait for a pipeline
+: >"$CALLS"
+FAKE_GIT=nopush run --yes --project group/throwaway
+printf '%s\n' "$OUT" | grep -qx 'M07 the pipeline of that push → not measurable: the push failed, so no pipeline can come of it' && ok "M07 blames the push, not CI, when the push fails" || ko "M07 lines: $(printf '%s\n' "$OUT" | grep '^M07' | head -n 3)"
+! printf '%s\n' "$OUT" | grep -q '^M07 jobs of the pipeline' && ok "…and looks at no jobs" || ko "M07 went on after a failed push"
+
+# --- M07 waits NAP seconds between two looks, never a fixed 5 (a fake sleep records the delays)
+SLEEPS=$WORK/sleeps
+mkdir -p "$WORK/sleepbin"
+cat >"$WORK/sleepbin/sleep" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$SLEEPS"
+EOF
+chmod +x "$WORK/sleepbin/sleep"
+: >"$SLEEPS"
+: >"$CALLS"
+OUT=$(SLEEPS="$SLEEPS" FAKE_NOPIPE=1 PATH="$WORK/sleepbin:$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" "$SCRIPT" --yes --project group/throwaway 2>&1 </dev/null)
+printf '%s\n' "$OUT" | grep -q '^M07 the pipeline of that push → not measurable: none within' && [ -s "$SLEEPS" ] && ! grep -qvx 0 "$SLEEPS" && ok "M07 sleeps SPIKE_NAP between two looks for a pipeline, nothing else" || ko "M07 sleeps: $(sort "$SLEEPS" | uniq -c | tr '\n' ' ')"
 
 # --- the plan: lines that fit a terminal, and nothing lost where they are cut
 run --dry-run
