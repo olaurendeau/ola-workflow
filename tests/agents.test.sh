@@ -1307,7 +1307,7 @@ forbid_key preview '(npm run dev|yarn dev|pnpm dev|rails server|https?://localho
 # a prompt that runs glab, passes a merge_request push option or names its token has chosen for
 # everyone. A `glab` command is `glab <subcommand>`: the coordinator's "the `glab` equivalent"
 # (agents/coordinator.md, on reading a link) names the tool and runs nothing.
-forbid_key forge '\bglab (api|mr|issue|label|auth|repo|release)\b|merge_request\.|GITLAB_TOKEN' \
+forbid_key forge '\bglab [a-z]|merge_request\.|GITLAB_TOKEN' \
   'a GitLab command or token'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
 # The paths that get a security review, and the command that matches them, are the brief's:
