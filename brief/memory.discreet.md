@@ -8,6 +8,11 @@ memory is local, under:
 with epic.md, tasks/, reviews/<branch>/<sha>.md and security-reviews/<branch>/<sha>.md.
 Keep the repository itself clean: git status must be as you found it.
 
+To take the state back, read the first line of epic.md and the list of tasks/, and the
+open pull requests with gh pr list, which only reads:
+
+    gh pr list --state open --json number,headRefOid,labels,closingIssuesReferences --jq '.[] | "PR #\(.number) \(.headRefOid) \(if any(.labels[]; .name == "RFR") then "RFR" else "-" end) closes \([.closingIssuesReferences[].number | "#\(.)"] | join(","))"'
+
 ## What discreet mode forbids
 
 - Changing anything on the forge, in any direction: creating, editing, deleting, closing,
