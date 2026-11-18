@@ -5,7 +5,7 @@
 #     Mnn <what> → <observed>
 #
 # The whole output is pasted as the Evidence of the decision record
-# (the draft docs/decisions/drafts/gitlab-identities-measured.md, once filled in). If a measure contradicts the model
+# (docs/decisions/0014-gitlab-identities-measured.md). If a measure contradicts the model
 # (assumptions A1, A2, A3 or A6 of the design), the epic stops for a revision.
 #
 # Run by the human, never by an agent. gitlab.com is the only host the epic measures: --host
@@ -100,7 +100,16 @@ banner() {
 if [ "$DRY" = 1 ]; then
   banner
   echo "dry run: no network, no git, no token read. The run would measure:"
-  plan
+  # cut at 100 columns on a space, the continuation indented: a terminal that cuts a line itself
+  # drops the space it cuts at, and what is copied from it reads "label,note"
+  plan | awk -v w=100 '{
+    n = split($0, words, " "); line = words[1]
+    for (i = 2; i <= n; i++) {
+      if (length(line) + 1 + length(words[i]) > w) { print line; line = "    " words[i] }
+      else line = line " " words[i]
+    }
+    print line
+  }'
   exit 0
 fi
 
@@ -112,6 +121,9 @@ done
 for tool in curl jq git; do
   command -v "$tool" >/dev/null || die "$tool is not on PATH"
 done
+
+NAP=${SPIKE_NAP:-3} # seconds between two looks at GitLab; for the test, which sets it to 0
+case $NAP in '' | *[!0-9]*) die "SPIKE_NAP is for the test and takes whole seconds" ;; esac
 
 banner
 echo "It will create and delete objects in that project, merge up to four merge requests into its"
@@ -134,8 +146,6 @@ EXPIRES=$(date -u -v+1d +%F 2>/dev/null || date -u -d tomorrow +%F)
 ENC=$(jq -rn --arg p "$PROJECT" '$p|@uri')
 GITURL="https://$HOST/$PROJECT.git"
 HTTP=000
-NAP=${SPIKE_NAP:-3} # seconds between two looks at GitLab; for the test, which sets it to 0
-case $NAP in '' | *[!0-9]*) die "SPIKE_NAP is for the test and takes whole seconds" ;; esac
 PID=""
 BASE=""
 
@@ -232,7 +242,8 @@ G() { git -C "$CLONE" -c user.name=ola-spike -c user.email=ola-spike@invalid "$@
 mkbranch() { # mkbranch <name> <ci|plain> → a commit on a new branch of the base; LAST_SHA
   local br=$1 kind=$2
   PUSH_RC=1
-  G fetch -q origin 2>/dev/null
+  LAST_SHA=""
+  GIT_TERMINAL_PROMPT=0 G fetch -q origin 2>/dev/null
   G checkout -q -b "$br" "origin/$BASE" || return 1
   printf 'ola-spike %s %s\n' "$RUN" "$br" >"$CLONE/spike-$br.txt"
   if [ "$kind" = ci ]; then
@@ -291,11 +302,13 @@ m01() {
 }
 
 pre_project() {
-  local nsid levels
+  local nsid levels first
   api human GET "/projects/$ENC"
   [ "$HTTP" = 200 ] || { pre "project $PROJECT" "$(h) — the run stops"; exit 1; }
-  PID=$(jb .id); BASE=$(jb '.default_branch // empty'); nsid=$(jb .namespace.id)
-  pre "project" "id $PID, visibility $(jb .visibility), default branch ${BASE:-none (empty repository)}, merge_method $(jb .merge_method), squash_option $(jb .squash_option), only_allow_merge_if_pipeline_succeeds $(jb .only_allow_merge_if_pipeline_succeeds)"
+  PID=$(jb .id); DEFAULT=$(jb '.default_branch // empty'); nsid=$(jb .namespace.id)
+  # GitLab names a default branch on an empty project too: empty_repo is what says it is empty
+  if [ "$(jb '.empty_repo // false')" = true ]; then BASE=""; else BASE=$DEFAULT; fi
+  pre "project" "id $PID, visibility $(jb .visibility), default branch ${DEFAULT:-none}$([ -n "$BASE" ] || echo " (empty repository)"), merge_method $(jb .merge_method), squash_option $(jb .squash_option), only_allow_merge_if_pipeline_succeeds $(jb .only_allow_merge_if_pipeline_succeeds)"
   api human GET "/namespaces/$nsid"
   pre "namespace plan" "$(jb '.plan // "not shown"')"
   api human GET "/projects/$PID/members/all/$BOT_ID"
@@ -307,9 +320,10 @@ pre_project() {
   if GIT_TERMINAL_PROMPT=0 git clone -q "$GITURL" "$CLONE" 2>"$WORK/git.err"; then
     pre "git clone with the human's credentials" "ok"
     if [ -z "$BASE" ]; then
-      G checkout -q -b main && printf 'ola-spike\n' >"$CLONE/README.md" && G add -A && G commit -q -m "ola-spike init" &&
-        GIT_TERMINAL_PROMPT=0 G push -q origin main 2>"$WORK/git.err" && BASE=main
-      pre "first commit of an empty project" "$([ -n "$BASE" ] && echo "pushed to main" || echo failed)"
+      first=${DEFAULT:-main}
+      G checkout -q -b "$first" && printf 'ola-spike\n' >"$CLONE/README.md" && G add -A && G commit -q -m "ola-spike init" &&
+        GIT_TERMINAL_PROMPT=0 G push -q origin "$first" 2>"$WORK/git.err" && BASE=$first
+      pre "first commit of an empty project" "$([ -n "$BASE" ] && echo "pushed to $first" || echo failed)"
     fi
   else
     pre "git clone with the human's credentials" "not measurable: the clone failed — M04 to M12 need it"
@@ -438,17 +452,26 @@ m06() {
 m07() {
   local sha pl id i=0 ids line
   [ "$GIT_OK" = 1 ] || { m 7 "a CI job named agent-review" "not measurable: no git clone"; return; }
-  mkbranch "ola-spike-$RUN-ci" ci && pushb "ola-spike-$RUN-ci"
-  sha=$LAST_SHA
+  mkbranch "ola-spike-$RUN-ci" ci
+  sha=$LAST_SHA # empty when the branch was not made: mkbranch clears it first
+  if [ -z "$sha" ]; then
+    m 7 "a CI job named agent-review" "not measurable: the branch could not be made"
+    return
+  fi
+  pushb "ola-spike-$RUN-ci"
   m 7 "push a branch with a .gitlab-ci.yml job named agent-review, as the human" "$(push_result)"
-  while [ $i -lt 12 ]; do
+  if [ "$PUSH_RC" != 0 ]; then
+    m 7 "the pipeline of that push" "not measurable: the push failed, so no pipeline can come of it"
+    return
+  fi
+  while [ $i -lt 20 ]; do # 20 looks, NAP seconds apart: 60 s at the default
     api human GET "/projects/$PID/pipelines?sha=$sha"
     [ "$(jb 'length')" != 0 ] && break
-    sleep 5
+    sleep "$NAP"
     i=$((i + 1))
   done
   pl=$(jb '.[0].id // empty')
-  [ -n "$pl" ] || { m 7 "the pipeline of that push" "not measurable: none within 60 s (CI disabled, no runner, or the account not verified)"; return; }
+  [ -n "$pl" ] || { m 7 "the pipeline of that push" "not measurable: none within $((20 * NAP)) s (CI disabled, no runner, or the account not verified)"; return; }
   m 7 "the pipeline of that push" "$(pipelines_of "$sha")"
   api human GET "/projects/$PID/pipelines/$pl/jobs"
   m 7 "jobs of the pipeline (GET /pipelines/:id/jobs)" "$(jb '[.[]? | "\(.name):\(.status)"] | join(", ")')"
@@ -505,7 +528,7 @@ m09() {
   for opt in merge_request.merge_when_pipeline_succeeds merge_request.auto_merge; do
     n=$((n + 1))
     br=ola-spike-$RUN-p$n
-    mkbranch "$br" ci || continue
+    mkbranch "$br" ci || { m 9 "git push -o merge_request.create -o $opt" "not measurable: the branch could not be made"; continue; }
     pushb "$br" -o merge_request.create -o "merge_request.target=$BASE" -o "merge_request.title=ola-spike $RUN P$n" -o "$opt"
     api human GET "/projects/$PID/merge_requests?source_branch=$br"
     iid=$(jb '.[0].iid // empty')
