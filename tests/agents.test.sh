@@ -994,6 +994,154 @@ if grep -q '## Security review' "$ROOT/brief/security-review.md" && grep -q 'tak
 else
   ko "the brief does not say the security review takes no slot"
 fi
+
+# The security review opens on the verdict and the findings; the coverage is folded away at
+# the end. Its template is a section of its own, so that the order, the titles and the words
+# are looked for there and nowhere else. The witness first: the section is found and holds the
+# `<details>` — every absence below is looked for in text that is there.
+sec_comment=$(awk '/^## The comment/{on=1; next} /^## /{on=0} on' "$sec")
+sec_flat() { tr '\n' ' ' | tr -s ' '; }
+sec_step3=$(awk '/^3\. /{on=1} /^4\. /{on=0} on' "$sec" | sec_flat)
+sec_step9=$(awk '/^9\. /{on=1} /^10\. /{on=0} on' "$sec" | sec_flat)
+sec_step10=$(awk '/^10\. /{on=1} /^## /{on=0} on' "$sec" | sec_flat)
+sec_verify=$(awk '/^## Verifying one finding/{on=1} on' "$sec" | sec_flat)
+sec_line() { printf '%s\n' "$sec_comment" | grep -n -m1 -- "$1" | cut -d: -f1; } # line of the first match in the section
+sec_line_from() { # sec_line_from <line> <pattern> — first match of the pattern after that line (empty if none)
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$sec_comment" | FROM=$1 RE=$2 awk 'NR > ENVIRON["FROM"] && $0 ~ ENVIRON["RE"] { print NR; exit }'
+}
+case $sec_comment in
+  *'<details>'*'</details>'*) ok "witness: security-reviewer has a comment section with its <details>" ;;
+  *) ko "witness: security-reviewer has no comment section with a <details>, the checks below look at nothing" ;;
+esac
+case $sec_step3$sec_step9 in
+  *'**Find your previous security review**'*'**Publish**'*) ok "witness: security-reviewer steps 3 and 9 are readable" ;;
+  *) ko "witness: security-reviewer steps 3 and 9 are not where the checks below look" ;;
+esac
+# One form per language: its title, its verdict line, its blocking group, its proof summary.
+for form in 'fr@^    ## Revue de sécurité de@^    \*\*(Changements|Rien)@^### Bloquant$@<summary>Couverture' \
+            'en@^    ## Security review of@^    \*\*(Changes|Nothing)@^### Blocking$@<summary>Coverage'; do
+  IFS='@' read -r f_lang f_title f_verdict f_block f_proof <<<"$form"
+  # Each line is looked for after the one before it, so the other form's lines are not taken.
+  t=$(sec_line "$f_title"); v=$(sec_line_from "$t" "$f_verdict"); b=$(sec_line_from "$t" "$f_block")
+  s=$(sec_line_from "$b" '^### Suggestions$'); d=$(sec_line_from "$s" '^<details>'); p=$(sec_line_from "$b" "$f_proof")
+  # The proof's word, anywhere in the section: its first appearance is the <details>, not a line above.
+  w=$(sec_line "${f_proof#<summary>}")
+  # `-lt` on an empty value is an error, not a false: a missing line must fail, not pass.
+  if [ -n "$t" ] && [ -n "$v" ] && [ -n "$b" ] && [ -n "$s" ] && [ -n "$d" ] &&
+     [ "$t" -lt "$v" ] && [ "$v" -lt "$b" ] && [ "$b" -lt "$s" ] && [ "$s" -lt "$d" ]; then
+    ok "security-reviewer ($f_lang): the comment is title, verdict line, blocking, suggestions, then the <details>"
+  else
+    ko "security-reviewer ($f_lang): the comment does not run title ($t), verdict ($v), blocking ($b), suggestions ($s), <details> ($d)"
+  fi
+  if [ -n "$p" ] && [ -n "$d" ] && [ -n "$b" ] && [ -n "$w" ] && [ "$p" -ge "$d" ] && [ "$p" -gt "$b" ] && [ "$w" -ge "$d" ]; then
+    ok "security-reviewer ($f_lang): the coverage is in the <details>, never before the findings"
+  else
+    ko "security-reviewer ($f_lang): the coverage is not after the <details> opens ($p / $d), or comes before the blocking group ($b)"
+  fi
+done
+# The only headings a comment has. Two spellings of the same three, one per language.
+h3=$(printf '%s\n' "$sec_comment" | grep -E '^### ' | sort -u | tr '\n' '|')
+if [ "$h3" = '### Blocking|### Bloquant|### Bloquants précédents|### Previous blocking findings|### Suggestions|' ]; then
+  ok "security-reviewer: the comment has the groups blocking and suggestions, and the previous blocking findings, no other level"
+else
+  ko "security-reviewer: the headings of the comment are not the expected ones: $h3"
+fi
+for t in '## Revue de sécurité de `<SHA 7>`' '## Revue de sécurité de `<SHA 7>` (delta depuis `<SHA 7>`)' \
+         '## Security review of `<SHA 7>`' '## Security review of `<SHA 7>` (delta from `<SHA 7>`)'; do
+  case $sec_comment in
+    *"    $t"$'\n'*) ok "security-reviewer: the comment has the title: $t" ;;
+    *) ko "security-reviewer: the comment lacks the title: $t" ;;
+  esac
+done
+# The verdict lines, and the marker that says a blocking finding is not yet verified.
+for v in '**Rien à signaler — aucun bloquant.**' '**Changements demandés — N bloquant(s) à vérifier, M suggestion(s).**' \
+         '**Nothing to report — no blocking.**' '**Changes requested — N blocking to verify, M suggestion(s).**'; do
+  case $sec_comment in
+    *"    $v"*) ok "security-reviewer: the comment has the verdict line: $v" ;;
+    *) ko "security-reviewer: the comment lacks the verdict line: $v" ;;
+  esac
+done
+case $sec_comment in
+  *'S2 · haute · à vérifier — `sink:ligne` ← `source:ligne`'*'S2 · high · to verify — `sink:line` ← `source:line`'*)
+    ok "security-reviewer: a blocking finding is marked à vérifier in the template, in both forms" ;;
+  *) ko "security-reviewer: the template does not mark a blocking finding à vérifier" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'A finding a verification refuted is closed: it is no longer counted'*'One a verification confirmed carries `confirmé` (English: `confirmed`) where `à vérifier` stood'*)
+    ok "security-reviewer: a confirmed finding says confirmé, a refuted one is no longer counted" ;;
+  *) ko "security-reviewer: nothing says how a verification changes the marker and the count" ;;
+esac
+case $sec_comment in
+  *'SHA relu : `<40'*'Reviewed SHA: `<40'*) ok "security-reviewer: the full SHA is on a line of the <details>, in both forms" ;;
+  *) ko "security-reviewer: the <details> has no line carrying the full SHA" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'`corrigé`, `contesté : <raison>` or `toujours ouvert` (English: `fixed`, `disputed: <reason>`, `still open`)'*)
+    ok "security-reviewer: a previous blocking finding is fixed, disputed with its reason, or still open" ;;
+  *) ko "security-reviewer: the previous blocking findings have no corrigé / contesté / toujours ouvert" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'`critique`, `haute`, `moyenne`, `basse`'*'`critical`, `high`, `medium`, `low`'*'the gravest first'*'`S1`, `S2`… without restarting between the two groups'*)
+    ok "security-reviewer: severity in words, gravest first, S1, S2 numbered across both groups" ;;
+  *) ko "security-reviewer: the comment does not give the severity in words, its order, or the numbering across groups" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'3 lines at most'*'Do not restate a finding in other words'*'do not tell how you found it'*'do not list the candidates you dropped anywhere but in the folded block of the comment'*)
+    ok "security-reviewer: a finding is 3 lines, with the restatement, the story of the search and the dropped candidates banned outside the <details>" ;;
+  *) ko "security-reviewer: the comment gives no form to a finding, or misses one of its three bans" ;;
+esac
+case $sec_comment in
+  *'Aucun.'*|*'None.'*) ko "security-reviewer: the template has a placeholder line for an empty group" ;;
+  *'A group with no finding is left out, its heading too'*) ok "security-reviewer: an empty group is left out, no placeholder stands in for it" ;;
+  *) ko "security-reviewer: nothing says an empty group is left out" ;;
+esac
+case $sec_comment in
+  *'---'*) ko "security-reviewer: the template has a --- line" ;;
+  *) ok "security-reviewer: the template has no --- line" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'When it is `fr`, write the French form below; for any other language, the English form'*) ok "security-reviewer: the comment is French when the language is fr, English otherwise" ;;
+  *) ko "security-reviewer: nothing says which form follows which language" ;;
+esac
+# Step 3: the previous review is found by the titles of the comment, and by the old title.
+case $sec_step3 in
+  *'starting `## Revue de sécurité de` or `## Security review of`'*'or `Security review of` without `##`'*)
+    ok "security-reviewer: step 3 finds its previous review by both titles and by the old one" ;;
+  *) ko "security-reviewer: step 3 does not name the three beginnings of a previous review" ;;
+esac
+case $sec_step3 in
+  *'`SHA relu : `'*'`Reviewed SHA: `'*'for an older review it is in the title, in full'*'`git rev-parse`'*)
+    ok "security-reviewer: step 3 reads the SHA on its line, in an old title, and resolves it with git rev-parse" ;;
+  *) ko "security-reviewer: step 3 does not say where the reviewed SHA is read, nor how it is resolved" ;;
+esac
+case $sec_step3 in
+  *'diff <(git diff <base>...<reviewed SHA>) <(git diff <base>...<head>)'*) ok "security-reviewer: the delta command is in step 3" ;;
+  *) ko "security-reviewer: the delta command is not in step 3" ;;
+esac
+# Step 9: it publishes the form of the comment, no longer a title of its own; the report keeps
+# `pending verification`, which the coordinator and the brief read.
+case $sec_step9 in
+  *'in the form of *The comment* below'*'`à vérifier`'*'the same text to `security-reviews/<branch>/<SHA>.md`'*)
+    ok "security-reviewer: step 9 publishes the form of the comment, the same text in discreet mode" ;;
+  *) ko "security-reviewer: step 9 does not publish the form of the comment, or changes the discreet text" ;;
+esac
+case $sec_step9$sec_comment in
+  *'Security review of <SHA>'*) ko "security-reviewer: the old title, Security review of <SHA>, is still a title to publish" ;;
+  *) ok "security-reviewer: no title of its own, Security review of <SHA>, is left to publish" ;;
+esac
+case $sec_step10 in
+  *'Blocking findings (pending verification): Sn'*) ok "security-reviewer: the report keeps pending verification, read by the coordinator" ;;
+  *) ko "security-reviewer: the report lost Blocking findings (pending verification)" ;;
+esac
+case $sec_verify in
+  *'`Verification of Sn at <SHA>: confirmed` or `: refuted`'*) ok "security-reviewer: the verification comment is unchanged" ;;
+  *) ko "security-reviewer: the verification comment changed" ;;
+esac
+case $(awk '/^## What a finding is/{on=1} /^## What is not reported/{on=0} on' "$sec" | sec_flat) in
+  *'as a concrete scenario: who, starting from what access, gets what they did not have'*) ok "security-reviewer: a finding still names a concrete scenario" ;;
+  *) ko "security-reviewer: a finding no longer names a concrete scenario" ;;
+esac
 # Two reviewers comment on one request. Each finds its own previous review to compute a
 # delta, and the pr-reviewer taking the security review for its own would review from the
 # wrong SHA.
