@@ -473,6 +473,35 @@ expect_problem '{"mode": "discreet", "pr": {"title": "poetic"}}' 'is not one of 
   'nested enums are checked'
 expect_problem '{"mode": "discreet", "db_hosts_allowed": "pg"}' 'expected array, got string' \
   'an array is not a string'
+# The forge: absent means github (the caller states that default, as for github_tokens), and a
+# value the schema does not know is refused with the two it does.
+expect_problem '{"mode": "discreet", "forge": "bitbucket"}' 'is not one of github, gitlab' \
+  'forge is an enum naming both forges'
+total=$((total + 1))
+printf '%s\n' '{"mode": "discreet", "forge": "gitlab"}' >"$WORK/forge.json"
+if "$CLI" validate "$WORK/forge.json" >/dev/null 2>&1; then
+  echo "ok    validate: forge gitlab is accepted"
+else
+  echo "FAIL  validate: forge gitlab is refused"
+  failures=$((failures + 1))
+fi
+mkrepo "$WORK/forge" "https://github.com/someone/forge-repo.git"
+mkdir -p "$WORK/forge/.claude"
+printf '%s\n' '{"mode": "integrated"}' >"$WORK/forge/.claude/workflow.json"
+eq github "$("$CLI" -C "$WORK/forge" get forge github)" "forge: absent reads as the github default"
+rc 1 "forge: absent, with no default, is not invented" -- "$CLI" -C "$WORK/forge" get forge
+for forge in github gitlab; do
+  printf '{"mode": "integrated", "forge": "%s"}\n' "$forge" >"$WORK/forge/.claude/workflow.json"
+  eq "$forge" "$("$CLI" -C "$WORK/forge" get forge github)" "forge: $forge is read back"
+done
+# A sub-group has no fixed depth: a discreet profile keyed on a self-managed host is found
+# however many segments the path has (the id keeps every one).
+mkrepo "$WORK/deep" "git@gitlab.example.com:a/b/c.git"
+user_profile "gitlab.example.com/a/b/c" '{"mode": "discreet", "forge": "gitlab"}'
+eq "$HOME/.claude/workflow-profiles/gitlab.example.com/a/b/c/profile.json" \
+  "$("$CLI" -C "$WORK/deep" path)" "forge: a discreet profile under a sub-group is found"
+eq gitlab "$("$CLI" -C "$WORK/deep" get forge github)" "forge: read from that profile"
+
 expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": "x", "exclude": "t"}]}}' \
   'expected array, got string' 'a pattern exclusion is a list of globs'
 expect_problem '{"mode": "discreet", "merge": {"sensitive_patterns": [{"regex": "a"}, {"file": "b"}]}}' \
