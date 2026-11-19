@@ -4,6 +4,20 @@ The forge is the memory. An epic is a GitHub issue labelled `epic`, a task is an
 labelled `task`, a review is a PR comment plus a commit status. Nothing important lives
 only in an agent's report: if it matters tomorrow, it is written on an issue or a PR today.
 
+To take the state back, one line per item, bounded:
+
+    gh issue list --label epic --state open --json number,title --jq '.[] | "epic #\(.number) \(.title)"'
+    gh issue list --label task --state open --limit 100 --json number,title,parent --jq '.[] | "task #\(.number) epic #\(.parent.number // "-") \(.title)"'
+    gh pr list --state open --json number,headRefOid,labels,closingIssuesReferences --jq '.[] | "PR #\(.number) \(.headRefOid) \(if any(.labels[]; .name == "RFR") then "RFR" else "-" end) closes \([.closingIssuesReferences[].number | "#\(.)"] | join(","))"'
+
+That is the open epics, the open tasks with their epic, and the open pull requests with
+their head SHA, whether they carry `RFR`, and the task it closes. No issue body and no
+comment at this stage: read the detail when you pick an item up.
+
+Create each task as a sub-issue of its epic, with the `--parent <epic>` option of the issue
+creation: the task-to-epic link then lives on the forge, whatever language the issues are
+in, and the second command above has it to show.
+
 ## Merging — integrated mode
 
 Checked on the forge for the PR's current head SHA, never taken from a report{{#tokens_on}}

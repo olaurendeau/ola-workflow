@@ -1628,7 +1628,6 @@ esac
 # its heading and the next, and the commands out of it, so a mention elsewhere in the file
 # cannot satisfy these.
 resume_state=$(coord_part '^## Resume the state' '^## ')
-resume_state_raw=$(awk '/^## Resume the state/{on=1; next} on && /^## /{exit} on' "$coord")
 step4=$(coord_part '^4\\. \\*\\*Design and split' '^5\\. \\*\\*')
 for part in resume_state step4; do
   if [ -n "${!part}" ]; then
@@ -1653,35 +1652,25 @@ case $resume_state in
   *) ko "coordinator: the state it resumes lacks epics, tasks, or pull requests with head SHA and RFR" ;;
 esac
 case $resume_state in
-  *'epic.md'*'tasks/'*'gh pr list'*'only reads'*)
-    ok "coordinator: in discreet mode, reads the memory directory and the open pull requests" ;;
+  *'epic.md'*'tasks/'*'open pull requests'*'the brief'*)
+    ok "coordinator: in discreet mode, reads the memory directory and the open pull requests, as the brief says" ;;
   *) ko "coordinator: says nothing of resuming the state in discreet mode" ;;
 esac
-resume_cmds=$(printf '%s\n' "$resume_state_raw" | grep -E '^ +gh ' || true)
-case $(printf '%s\n' "$resume_cmds" | grep -c 'gh ') in
-  3) ok "coordinator: resumes the state with three commands" ;;
-  *) ko "coordinator: the state is not three commands: epics, tasks, pull requests" ;;
-esac
-for sub in 'issue list --label epic' 'issue list --label task' 'pr list'; do
-  line=$(printf '%s\n' "$resume_cmds" | grep -F "gh $sub" || true)
-  case $line in
-    *'--jq'*) ok "coordinator: '$sub' prints one line per item, through --jq" ;;
-    *) ko "coordinator: '$sub' is not reduced to one line per item by --jq" ;;
-  esac
-done
-case $resume_cmds in
-  *body*|*comments*) ko "coordinator: the state it resumes reads a body or comments, not one line per item" ;;
-  *) ok "coordinator: the state it resumes reads no body and no comments" ;;
-esac
-case $resume_cmds in
-  *'--limit'*'parent'*'headRefOid'*'closingIssuesReferences'*)
-    ok "coordinator: bounds the task list, and asks the parent, head SHA and closed tasks" ;;
-  *) ko "coordinator: the commands lack --limit, parent, headRefOid or closingIssuesReferences" ;;
+case $resume_state in
+  *'commands the brief'*'Memory section'*)
+    ok "coordinator: takes the state back with the commands the brief's Memory section gives" ;;
+  *) ko "coordinator: does not send the reader to the brief's Memory section for the commands" ;;
 esac
 case $step4 in
-  *'sub-issue of the epic'*'--parent <epic>'*) ok "coordinator: step 4 creates each task as a sub-issue of its epic" ;;
-  *) ko "coordinator: step 4 does not create tasks with --parent, so the task list has no epic to show" ;;
+  *'sub-issue of the epic'*'link each task to its epic'*'the brief says'*)
+    ok "coordinator: step 4 creates each task as a sub-issue, linked the way the brief says" ;;
+  *) ko "coordinator: step 4 does not link each task to its epic the way the brief says" ;;
 esac
+# The commands are the brief's, since a GitLab coordinator needs others and the brief is the
+# one reader of the profile. Reading (`gh pr view`, `gh issue view`, which name the two forges)
+# stays in the prompt; listing and creating do not.
+forbid 'gh (issue|pr) (list|create)' 'a forge command that lists or creates, which the brief gives'
+forbid '--parent' 'the option that links a task to its epic, which the brief gives'
 
 # --- The shape of a pull request description ------------------------------------------
 # The brief states it once, the developer writes it and the pr-reviewer judges it. An agent
@@ -2130,6 +2119,47 @@ discreet=$(brief_for discreet)
 if [ "$(printf '%s' "$integrated" | wc -l)" -gt 20 ]; then ok "the integrated brief has content"; else ko "the integrated brief is empty or nearly so"; fi
 if [ "$(printf '%s' "$discreet" | wc -l)" -gt 20 ]; then ok "the discreet brief has content"; else ko "the discreet brief is empty or nearly so"; fi
 
+# The commands that take the coordinator's state back from the forge, and the link of a task
+# to its epic, are the brief's: the coordinator points at them, it does not spell them.
+integrated_resume=$(printf '%s\n' "$integrated" | grep -E '^ +gh (issue|pr) list ' || true)
+case $(printf '%s\n' "$integrated_resume" | grep -c 'gh ') in
+  3) ok "integrated: the brief gives three commands to resume the state: epics, tasks, pull requests" ;;
+  *) ko "integrated: the brief does not give exactly three commands to resume the state" ;;
+esac
+for sub in 'issue list --label epic' 'issue list --label task' 'pr list'; do
+  line=$(printf '%s\n' "$integrated_resume" | grep -F "gh $sub" || true)
+  case $line in
+    *'--jq'*) ok "integrated: '$sub' prints one line per item, through --jq" ;;
+    *) ko "integrated: '$sub' is missing from the brief or not reduced to one line per item by --jq" ;;
+  esac
+done
+case $integrated_resume in
+  *body*|*comments*) ko "integrated: the state the brief resumes reads a body or comments, not one line per item" ;;
+  *) ok "integrated: the state the brief resumes reads no body and no comments" ;;
+esac
+case $integrated_resume in
+  *'--limit'*'parent'*'headRefOid'*'closingIssuesReferences'*)
+    ok "integrated: the brief bounds the task list, and asks the parent, head SHA and closed tasks" ;;
+  *) ko "integrated: the brief's commands lack --limit, parent, headRefOid or closingIssuesReferences" ;;
+esac
+case $integrated in
+  *'sub-issue'*'--parent <epic>'*) ok "integrated: the brief links each task to its epic with --parent <epic>" ;;
+  *) ko "integrated: the brief does not give --parent <epic>, so the task list has no epic to show" ;;
+esac
+discreet_resume=$(printf '%s\n' "$discreet" | grep -E '^ +gh (issue|pr) ' || true)
+case $discreet_resume in
+  *'gh pr list --state open'*'headRefOid'*'closingIssuesReferences'*) ok "discreet: the brief gives the gh pr list that reads the open pull requests" ;;
+  *) ko "discreet: the brief does not give the gh pr list that reads the open pull requests" ;;
+esac
+case $discreet in
+  *'gh pr list'*'only reads'*) ok "discreet: the brief says that gh pr list only reads" ;;
+  *) ko "discreet: the brief does not say that gh pr list only reads" ;;
+esac
+case $discreet_resume in
+  *'issue list'*|*'issue create'*|*'pr create'*) ko "discreet: the brief gives a forge command other than reading the pull requests" ;;
+  *) ok "discreet: the brief gives no forge command but the reading of the pull requests" ;;
+esac
+
 # Both modes resolve the profile rather than assuming anything.
 for pair in "integrated:$integrated" "discreet:$discreet"; do
   mode=${pair%%:*}
@@ -2342,7 +2372,14 @@ case $integrated in
   *'gh label create RFR'*) ok "integrated: the brief says how to create the RFR label" ;;
   *) ko "integrated: the brief gives no command to create the RFR label" ;;
 esac
-case $discreet in
+# The one RFR the discreet brief has is the word the read-only `gh pr list` prints for a label
+# somebody else put there: only that exact line is set aside, anything else naming RFR is a trace
+# (another `gh pr list`, or a command chained after it, included).
+reader_line=$(cat <<'LINE'
+    gh pr list --state open --json number,headRefOid,labels,closingIssuesReferences --jq '.[] | "PR #\(.number) \(.headRefOid) \(if any(.labels[]; .name == "RFR") then "RFR" else "-" end) closes \([.closingIssuesReferences[].number | "#\(.)"] | join(","))"'
+LINE
+)
+case $(printf '%s\n' "$discreet" | grep -vxF -- "$reader_line") in
   *RFR*) ko "discreet: the brief mentions the RFR label, and the workflow leaves no trace there" ;;
   *) ok "discreet: the brief says nothing of the RFR label" ;;
 esac
