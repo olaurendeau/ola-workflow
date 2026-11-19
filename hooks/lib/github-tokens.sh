@@ -35,14 +35,15 @@ ola_token_permissions() { # ola_token_permissions <kind>
 
 ola_token_service() { printf 'ola-workflow-%s' "$1"; }
 
-# ola_token_read <kind> → the token on stdout, or 1 when there is none. An empty answer is
+# ola_token_read <kind> [account] → the token on stdout, or 1 when there is none. The account
+# is the keychain's and defaults to ola-workflow. An empty answer is
 # a missing token: `GH_TOKEN=` empty makes gh fall back to the human's own login, which
 # is the one outcome this file exists to prevent.
 ola_token_read() {
   local token
   command -v security >/dev/null 2>&1 || return 1
   token=$(security find-generic-password -s "$(ola_token_service "$1")" \
-            -a "$OLA_TOKEN_ACCOUNT" -w 2>/dev/null) || return 1
+            -a "${2:-$OLA_TOKEN_ACCOUNT}" -w 2>/dev/null) || return 1
   [ -n "$token" ] || return 1
   printf '%s' "$token"
 }

@@ -31,7 +31,7 @@ cat >"$WORK/bin/security" <<EOF
 shift
 svc=""
 while [ \$# -gt 0 ]; do
-  case \$1 in -s) svc=\$2; shift 2 ;; -a) shift 2 ;; *) shift ;; esac
+  case \$1 in -s) svc=\$2; shift 2 ;; -a) printf '%s\\n' "\$2" >>"$WORK/accounts"; shift 2 ;; *) shift ;; esac
 done
 [ -s "$KEYCHAIN/\$svc" ] || { echo "security: item not found" >&2; exit 44; }
 cat "$KEYCHAIN/\$svc"
@@ -52,6 +52,8 @@ NOWHERE=$WORK/nowhere
 mkdir -p "$NOWHERE"
 INTEGRATED=$(project integrated '{"mode":"integrated"}')
 DISCREET=$(project discreet '{"mode":"discreet"}')
+GITLAB=$(project gitlab '{"mode":"integrated","forge":"gitlab"}')
+GITHUB=$(project github '{"mode":"integrated","forge":"github"}')
 OFF=$(project off '{"mode":"integrated","github_tokens":"off"}')
 CUSTOM=$(project custom '{"mode":"integrated","merge":{"review_status":"ci.review"}}')
 ODD=$(project odd '{"mode":"integrated","merge":{"review_status":"c++-review"}}')
@@ -68,7 +70,7 @@ elevate() { # elevate <dir> <agent_type> <command> → the hook's stdout
 }
 
 # elevated <kind> <dir> <agent_type> <command>: allowed, rewritten through with-token.sh
-# with that kind, the original command intact at the end, the other input fields kept.
+# with the forge (github) and that kind, the original command intact at the end, the other input fields kept.
 elevated() {
   local kind=$1 dir=$2 agent=$3 cmd=$4 out err
   err=$WORK/err; : >"$err"
@@ -77,7 +79,7 @@ elevated() {
     ko "elevated $kind: '$cmd' wrote to stderr: $(head -1 "$err")"
   elif [ "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$out" 2>/dev/null)" = allow ] &&
      [ "$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$out")" = \
-       "bash $(printf '%q' "$ROOT/hooks/lib/with-token.sh") $kind $cmd" ] &&
+       "bash $(printf '%q' "$ROOT/hooks/lib/with-token.sh") github $kind $cmd" ] &&
      [ "$(jq -r '.hookSpecificOutput.updatedInput.description' <<<"$out")" = kept ]; then
     ok "elevated $kind (${agent#ola-workflow:}): $cmd"
   else
@@ -115,6 +117,20 @@ elevated review "$INTEGRATED" "$R" "gh api -X POST repos/o/r/statuses/$SHA -f co
 elevated review "$INTEGRATED" "$R" "gh api --method POST repos/{owner}/{repo}/statuses/$SHA -f state=pending -f context=agent-review"
 elevated review "$INTEGRATED" "$R" "$STATUS -f description='\$(not run) \`literal\` ; | &'"
 elevated review "$CUSTOM"     "$R" "gh api repos/o/r/statuses/$SHA -f state=success -f context=ci.review"
+
+# The profile may name the forge; github is the default and the same answer.
+elevated merge  "$GITHUB" "$C" "$MERGE"
+elevated review "$GITHUB" "$R" "$STATUS"
+
+# A GitHub form in a project hosted on GitLab is not that project's form: it passes untouched.
+untouched "$GITLAB" "$C" "$MERGE"
+untouched "$GITLAB" "$R" "$STATUS"
+# GitLab's own forms are not elevated yet, whatever the role.
+untouched "$GITLAB" "$C" "glab mr merge 12 --squash --sha $SHA"
+untouched "$GITLAB" "$R" "glab api projects/1/statuses/$SHA -f state=success -f name=agent-review"
+# And a GitLab form in a GitHub project is no GitHub form.
+untouched "$INTEGRATED" "$C" "glab mr merge 12 --squash --sha $SHA"
+untouched "$GITHUB"     "$R" "glab api projects/1/statuses/$SHA -f state=success -f name=agent-review"
 
 # Another role, or no role, or someone else's agent with the same name.
 untouched "$INTEGRATED" "$D" "$MERGE"
@@ -188,25 +204,50 @@ if [ -z "$out" ] && [ "$rc" = 0 ]; then ok "untouched: without jq, nothing is el
 
 # ----------------------------------------------------------------- with-token.sh
 store merge merge-token-value
-out=$(bash "$ROOT/hooks/lib/with-token.sh" merge printenv GH_TOKEN 2>&1); rc=$?
+out=$(bash "$ROOT/hooks/lib/with-token.sh" github merge printenv GH_TOKEN 2>&1); rc=$?
 if [ "$rc" = 0 ] && [ "$out" = merge-token-value ]; then
   ok "with-token: the command runs with that kind's token"
 else
   ko "with-token: expected merge-token-value, exit $rc: $out"
 fi
 forget review
-out=$(GH_TOKEN=session-token bash "$ROOT/hooks/lib/with-token.sh" review printenv GH_TOKEN 2>"$WORK/err"); rc=$?
+out=$(GH_TOKEN=session-token bash "$ROOT/hooks/lib/with-token.sh" github review printenv GH_TOKEN 2>"$WORK/err"); rc=$?
 if [ "$rc" = 3 ] && [ -z "$out" ] && grep -q 'ola-workflow-tokens setup review' "$WORK/err"; then
   ok "with-token: no token, nothing runs, and the message names the fix"
 else
   ko "with-token: with no review token, exit $rc, ran: '$out', said: $(cat "$WORK/err")"
 fi
 store review ""
-out=$(bash "$ROOT/hooks/lib/with-token.sh" review printenv GH_TOKEN 2>/dev/null); rc=$?
+out=$(bash "$ROOT/hooks/lib/with-token.sh" github review printenv GH_TOKEN 2>/dev/null); rc=$?
 if [ "$rc" = 3 ] && [ -z "$out" ]; then
   ok "with-token: an empty token is a missing one"
 else
   ko "with-token: an empty token ran the command (exit $rc, '$out')"
+fi
+
+# The forge comes first. One that is unknown, or missing, runs nothing; GitLab has no token
+# to lend yet, so it runs nothing either.
+for args in "merge printenv GH_TOKEN" "gitlab merge printenv GH_TOKEN" "bitbucket merge printenv GH_TOKEN" "github"; do
+  # shellcheck disable=SC2086
+  out=$(bash "$ROOT/hooks/lib/with-token.sh" $args 2>/dev/null); rc=$?
+  if [ "$rc" != 0 ] && [ -z "$out" ]; then
+    ok "with-token: '$args' runs nothing"
+  else
+    ko "with-token: '$args' ran (exit $rc, '$out')"
+  fi
+done
+
+# ola_token_read: the default account is unchanged, and another one can be asked for.
+# shellcheck source=hooks/lib/github-tokens.sh
+. "$ROOT/hooks/lib/github-tokens.sh"
+store merge merge-token-value
+: >"$WORK/accounts"
+ola_token_read merge >/dev/null
+ola_token_read merge other-account >/dev/null
+if [ "$(tr '\n' ' ' <"$WORK/accounts")" = "ola-workflow other-account " ]; then
+  ok "ola_token_read: the default account is ola-workflow, an account can be given"
+else
+  ko "ola_token_read: accounts asked for were: $(tr '\n' ' ' <"$WORK/accounts")"
 fi
 
 # ------------------------------------------------------------------- session.sh
@@ -262,8 +303,6 @@ fi
 # ----------------------------------------------------- what the tokens may do
 # The two rights that matter, read from the one table, so that a change to it is a change
 # this suite sees.
-# shellcheck source=hooks/lib/github-tokens.sh
-. "$ROOT/hooks/lib/github-tokens.sh"
 for kind in base review; do
   case "&$(ola_token_permissions $kind)&" in
     *"&contents=write&"*) ko "the $kind token can merge (contents=write)" ;;
