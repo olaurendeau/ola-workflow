@@ -2,7 +2,7 @@
 # Finds and reads the profile of the project the session is working on.
 #
 # Two places, in this order:
-#   1. $HOME/.claude/workflow-profiles/<host>/<owner>/<repo>/profile.json   yours
+#   1. $HOME/.claude/workflow-profiles/<host>/<path>/profile.json   yours
 #   2. <git toplevel>/.claude/workflow.json                                the project's
 # Where the file lives says who owns it; the `mode` key inside says how to behave.
 # The identity in (1) comes from `git remote get-url upstream || origin`, so a fork is
@@ -49,7 +49,7 @@ ola_profile_component_ok() {
   return 0
 }
 
-# ola_profile_url_id <url> → <host>/<owner>/<repo>, the profile directory of a remote.
+# ola_profile_url_id <url> → <host>/<path>, the profile directory of a remote.
 # Handles scp-like (git@host:owner/repo.git), ssh://, https:// with credentials and a
 # port, git://, file:// and plain paths, and GitLab subgroups (the owner may hold slashes).
 #

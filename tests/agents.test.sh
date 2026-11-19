@@ -994,6 +994,154 @@ if grep -q '## Security review' "$ROOT/brief/security-review.md" && grep -q 'tak
 else
   ko "the brief does not say the security review takes no slot"
 fi
+
+# The security review opens on the verdict and the findings; the coverage is folded away at
+# the end. Its template is a section of its own, so that the order, the titles and the words
+# are looked for there and nowhere else. The witness first: the section is found and holds the
+# `<details>` — every absence below is looked for in text that is there.
+sec_comment=$(awk '/^## The comment/{on=1; next} /^## /{on=0} on' "$sec")
+sec_flat() { tr '\n' ' ' | tr -s ' '; }
+sec_step3=$(awk '/^3\. /{on=1} /^4\. /{on=0} on' "$sec" | sec_flat)
+sec_step9=$(awk '/^9\. /{on=1} /^10\. /{on=0} on' "$sec" | sec_flat)
+sec_step10=$(awk '/^10\. /{on=1} /^## /{on=0} on' "$sec" | sec_flat)
+sec_verify=$(awk '/^## Verifying one finding/{on=1} on' "$sec" | sec_flat)
+sec_line() { printf '%s\n' "$sec_comment" | grep -n -m1 -- "$1" | cut -d: -f1; } # line of the first match in the section
+sec_line_from() { # sec_line_from <line> <pattern> — first match of the pattern after that line (empty if none)
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$sec_comment" | FROM=$1 RE=$2 awk 'NR > ENVIRON["FROM"] && $0 ~ ENVIRON["RE"] { print NR; exit }'
+}
+case $sec_comment in
+  *'<details>'*'</details>'*) ok "witness: security-reviewer has a comment section with its <details>" ;;
+  *) ko "witness: security-reviewer has no comment section with a <details>, the checks below look at nothing" ;;
+esac
+case $sec_step3$sec_step9 in
+  *'**Find your previous security review**'*'**Publish**'*) ok "witness: security-reviewer steps 3 and 9 are readable" ;;
+  *) ko "witness: security-reviewer steps 3 and 9 are not where the checks below look" ;;
+esac
+# One form per language: its title, its verdict line, its blocking group, its proof summary.
+for form in 'fr@^    ## Revue de sécurité de@^    \*\*(Changements|Rien)@^### Bloquant$@<summary>Couverture' \
+            'en@^    ## Security review of@^    \*\*(Changes|Nothing)@^### Blocking$@<summary>Coverage'; do
+  IFS='@' read -r f_lang f_title f_verdict f_block f_proof <<<"$form"
+  # Each line is looked for after the one before it, so the other form's lines are not taken.
+  t=$(sec_line "$f_title"); v=$(sec_line_from "$t" "$f_verdict"); b=$(sec_line_from "$t" "$f_block")
+  s=$(sec_line_from "$b" '^### Suggestions$'); d=$(sec_line_from "$s" '^<details>'); p=$(sec_line_from "$b" "$f_proof")
+  # The proof's word, anywhere in the section: its first appearance is the <details>, not a line above.
+  w=$(sec_line "${f_proof#<summary>}")
+  # `-lt` on an empty value is an error, not a false: a missing line must fail, not pass.
+  if [ -n "$t" ] && [ -n "$v" ] && [ -n "$b" ] && [ -n "$s" ] && [ -n "$d" ] &&
+     [ "$t" -lt "$v" ] && [ "$v" -lt "$b" ] && [ "$b" -lt "$s" ] && [ "$s" -lt "$d" ]; then
+    ok "security-reviewer ($f_lang): the comment is title, verdict line, blocking, suggestions, then the <details>"
+  else
+    ko "security-reviewer ($f_lang): the comment does not run title ($t), verdict ($v), blocking ($b), suggestions ($s), <details> ($d)"
+  fi
+  if [ -n "$p" ] && [ -n "$d" ] && [ -n "$b" ] && [ -n "$w" ] && [ "$p" -ge "$d" ] && [ "$p" -gt "$b" ] && [ "$w" -ge "$d" ]; then
+    ok "security-reviewer ($f_lang): the coverage is in the <details>, never before the findings"
+  else
+    ko "security-reviewer ($f_lang): the coverage is not after the <details> opens ($p / $d), or comes before the blocking group ($b)"
+  fi
+done
+# The only headings a comment has. Two spellings of the same three, one per language.
+h3=$(printf '%s\n' "$sec_comment" | grep -E '^### ' | sort -u | tr '\n' '|')
+if [ "$h3" = '### Blocking|### Bloquant|### Bloquants précédents|### Previous blocking findings|### Suggestions|' ]; then
+  ok "security-reviewer: the comment has the groups blocking and suggestions, and the previous blocking findings, no other level"
+else
+  ko "security-reviewer: the headings of the comment are not the expected ones: $h3"
+fi
+for t in '## Revue de sécurité de `<SHA 7>`' '## Revue de sécurité de `<SHA 7>` (delta depuis `<SHA 7>`)' \
+         '## Security review of `<SHA 7>`' '## Security review of `<SHA 7>` (delta from `<SHA 7>`)'; do
+  case $sec_comment in
+    *"    $t"$'\n'*) ok "security-reviewer: the comment has the title: $t" ;;
+    *) ko "security-reviewer: the comment lacks the title: $t" ;;
+  esac
+done
+# The verdict lines, and the marker that says a blocking finding is not yet verified.
+for v in '**Rien à signaler — aucun bloquant.**' '**Changements demandés — N bloquant(s) à vérifier, M suggestion(s).**' \
+         '**Nothing to report — no blocking.**' '**Changes requested — N blocking to verify, M suggestion(s).**'; do
+  case $sec_comment in
+    *"    $v"*) ok "security-reviewer: the comment has the verdict line: $v" ;;
+    *) ko "security-reviewer: the comment lacks the verdict line: $v" ;;
+  esac
+done
+case $sec_comment in
+  *'S2 · haute · à vérifier — `sink:ligne` ← `source:ligne`'*'S2 · high · to verify — `sink:line` ← `source:line`'*)
+    ok "security-reviewer: a blocking finding is marked à vérifier in the template, in both forms" ;;
+  *) ko "security-reviewer: the template does not mark a blocking finding à vérifier" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'A finding a verification refuted is closed: it is no longer counted'*'One a verification confirmed carries `confirmé` (English: `confirmed`) where `à vérifier` stood'*)
+    ok "security-reviewer: a confirmed finding says confirmé, a refuted one is no longer counted" ;;
+  *) ko "security-reviewer: nothing says how a verification changes the marker and the count" ;;
+esac
+case $sec_comment in
+  *'SHA relu : `<40'*'Reviewed SHA: `<40'*) ok "security-reviewer: the full SHA is on a line of the <details>, in both forms" ;;
+  *) ko "security-reviewer: the <details> has no line carrying the full SHA" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'`corrigé`, `contesté : <raison>` or `toujours ouvert` (English: `fixed`, `disputed: <reason>`, `still open`)'*)
+    ok "security-reviewer: a previous blocking finding is fixed, disputed with its reason, or still open" ;;
+  *) ko "security-reviewer: the previous blocking findings have no corrigé / contesté / toujours ouvert" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'`critique`, `haute`, `moyenne`, `basse`'*'`critical`, `high`, `medium`, `low`'*'the gravest first'*'`S1`, `S2`… without restarting between the two groups'*)
+    ok "security-reviewer: severity in words, gravest first, S1, S2 numbered across both groups" ;;
+  *) ko "security-reviewer: the comment does not give the severity in words, its order, or the numbering across groups" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'3 lines at most'*'Do not restate a finding in other words'*'do not tell how you found it'*'do not list the candidates you dropped anywhere but in the folded block of the comment'*)
+    ok "security-reviewer: a finding is 3 lines, with the restatement, the story of the search and the dropped candidates banned outside the <details>" ;;
+  *) ko "security-reviewer: the comment gives no form to a finding, or misses one of its three bans" ;;
+esac
+case $sec_comment in
+  *'Aucun.'*|*'None.'*) ko "security-reviewer: the template has a placeholder line for an empty group" ;;
+  *'A group with no finding is left out, its heading too'*) ok "security-reviewer: an empty group is left out, no placeholder stands in for it" ;;
+  *) ko "security-reviewer: nothing says an empty group is left out" ;;
+esac
+case $sec_comment in
+  *'---'*) ko "security-reviewer: the template has a --- line" ;;
+  *) ok "security-reviewer: the template has no --- line" ;;
+esac
+case $(printf '%s' "$sec_comment" | sec_flat) in
+  *'When it is `fr`, write the French form below; for any other language, the English form'*) ok "security-reviewer: the comment is French when the language is fr, English otherwise" ;;
+  *) ko "security-reviewer: nothing says which form follows which language" ;;
+esac
+# Step 3: the previous review is found by the titles of the comment, and by the old title.
+case $sec_step3 in
+  *'starting `## Revue de sécurité de` or `## Security review of`'*'or `Security review of` without `##`'*)
+    ok "security-reviewer: step 3 finds its previous review by both titles and by the old one" ;;
+  *) ko "security-reviewer: step 3 does not name the three beginnings of a previous review" ;;
+esac
+case $sec_step3 in
+  *'`SHA relu : `'*'`Reviewed SHA: `'*'for an older review it is in the title, in full'*'`git rev-parse`'*)
+    ok "security-reviewer: step 3 reads the SHA on its line, in an old title, and resolves it with git rev-parse" ;;
+  *) ko "security-reviewer: step 3 does not say where the reviewed SHA is read, nor how it is resolved" ;;
+esac
+case $sec_step3 in
+  *'diff <(git diff <base>...<reviewed SHA>) <(git diff <base>...<head>)'*) ok "security-reviewer: the delta command is in step 3" ;;
+  *) ko "security-reviewer: the delta command is not in step 3" ;;
+esac
+# Step 9: it publishes the form of the comment, no longer a title of its own; the report keeps
+# `pending verification`, which the coordinator and the brief read.
+case $sec_step9 in
+  *'in the form of *The comment* below'*'`à vérifier`'*'the same text to `security-reviews/<branch>/<SHA>.md`'*)
+    ok "security-reviewer: step 9 publishes the form of the comment, the same text in discreet mode" ;;
+  *) ko "security-reviewer: step 9 does not publish the form of the comment, or changes the discreet text" ;;
+esac
+case $sec_step9$sec_comment in
+  *'Security review of <SHA>'*) ko "security-reviewer: the old title, Security review of <SHA>, is still a title to publish" ;;
+  *) ok "security-reviewer: no title of its own, Security review of <SHA>, is left to publish" ;;
+esac
+case $sec_step10 in
+  *'Blocking findings (pending verification): Sn'*) ok "security-reviewer: the report keeps pending verification, read by the coordinator" ;;
+  *) ko "security-reviewer: the report lost Blocking findings (pending verification)" ;;
+esac
+case $sec_verify in
+  *'`Verification of Sn at <SHA>: confirmed` or `: refuted`'*) ok "security-reviewer: the verification comment is unchanged" ;;
+  *) ko "security-reviewer: the verification comment changed" ;;
+esac
+case $(awk '/^## What a finding is/{on=1} /^## What is not reported/{on=0} on' "$sec" | sec_flat) in
+  *'as a concrete scenario: who, starting from what access, gets what they did not have'*) ok "security-reviewer: a finding still names a concrete scenario" ;;
+  *) ko "security-reviewer: a finding no longer names a concrete scenario" ;;
+esac
 # Two reviewers comment on one request. Each finds its own previous review to compute a
 # delta, and the pr-reviewer taking the security review for its own would review from the
 # wrong SHA.
@@ -1303,6 +1451,12 @@ forbid_key verify_ui '(playwright|maestro|simctl|ios-simulator|--width [0-9])' \
 # What a prompt that hard-codes a preview would write: a dev server command or its address.
 forbid_key preview '(npm run dev|yarn dev|pnpm dev|rails server|https?://localhost)' \
   'a way of starting a preview'
+# Which forge a project is on is the profile's, and what each forge is told is the brief's:
+# a prompt that runs glab, passes a merge_request push option or names its token has chosen for
+# everyone. A `glab` command is `glab <subcommand>`: the coordinator's "the `glab` equivalent"
+# (agents/coordinator.md, on reading a link) names the tool and runs nothing.
+forbid_key forge '\bglab [a-z]|merge_request\.|GITLAB_TOKEN' \
+  'a GitLab command or token'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
 # The paths that get a security review, and the command that matches them, are the brief's:
 # a prompt that lists them has decided for every project which files are worth a look.
@@ -1480,7 +1634,6 @@ esac
 # its heading and the next, and the commands out of it, so a mention elsewhere in the file
 # cannot satisfy these.
 resume_state=$(coord_part '^## Resume the state' '^## ')
-resume_state_raw=$(awk '/^## Resume the state/{on=1; next} on && /^## /{exit} on' "$coord")
 step4=$(coord_part '^4\\. \\*\\*Design and split' '^5\\. \\*\\*')
 for part in resume_state step4; do
   if [ -n "${!part}" ]; then
@@ -1505,35 +1658,25 @@ case $resume_state in
   *) ko "coordinator: the state it resumes lacks epics, tasks, or pull requests with head SHA and RFR" ;;
 esac
 case $resume_state in
-  *'epic.md'*'tasks/'*'gh pr list'*'only reads'*)
-    ok "coordinator: in discreet mode, reads the memory directory and the open pull requests" ;;
+  *'epic.md'*'tasks/'*'open pull requests'*'the brief'*)
+    ok "coordinator: in discreet mode, reads the memory directory and the open pull requests, as the brief says" ;;
   *) ko "coordinator: says nothing of resuming the state in discreet mode" ;;
 esac
-resume_cmds=$(printf '%s\n' "$resume_state_raw" | grep -E '^ +gh ' || true)
-case $(printf '%s\n' "$resume_cmds" | grep -c 'gh ') in
-  3) ok "coordinator: resumes the state with three commands" ;;
-  *) ko "coordinator: the state is not three commands: epics, tasks, pull requests" ;;
-esac
-for sub in 'issue list --label epic' 'issue list --label task' 'pr list'; do
-  line=$(printf '%s\n' "$resume_cmds" | grep -F "gh $sub" || true)
-  case $line in
-    *'--jq'*) ok "coordinator: '$sub' prints one line per item, through --jq" ;;
-    *) ko "coordinator: '$sub' is not reduced to one line per item by --jq" ;;
-  esac
-done
-case $resume_cmds in
-  *body*|*comments*) ko "coordinator: the state it resumes reads a body or comments, not one line per item" ;;
-  *) ok "coordinator: the state it resumes reads no body and no comments" ;;
-esac
-case $resume_cmds in
-  *'--limit'*'parent'*'headRefOid'*'closingIssuesReferences'*)
-    ok "coordinator: bounds the task list, and asks the parent, head SHA and closed tasks" ;;
-  *) ko "coordinator: the commands lack --limit, parent, headRefOid or closingIssuesReferences" ;;
+case $resume_state in
+  *'commands the brief'*'Memory section'*)
+    ok "coordinator: takes the state back with the commands the brief's Memory section gives" ;;
+  *) ko "coordinator: does not send the reader to the brief's Memory section for the commands" ;;
 esac
 case $step4 in
-  *'sub-issue of the epic'*'--parent <epic>'*) ok "coordinator: step 4 creates each task as a sub-issue of its epic" ;;
-  *) ko "coordinator: step 4 does not create tasks with --parent, so the task list has no epic to show" ;;
+  *'sub-issue of the epic'*'link each task to its epic'*'the brief says'*)
+    ok "coordinator: step 4 creates each task as a sub-issue, linked the way the brief says" ;;
+  *) ko "coordinator: step 4 does not link each task to its epic the way the brief says" ;;
 esac
+# The commands are the brief's, since a GitLab coordinator needs others and the brief is the
+# one reader of the profile. Reading (`gh pr view`, `gh issue view`, which name the two forges)
+# stays in the prompt; listing and creating do not.
+forbid 'gh (issue|pr) (list|create)' 'a forge command that lists or creates, which the brief gives'
+forbid '--parent' 'the option that links a task to its epic, which the brief gives'
 
 # --- The shape of a pull request description ------------------------------------------
 # The brief states it once, the developer writes it and the pr-reviewer judges it. An agent
@@ -1982,6 +2125,47 @@ discreet=$(brief_for discreet)
 if [ "$(printf '%s' "$integrated" | wc -l)" -gt 20 ]; then ok "the integrated brief has content"; else ko "the integrated brief is empty or nearly so"; fi
 if [ "$(printf '%s' "$discreet" | wc -l)" -gt 20 ]; then ok "the discreet brief has content"; else ko "the discreet brief is empty or nearly so"; fi
 
+# The commands that take the coordinator's state back from the forge, and the link of a task
+# to its epic, are the brief's: the coordinator points at them, it does not spell them.
+integrated_resume=$(printf '%s\n' "$integrated" | grep -E '^ +gh (issue|pr) list ' || true)
+case $(printf '%s\n' "$integrated_resume" | grep -c 'gh ') in
+  3) ok "integrated: the brief gives three commands to resume the state: epics, tasks, pull requests" ;;
+  *) ko "integrated: the brief does not give exactly three commands to resume the state" ;;
+esac
+for sub in 'issue list --label epic' 'issue list --label task' 'pr list'; do
+  line=$(printf '%s\n' "$integrated_resume" | grep -F "gh $sub" || true)
+  case $line in
+    *'--jq'*) ok "integrated: '$sub' prints one line per item, through --jq" ;;
+    *) ko "integrated: '$sub' is missing from the brief or not reduced to one line per item by --jq" ;;
+  esac
+done
+case $integrated_resume in
+  *body*|*comments*) ko "integrated: the state the brief resumes reads a body or comments, not one line per item" ;;
+  *) ok "integrated: the state the brief resumes reads no body and no comments" ;;
+esac
+case $integrated_resume in
+  *'--limit'*'parent'*'headRefOid'*'closingIssuesReferences'*)
+    ok "integrated: the brief bounds the task list, and asks the parent, head SHA and closed tasks" ;;
+  *) ko "integrated: the brief's commands lack --limit, parent, headRefOid or closingIssuesReferences" ;;
+esac
+case $integrated in
+  *'sub-issue'*'--parent <epic>'*) ok "integrated: the brief links each task to its epic with --parent <epic>" ;;
+  *) ko "integrated: the brief does not give --parent <epic>, so the task list has no epic to show" ;;
+esac
+discreet_resume=$(printf '%s\n' "$discreet" | grep -E '^ +gh (issue|pr) ' || true)
+case $discreet_resume in
+  *'gh pr list --state open'*'headRefOid'*'closingIssuesReferences'*) ok "discreet: the brief gives the gh pr list that reads the open pull requests" ;;
+  *) ko "discreet: the brief does not give the gh pr list that reads the open pull requests" ;;
+esac
+case $discreet in
+  *'gh pr list'*'only reads'*) ok "discreet: the brief says that gh pr list only reads" ;;
+  *) ko "discreet: the brief does not say that gh pr list only reads" ;;
+esac
+case $discreet_resume in
+  *'issue list'*|*'issue create'*|*'pr create'*) ko "discreet: the brief gives a forge command other than reading the pull requests" ;;
+  *) ok "discreet: the brief gives no forge command but the reading of the pull requests" ;;
+esac
+
 # Both modes resolve the profile rather than assuming anything.
 for pair in "integrated:$integrated" "discreet:$discreet"; do
   mode=${pair%%:*}
@@ -2194,7 +2378,14 @@ case $integrated in
   *'gh label create RFR'*) ok "integrated: the brief says how to create the RFR label" ;;
   *) ko "integrated: the brief gives no command to create the RFR label" ;;
 esac
-case $discreet in
+# The one RFR the discreet brief has is the word the read-only `gh pr list` prints for a label
+# somebody else put there: only that exact line is set aside, anything else naming RFR is a trace
+# (another `gh pr list`, or a command chained after it, included).
+reader_line=$(cat <<'LINE'
+    gh pr list --state open --json number,headRefOid,labels,closingIssuesReferences --jq '.[] | "PR #\(.number) \(.headRefOid) \(if any(.labels[]; .name == "RFR") then "RFR" else "-" end) closes \([.closingIssuesReferences[].number | "#\(.)"] | join(","))"'
+LINE
+)
+case $(printf '%s\n' "$discreet" | grep -vxF -- "$reader_line") in
   *RFR*) ko "discreet: the brief mentions the RFR label, and the workflow leaves no trace there" ;;
   *) ok "discreet: the brief says nothing of the RFR label" ;;
 esac
@@ -2647,6 +2838,31 @@ case $out in
   *trunk*|*"just check"*) ko "no profile: the refusal leaked another project's values" ;;
   *) ok "no profile: nothing is guessed" ;;
 esac
+
+# A GitLab project is stopped before any rule is printed: until the brief has a GitLab text,
+# it would dictate gh commands and promise refusals nobody applies. Nothing on stdout, the
+# refusal on stderr, exit 1; and the same profile on GitHub still gets its brief.
+mkdir -p "$WORK/gitlab/.claude"
+git -C "$WORK/gitlab" -c init.defaultBranch=main init -q 2>/dev/null
+printf '{"mode":"integrated","forge":"gitlab"}\n' >"$WORK/gitlab/.claude/workflow.json"
+glout=$("$BRIEF" "$WORK/gitlab" 2>"$WORK/gitlab.err")
+glstatus=$?
+if [ "$glstatus" = 1 ] && [ -z "$glout" ]; then
+  ok "forge gitlab: the brief exits 1 and prints nothing on stdout"
+else
+  ko "forge gitlab: exit $glstatus, stdout '${glout:-nothing}'"
+fi
+case $(cat "$WORK/gitlab.err") in
+  *'GitLab is not supported by this version yet'*'remove the key.'*)
+    ok "forge gitlab: the refusal is on stderr, with the way out" ;;
+  *) ko "forge gitlab: the refusal is not on stderr" ;;
+esac
+printf '{"mode":"integrated","forge":"github"}\n' >"$WORK/gitlab/.claude/workflow.json"
+if "$BRIEF" "$WORK/gitlab" >/dev/null 2>&1; then
+  ok "forge github: the brief is printed"
+else
+  ko "forge github: the brief is refused"
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total agent test(s) failed"

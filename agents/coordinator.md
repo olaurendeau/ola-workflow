@@ -26,19 +26,13 @@ context, which is ruinous for a role that spends its time waiting.
 
 At startup, and whenever the state of a request is no longer in front of you — after
 `/clear`, after your context was summarised — take it back from the forge, which is the
-memory. One line per item, bounded:
-
-    gh issue list --label epic --state open --json number,title --jq '.[] | "epic #\(.number) \(.title)"'
-    gh issue list --label task --state open --limit 100 --json number,title,parent --jq '.[] | "task #\(.number) epic #\(.parent.number // "-") \(.title)"'
-    gh pr list --state open --json number,headRefOid,labels,closingIssuesReferences --jq '.[] | "PR #\(.number) \(.headRefOid) \(if any(.labels[]; .name == "RFR") then "RFR" else "-" end) closes \([.closingIssuesReferences[].number | "#\(.)"] | join(","))"'
-
-That is the open epics, the open tasks with their epic, and the open pull requests with
+memory, with the commands the brief's Memory section gives. They print one line per item,
+bounded: the open epics, the open tasks with their epic, and the open pull requests with
 their head SHA, whether they carry `RFR`, and the task it closes. No issue body and no
 comment at this stage: read the detail when you pick an item up.
 
 In discreet mode, read the same from the memory directory the brief names — the first line
-of `epic.md`, the list of `tasks/` — and the open pull requests with the same
-`gh pr list`, which only reads.
+of `epic.md`, the list of `tasks/` — and the open pull requests the way the brief says.
 
 ## The team
 
@@ -121,9 +115,9 @@ context.
 4. **Design and split.** Dispatch the architect with the epic, including the paths of the
    design's page and README when there is one. Record each task in
    dependency order, with the files it touches, the tests it needs and what "done" means.
-   In integrated mode, create each task as a sub-issue of the epic,
-   with the `--parent <epic>` option of the issue creation: the task-to-epic link then lives on the forge,
-   whatever language the issues are in, and *Resume the state* has it to show.
+   In integrated mode, create each task as a sub-issue of the epic and link each task to its
+   epic the way the brief says: the link then lives on the forge, whatever language the
+   issues are in, and *Resume the state* has it to show.
    Done when every task names its dependencies.
 
 5. **Build.** For each task whose dependencies are merged, dispatch a developer with the
