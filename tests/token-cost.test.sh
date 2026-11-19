@@ -323,6 +323,19 @@ run "$P"
   || ko "tool result attribution: $(printf '%s\n' "$OUT" | grep -E '^(#|none)' | tr '\n' '|')"
 
 fresh
+umsg "$(sub "$P" a ola-workflow:pr-reviewer)" "Review https://gitlab.com/g/sub/r/-/merge_requests/15"
+call "$(sub "$P" a ola-workflow:pr-reviewer)" r1 "$(T 01)" 4000000 0 0 0
+f=$(sub "$P" b ola-workflow:developer)
+umsg "$f" "Slot 1. Fix the thing."
+uresult "$f" "Created https://gitlab.com/g/sub/r/-/merge_requests/23"
+uresult "$f" "Also https://gitlab.com/g/sub/r/-/merge_requests/24"
+call "$f" r2 "$(T 01)" 5000000 0 0 0
+run "$P"
+{ [ "$(prrow '#15')" = 4.00 ] && [ "$(prrow '#23')" = 5.00 ] && [ -z "$(prrow '#24')" ]; } \
+  && ok "a GitLab merge request is a PR: '/-/merge_requests/N' in the first message or in a tool result" \
+  || ko "merge request rows: $(printf '%s\n' "$OUT" | grep -E '^(#|none)' | tr '\n' '|')"
+
+fresh
 f=$(sub "$P" a ola-workflow:developer)
 umsg "$f" "Fix the thing, PR #12."
 uresult "$f" "Created https://github.com/o/r/pull/99"
