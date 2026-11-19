@@ -6,7 +6,9 @@
 #   the pr-reviewer   gh api [-X POST] repos/<owner>/<repo>/statuses/<40-hex SHA>
 #                       -f state=… -f context=<review status> [-f description='…'] [-f target_url=…]
 #
-# For those, the command is rewritten to run through hooks/lib/with-token.sh and allowed.
+# Those are the GitHub forms, tried only in a project whose `forge` is github (the default).
+# For those, the command is rewritten to run through hooks/lib/with-token.sh, which is told
+# the forge, and allowed. GitLab's forms are not here yet: a project on gitlab elevates nothing.
 # Everything else passes through untouched, as if this hook did not exist: no rewrite, no
 # decision, the human's permission rules apply as they are written. That matters, because a
 # rewritten command is the one those rules are matched against (measured), so rewriting
@@ -52,15 +54,17 @@ esac
 SHA='[0-9a-f]{40}'
 MERGE_FORM="^gh pr merge [0-9]+ --squash --match-head-commit $SHA\$"
 
-kind=""
+# The prefilter: a role, and the first words of a forge's tool for that role. It reads no
+# profile, so it does not say whose form this is: the project's forge decides that, below.
+candidate=""
 case $role in
   coordinator)
-    [[ $command_line =~ $MERGE_FORM ]] && kind=merge ;;
+    case $command_line in "gh pr merge "*|"glab mr merge "*) candidate=1 ;; esac ;;
   pr-reviewer)
-    [[ $command_line == "gh api "*statuses/* ]] && kind=review ;;
+    case $command_line in "gh api "*|"glab api "*) candidate=1 ;; esac ;;
 esac
 # Cheap so far: nothing above read the profile, and almost every command stops here.
-[ -n "$kind" ] || exit 0
+[ -n "$candidate" ] || exit 0
 
 # shellcheck source=hooks/lib/profile.sh
 . "$SELF_DIR/lib/profile.sh"
@@ -69,6 +73,22 @@ cwd=$(field '.cwd')
 ola_profile_path "$cwd" >/dev/null 2>&1 || exit 0
 [ "$(ola_profile_mode "$cwd" 2>/dev/null)" = integrated ] || exit 0
 [ "$(ola_profile_get github_tokens "$cwd" "" keychain 2>/dev/null)" = off ] && exit 0
+
+# Only the forms of the project's forge are tried. A form of the other forge, or of a forge
+# this hook has no form for yet (gitlab, for now), is not elevated: it runs with the base
+# token, and the forge answers.
+forge=$(ola_profile_get forge "$cwd" "" github 2>/dev/null)
+kind=""
+case $forge in
+  github)
+    case $role in
+      coordinator)
+        [[ $command_line =~ $MERGE_FORM ]] && kind=merge ;;
+      pr-reviewer)
+        [[ $command_line == "gh api "*statuses/* ]] && kind=review ;;
+    esac ;;
+esac
+[ -n "$kind" ] || exit 0
 
 if [ "$kind" = review ]; then
   # The context is the profile's review status, and only a plain name is accepted: it goes
@@ -95,7 +115,7 @@ if [ "$kind" = review ]; then
   [[ $command_line =~ $has_context ]] || exit 0
 fi
 
-rewritten="bash $(printf '%q' "$SELF_DIR/lib/with-token.sh") $kind $command_line"
+rewritten="bash $(printf '%q' "$SELF_DIR/lib/with-token.sh") $forge $kind $command_line"
 printf '%s' "$input" | jq -c --arg c "$rewritten" --arg r "ola-workflow: the $role runs this with the $kind token" '
   {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow",
                         permissionDecisionReason: $r,
