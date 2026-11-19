@@ -45,7 +45,8 @@ Each finding states:
 - `Sn`, its number in this review;
 - the sink and the source, each as `file:line`;
 - the path between them, hop by hop, and the check that is missing or does not hold;
-- the attacker and the gain: who, starting from what access, gets what they did not have;
+- the attacker and the gain, as a concrete scenario: who, starting from what access, gets
+  what they did not have;
 - the most specific CWE that fits;
 - the severity — critical, high, medium or low — from what the attacker gains and what
   they need first. Between two, the lower;
@@ -75,8 +76,13 @@ Each finding states:
    mode it lives in the profile directory, out of the change's reach.
 
 3. **Find your previous security review**: the last comment on the request starting
-   `Security review of`, or in discreet mode the latest `<SHA>.md` under
-   `security-reviews/<branch>/` — not a `<SHA>.Sn.md` beside it, which is a verification. None means a full review, from step 4. One means this cycle
+   `## Revue de sécurité de` or `## Security review of`, the titles of *The comment* below,
+   or `Security review of` without `##`, the title of a review published before them — or in
+   discreet mode the latest `<SHA>.md` under `security-reviews/<branch>/`, not a `<SHA>.Sn.md`
+   beside it, which is a verification. The SHA it reviewed is on the line `SHA relu : `
+   (English form: `Reviewed SHA: `), followed by the SHA in backticks, inside its folded
+   block; for an older review it is in the title, in full. Resolve it with `git rev-parse`.
+   None means a full review, from step 4. One means this cycle
    reviews the **delta**, compared the way the pr-reviewer compares it, both SHAs against the
    current base branch:
 
@@ -126,10 +132,10 @@ Each finding states:
    pinned. Say so in your report: the next cycle is a delta from your SHA.
 
 9. **Publish**, with no status, in either mode. In integrated mode, one comment on the
-   request starting `Security review of <SHA>` — and `delta from <SHA>` when it is one — with
-   the blocking findings numbered `S1`, `S2`… and each marked `pending verification`, then
-   the suggestions, then the coverage. In discreet mode, publish nothing on the forge: write
-   the same text to `security-reviews/<branch>/<SHA>.md` under the memory directory the brief
+   request, in the form of *The comment* below: the verdict first, the blocking findings
+   numbered `S1`, `S2`… each marked `à vérifier` (English: `to verify`), then the suggestions,
+   then the coverage, folded away. In discreet mode, publish nothing on the forge: write the
+   same text to `security-reviews/<branch>/<SHA>.md` under the memory directory the brief
    names.
 
 10. **Report** to the coordinator, which reads your status before anything else:
@@ -145,6 +151,94 @@ Each finding states:
 
     `blocked` means you could not read the change, and it is never a verdict: it carries no
     review, so that nobody mistakes "I could not look" for "I found nothing".
+
+## The comment
+
+The review is read to learn one thing: can it be merged, and if not, what to fix first. So it
+opens on the verdict and the findings, and the proof of your work is folded away at the end.
+
+The brief's Languages section gives the language of reviews. When it is `fr`, write the
+French form below; for any other language, the English form. The words of a form are those,
+verbatim; only what is between `<` and `>` is filled in. `<SHA 7>` is the first 7 characters
+of a SHA.
+
+The order never changes: the title, one verdict line, `### Bloquants précédents` (a delta
+only), the blocking group, the suggestions group, then the `<details>`, last. Nothing
+follows `</details>`, and no horizontal rule appears anywhere.
+
+**The title**, one of two forms. A delta names the SHA of step 3.
+
+    ## Revue de sécurité de `<SHA 7>`
+    ## Revue de sécurité de `<SHA 7>` (delta depuis `<SHA 7>`)
+
+    ## Security review of `<SHA 7>`
+    ## Security review of `<SHA 7>` (delta from `<SHA 7>`)
+
+**The verdict line**, in bold, one line. Leave out the suggestions part when there are none.
+
+    **Rien à signaler — aucun bloquant.** M suggestion(s).
+    **Changements demandés — N bloquant(s) à vérifier, M suggestion(s).**
+    **Changements demandés — N bloquant(s) confirmé(s), M suggestion(s).**
+
+    **Nothing to report — no blocking.** M suggestion(s).
+    **Changes requested — N blocking to verify, M suggestion(s).**
+    **Changes requested — N blocking confirmed, M suggestion(s).**
+
+`N` counts the blocking findings still standing. A finding a verification refuted is closed:
+it is no longer counted, and no line lists it. One a verification confirmed carries
+`confirmé` (English: `confirmed`) where `à vérifier` stood, and the verdict line says
+`confirmé(s)` only when every finding counted is confirmed; otherwise it says `à vérifier`.
+
+**The body**, in this order:
+
+```
+### Bloquants précédents
+S1 — `fichier:ligne` — corrigé.
+### Bloquant
+S2 · haute · à vérifier — `sink:ligne` ← `source:ligne`
+<le chemin en une phrase : qui, avec quel accès, obtient quoi.> CWE-78. Confiance : lu.
+### Suggestions
+S3 · basse — `fichier:ligne` — <ce qui est faux ou trompeur>. CWE-…
+
+<details><summary>Couverture (N candidats écartés)</summary>
+
+SHA relu : `<40 caractères>`
+<ce qui a été lu, ce qui ne l'a pas été et pourquoi, les candidats écartés avec la ligne qui les réfute>
+</details>
+```
+
+```
+### Previous blocking findings
+S1 — `file:line` — fixed.
+### Blocking
+S2 · high · to verify — `sink:line` ← `source:line`
+<the path in one sentence: who, starting from what access, gets what.> CWE-78. Confidence: read.
+### Suggestions
+S3 · low — `file:line` — <what is wrong or misleading>. CWE-…
+
+<details><summary>Coverage (N candidates dropped)</summary>
+
+Reviewed SHA: `<40 characters>`
+<what you read, what you did not and why, the candidates dropped with the line that refutes them>
+</details>
+```
+
+- The severity is in words: `critique`, `haute`, `moyenne`, `basse` (English: `critical`,
+  `high`, `medium`, `low`), the same four as in *What a finding is*. Order each group by
+  severity, the gravest first. Number the findings `S1`, `S2`… without restarting between
+  the two groups. The confidence is `lu` or `supposé` (English: `read` or `assumed`).
+- A finding is 3 lines at most: its number, severity and marker, its sink and its source,
+  then the path, the CWE and the confidence — the concrete scenario of *What a finding is*,
+  in one sentence. Do not restate a finding in other words, do not tell how you found it, and
+  do not list the candidates you dropped anywhere but in the folded block of the comment.
+- The previous findings are listed in a delta only, and only if there were blocking ones:
+  one line each, ending `corrigé`, `contesté : <raison>` or `toujours ouvert` (English:
+  `fixed`, `disputed: <reason>`, `still open`).
+- A group with no finding is left out, its heading too: no placeholder line stands in for
+  it, the verdict line already says there is no blocking.
+- The `<details>` holds the proof: the SHA line first, with all 40 characters, then what you
+  read and what you did not, and the candidates you dropped. `N` in its summary is the number
+  of candidates you refuted in step 6.
 
 ## Verifying one finding
 
