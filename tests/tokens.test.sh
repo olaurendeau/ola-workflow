@@ -23,7 +23,9 @@ export HOME=$WORK/home
 mkdir -p "$HOME"
 
 # The fake keychain: one file per service for the default account, one per service and
-# account for any other (the account's slashes written as %), holding the token.
+# account for any other (the account's slashes written as %), holding the token. An item
+# that exists and is empty is answered as such (exit 0, nothing on stdout), as the real one
+# does, so that the code under test is the one that treats it as missing.
 KEYCHAIN=$WORK/keychain
 mkdir -p "$KEYCHAIN" "$WORK/bin"
 cat >"$WORK/bin/security" <<EOF
@@ -36,7 +38,7 @@ while [ \$# -gt 0 ]; do
   case \$1 in -s) svc=\$2; shift 2 ;; -a) acct=\$2; printf '%s\\n' "\$2" >>"$WORK/accounts"; shift 2 ;; *) shift ;; esac
 done
 [ "\$acct" = ola-workflow ] || svc=\$svc@\${acct//\//%}
-[ -s "$KEYCHAIN/\$svc" ] || { echo "security: item not found" >&2; exit 44; }
+[ -e "$KEYCHAIN/\$svc" ] || { echo "security: item not found" >&2; exit 44; }
 cat "$KEYCHAIN/\$svc"
 EOF
 chmod +x "$WORK/bin/security"
@@ -322,7 +324,15 @@ fi
 # shellcheck source=hooks/lib/gitlab-tokens.sh
 . "$ROOT/hooks/lib/gitlab-tokens.sh"
 sourced_var() { # sourced_var <env file> <name> → that variable after sourcing the file
-  env -u GH_TOKEN -u GITLAB_TOKEN -u GITLAB_HOST bash -c '. "$1"; printf "%s" "${!2}"' _ "$1" "$2"
+  # Claude Code sources the line in the user's shell, bash or zsh: under both when zsh is
+  # installed, and a difference between them is an answer no check can match.
+  local b z
+  b=$(env -u GH_TOKEN -u GITLAB_TOKEN -u GITLAB_HOST bash -c '. "$1"; printf "%s" "${!2}"' _ "$1" "$2")
+  if command -v zsh >/dev/null 2>&1; then
+    z=$(env -u GH_TOKEN -u GITLAB_TOKEN -u GITLAB_HOST zsh -c '. "$1"; printf "%s" "${(P)2}"' _ "$1" "$2")
+    [ "$b" = "$z" ] || b="DIFFERS bash='$b' zsh='$z'"
+  fi
+  printf '%s' "$b"
 }
 gitlab_session() { # gitlab_session <dir> → the env file the hook wrote; what it said is in $WORK/said
   local envfile=$WORK/env-gl-$RANDOM
@@ -375,6 +385,12 @@ check "gitlab: no base token — the session is told, naming GitLab and the fix"
 store_at base gitlab:gl.example.com ""
 env=$(gitlab_session "$GL")
 check "gitlab: an empty token is a missing one" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" ola-workflow-has-no-base-token)"
+# ... and the ascent goes on past it: an empty item at the project is not the end of the road.
+store_at base gitlab:gl.example.com/grp/sub/proj ""
+store_at base gitlab:gl.example.com host-token
+env=$(gitlab_session "$GL")
+check "gitlab: an empty token at the project is passed over, the host's serves" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" host-token)"
 
 # A token kept for host A is never exported for host B, nor for a sibling or parent domain.
 forget_all
@@ -399,6 +415,27 @@ if [ "$got" = evil-project-token ] && [ ! -e "$WORK/PWNED" ] && [ ! -e "$WORK/PW
 else
   ko "gitlab: a hostile path — got '$got', env: $(cat "$env")"
 fi
+
+# A host that starts with `=` is expanded by zsh (`==ls` is `/bin/ls`): the line escapes it,
+# and the host stays the text of the remote, under bash and zsh alike.
+forget_all; store base github-base
+EQ=$(remote_project eqhost "$GL_JSON" 'git@=ls:grp/p.git')
+store_at base 'gitlab:=ls' eq-host-token
+env=$(gitlab_session "$EQ")
+check "gitlab: a host starting with = stays that text in GITLAB_HOST" "$(is "$(sourced_var "$env" GITLAB_HOST)" '=ls')"
+check "gitlab: a host starting with = is still asked for as is" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" eq-host-token)"
+
+# The ssh-over-443 host of gitlab.com is gitlab.com: a token is kept for it, and glab is
+# sent to it, not to altssh.gitlab.com, which serves no API.
+forget_all; store base github-base
+ALT=$(remote_project altssh "$GL_JSON" 'ssh://git@altssh.gitlab.com:443/grp/p.git')
+store_at base gitlab:gitlab.com/grp gl-com-token
+env=$(gitlab_session "$ALT")
+check "gitlab: altssh.gitlab.com exports GITLAB_HOST=gitlab.com" "$(is "$(sourced_var "$env" GITLAB_HOST)" gitlab.com)"
+check "gitlab: altssh.gitlab.com reads the tokens kept for gitlab.com" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" gl-com-token)"
+store_at merge gitlab:gitlab.com merge-gl-com-token
+out=$(cd "$ALT" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge sh -c 'printf "%s|%s" "$GITLAB_TOKEN" "$GITLAB_HOST"' 2>&1)
+check "with-token gitlab: altssh.gitlab.com lends the token and the host of gitlab.com" "$(is "$out" 'merge-gl-com-token|gitlab.com')"
 
 # GitHub projects: no GitLab line at all, whatever the keychain holds. The file is the one
 # line GH_TOKEN has always been.
@@ -457,6 +494,10 @@ check "with-token gitlab: no token for this host, nothing runs, the message name
 store_at merge gitlab:gl.example.com ""
 out=$(cd "$GL" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>/dev/null); rc=$?
 check "with-token gitlab: an empty token is a missing one" "$([ "$rc" = 3 ] && [ -z "$out" ] && echo 0 || echo 1)"
+store_at merge gitlab:gl.example.com/grp/sub/proj ""
+store_at merge gitlab:gl.example.com merge-host-token
+out=$(cd "$GL" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>&1)
+check "with-token gitlab: an empty token at the project is passed over, the host's serves" "$(is "$out" merge-host-token)"
 out=$(cd "$NOWHERE" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>/dev/null); rc=$?
 check "with-token gitlab: with no remote, no host is known and nothing runs" "$([ "$rc" != 0 ] && [ -z "$out" ] && echo 0 || echo 1)"
 # The token never travels in an argument: the command is run as given.

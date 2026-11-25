@@ -16,8 +16,8 @@
 # with the token (GITLAB_HOST) so that glab sends it nowhere else.
 #
 # What GitLab does not give is what GitHub gives: the roles are not enforced by the
-# token's rights, so what this file lends is an identity, not a permission. The README says
-# the rest. The tokens are never written to a file and never put in the text of a command.
+# token's rights, so what this file lends is an identity, not a permission. What that means
+# for the roles is for the GitLab token documentation to say (#167). The tokens are never written to a file and never put in the text of a command.
 #
 # Everything in the remote — host and path — is project-controlled text. It reaches the
 # line sourced before each Bash command only through `printf %q`, so a quote, a space or a
@@ -32,12 +32,15 @@
 OLA_GITLAB_NO_TOKEN=ola-workflow-has-no-base-token
 
 # ola_gitlab_id [dir] → <host>/<path> of the project's remote, or 1. A name with a line break
-# in it is no name: the accounts are told apart by lines.
+# in it is no name: the accounts are told apart by lines. The ssh-over-443 host of gitlab.com
+# is gitlab.com (as in bin/ola-workflow-pr-assets): it serves git, not the API glab calls, and
+# the tokens are kept for gitlab.com.
 ola_gitlab_id() {
   local id
   id=$(ola_profile_id "${1:-$PWD}") || return 1
   case $id in
     ''|*$'\n'*|*$'\r'*) return 1 ;;
+    altssh.gitlab.com|altssh.gitlab.com/*) id=gitlab.com${id#altssh.gitlab.com} ;;
   esac
   printf '%s' "$id"
 }
@@ -74,7 +77,7 @@ EOF
 # shellcheck disable=SC2016
 #   The $ are for the shell that sources the line, not for this one.
 ola_gitlab_env_line() {
-  local id=${1:-} account
+  local id=${1:-} account host
   if [ -z "$id" ]; then
     printf 'export GITLAB_TOKEN=%s\n' "$OLA_GITLAB_NO_TOKEN"
     return 0
@@ -87,6 +90,11 @@ $(ola_gitlab_accounts "$id")
 EOF
   printf '; do t=$(security find-generic-password -s %s -a "$a" -w 2>/dev/null) && [ -n "$t" ] && { printf %%s "$t"; break; }; done)"; ' \
     "$(ola_token_service base)"
-  printf '[ -n "$GITLAB_TOKEN" ] || export GITLAB_TOKEN=%s; export GITLAB_HOST=%q\n' \
-    "$OLA_GITLAB_NO_TOKEN" "${id%%/*}"
+  # zsh expands a word that starts with `=` (`==ls` is `/bin/ls`), and `%q` leaves it as is.
+  host=$(printf '%q' "${id%%/*}")
+  case $host in
+    =*) host=\\$host ;;
+  esac
+  printf '[ -n "$GITLAB_TOKEN" ] || export GITLAB_TOKEN=%s; export GITLAB_HOST=%s\n' \
+    "$OLA_GITLAB_NO_TOKEN" "$host"
 }
