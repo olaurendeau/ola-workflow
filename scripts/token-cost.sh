@@ -46,8 +46,10 @@
 # filtered by --since/--until, otherwise the first call of the window would never count.
 #
 # A PR is attributed, in this order, from:
-#   1. the first user message of the log: "PR #N", "pull request #N" or "/pull/N";
-#   2. else the first "/pull/N" in a tool result (a developer's `gh pr create`);
+#   1. the first user message of the log: "PR #N", "pull request #N", "/pull/N" or, on
+#      GitLab, "/-/merge_requests/N";
+#   2. else the first "/pull/N" or "/-/merge_requests/N" in a tool result (a developer's
+#      `gh pr create`, or its `glab` equivalent);
 #   3. else "none".
 # The main session is attributed to no PR. It is a heuristic and the share left in "none"
 # is printed, so that one can see what it covers.
@@ -141,8 +143,8 @@ PER_LOG='
            i: ($u.input_tokens // 0), cc: ($u.cache_creation_input_tokens // 0),
            cr: ($u.cache_read_input_tokens // 0), o: ($u.output_tokens // 0)}
       elif $r.type == "user" then
-        {k: "u", msg: ($r | .message.content | text | pr_in("(?:PR #|pull request #|/pull/)([0-9]+)")),
-         res: ($r | tool_results | pr_in("/pull/([0-9]+)"))}
+        {k: "u", msg: ($r | .message.content | text | pr_in("(?:PR #|pull request #|/pull/|/-/merge_requests/)([0-9]+)")),
+         res: ($r | tool_results | pr_in("(?:/pull/|/-/merge_requests/)([0-9]+)"))}
       else empty end
   ] as $recs
   | ([$recs[] | select(.k == "u")]) as $users

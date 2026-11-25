@@ -422,6 +422,109 @@ calls=$(wc -l <"$WORK/hook-calls" | tr -d ' ')
   ko "a push always refused is tried 3 times, then exit 1, the branch intact (rc=$rc, $calls attempts)"
 rm -f "$BARE/hooks/pre-receive"
 
+# --- pr-assets, forge: gitlab -------------------------------------------------------------
+
+# On GitLab the raw file is at <project>/-/raw/<branch>/<path>, with no ?raw=true; the web
+# host of GitLab's SSH-over-443 host altssh.gitlab.com is gitlab.com; a subgroup is part of
+# the project path. The forge comes from the profile, never from the host's name: a
+# self-managed GitLab is called anything.
+GLBARE=$WORK/gitlab-origin.git
+git init --quiet --bare "$GLBARE"
+glclone() { # glclone <dir> <origin url as configured> <profile json, or empty for none>
+  git clone --quiet "$GLBARE" "$1" 2>/dev/null
+  git -C "$1" config remote.origin.url "$2"
+  git -C "$1" config "url.$GLBARE.insteadOf" "$2"
+  echo base >"$1/README"
+  git -C "$1" add README
+  git -C "$1" commit --quiet -m base
+  if [ -n "$3" ]; then
+    mkdir -p "$1/.claude"
+    printf '%s\n' "$3" >"$1/.claude/workflow.json"
+  fi
+}
+cat >"$WORK/sshshim/ssh" <<'SHIM'
+#!/usr/bin/env bash
+[ "$1" = -G ] || exit 1
+shift
+[ "$1" != -- ] || shift
+case $1 in
+  gitlab.com) echo "hostname gitlab.com" ;;
+  gl-work|altssh.gitlab.com) echo "hostname altssh.gitlab.com" ;;
+  gh-work) echo "hostname ssh.github.com" ;;
+  *) echo "hostname 192.0.2.1" ;;
+esac
+SHIM
+GL='{"mode":"integrated","forge":"gitlab"}'
+n=0
+while IFS='|' read -r remote want; do
+  n=$((n + 1))
+  C=$WORK/clone-gitlab-$n
+  glclone "$C" "$remote" "$GL"
+  msg=$(cd "$C" && PATH="$WORK/sshshim:$PATH" "$ASSETS" 41 "$WORK/other.png" 2>&1)
+  if [ "$msg" = "![other](https://$want/-/raw/pr-assets/41/other.png)" ]; then
+    ok "forge gitlab: the link is /-/raw/ on the web host, for $remote"
+  else
+    ko "forge gitlab: the link is /-/raw/ on the web host, for $remote (got: $msg)"
+  fi
+done <<'REMOTES'
+https://gitlab.com/group/repo.git|gitlab.com/group/repo
+https://gitlab.com/group/sub/deep/repo.git|gitlab.com/group/sub/deep/repo
+git@gitlab.com:group/sub/repo.git|gitlab.com/group/sub/repo
+git@gl-work:group/repo.git|gitlab.com/group/repo
+git@altssh.gitlab.com:group/repo.git|gitlab.com/group/repo
+ssh://git@altssh.gitlab.com:443/group/sub/repo.git|gitlab.com/group/sub/repo
+https://git.example.org/group/repo.git|git.example.org/group/repo
+REMOTES
+git -C "$GLBARE" show pr-assets:41/other.png 2>/dev/null | cmp -s - "$WORK/other.png" &&
+  ok "forge gitlab: the file is at 41/other.png, byte for byte" ||
+  ko "forge gitlab: the file is at 41/other.png, byte for byte"
+
+# Without forge: gitlab, the GitHub form, byte for byte, whatever the host is called.
+C=$WORK/clone-gitlab-noprofile
+glclone "$C" https://gitlab.com/group/repo.git ""
+msg=$(cd "$C" && "$ASSETS" 42 "$WORK/other.png" 2>&1)
+[ "$msg" = '![other](https://gitlab.com/group/repo/blob/pr-assets/42/other.png?raw=true)' ] &&
+  ok "no profile: the GitHub form, whatever the host" ||
+  ko "no profile: the GitHub form, whatever the host (got: $msg)"
+C=$WORK/clone-gitlab-ghprofile
+glclone "$C" https://git.example.org/o/r.git '{"mode":"integrated","forge":"github"}'
+msg=$(cd "$C" && "$ASSETS" 43 "$WORK/other.png" 2>&1)
+[ "$msg" = '![other](https://git.example.org/o/r/blob/pr-assets/43/other.png?raw=true)' ] &&
+  ok "forge github: the GitHub form" || ko "forge github: the GitHub form (got: $msg)"
+# ssh.github.com is rewritten for GitHub only, and altssh.gitlab.com for GitLab only.
+C=$WORK/clone-gitlab-ghalt
+glclone "$C" git@gl-work:o/r.git '{"mode":"integrated"}'
+msg=$(cd "$C" && PATH="$WORK/sshshim:$PATH" "$ASSETS" 44 "$WORK/other.png" 2>&1)
+[ "$msg" = '![other](https://altssh.gitlab.com/o/r/blob/pr-assets/44/other.png?raw=true)' ] &&
+  ok "forge github: altssh.gitlab.com is left alone" || ko "forge github: altssh.gitlab.com is left alone (got: $msg)"
+C=$WORK/clone-gitlab-glalt
+glclone "$C" git@gh-work:o/r.git "$GL"
+msg=$(cd "$C" && PATH="$WORK/sshshim:$PATH" "$ASSETS" 45 "$WORK/other.png" 2>&1)
+[ "$msg" = '![other](https://ssh.github.com/o/r/-/raw/pr-assets/45/other.png)' ] &&
+  ok "forge gitlab: ssh.github.com is left alone" || ko "forge gitlab: ssh.github.com is left alone (got: $msg)"
+
+# A clone with no identity: the commit is made as ola-workflow, with an address under the
+# forge's own noreply domain (users.noreply.github.com, users.noreply.gitlab.com).
+noid() { # noid <dir> <pr> → runs the script with no git identity at all
+  (cd "$1" && env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.useConfigOnly GIT_CONFIG_VALUE_0=true \
+    "$ASSETS" "$2" "$WORK/other.png" 2>&1)
+}
+C=$WORK/clone-gitlab-noid
+glclone "$C" https://gitlab.com/group/repo.git "$GL"
+msg=$(noid "$C" 46)
+who=$(git -C "$GLBARE" log -1 --format='%an <%ae> %cn <%ce>' pr-assets 2>/dev/null)
+[ "$who" = 'ola-workflow <ola-workflow@users.noreply.gitlab.com> ola-workflow <ola-workflow@users.noreply.gitlab.com>' ] &&
+  ok "forge gitlab: without an identity, the commit is ola-workflow@users.noreply.<host>" ||
+  ko "forge gitlab: without an identity, the commit is ola-workflow@users.noreply.<host> (got: $who; $msg)"
+C=$WORK/clone-github-noid
+glclone "$C" https://github.com/o/r.git ""
+msg=$(noid "$C" 47)
+who=$(git -C "$GLBARE" log -1 --format='%an <%ae> %cn <%ce>' pr-assets 2>/dev/null)
+[ "$who" = 'ola-workflow <ola-workflow@users.noreply.github.com> ola-workflow <ola-workflow@users.noreply.github.com>' ] &&
+  ok "forge github: without an identity, the commit is ola-workflow@users.noreply.github.com" ||
+  ko "forge github: without an identity, the commit is ola-workflow@users.noreply.github.com (got: $who; $msg)"
+
 # Refusals: exit 2, and pr-assets untouched on origin.
 tip=$(git -C "$BARE" rev-parse pr-assets)
 refuse() { # refuse <label> <args...>
