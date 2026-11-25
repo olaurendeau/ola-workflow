@@ -1,4 +1,4 @@
-# Les formes glab du statut et de la fusion tiennent ; un PAT granulaire écrit comme son propriétaire, ne lit pas les statuts, et la fusion est une permission à part
+# The glab forms for status and merge hold; a granular PAT writes as its owner, one without Commit: Read is refused the status list, and merge is a separate permission
 
 ## Status
 
@@ -10,169 +10,180 @@ accepted
 
 ## Context
 
-[0014](0014-gitlab-identities-measured.md) laissait ouvert, pour #165 et #166, ce que la révision 3
-de l'epic #160 a confié à #200 : M08 n'avait été mesuré que par curl, M10 n'avait rien conclu de la
-forme `glab api`, et M07 n'avait ni le 404 d'un statut externe lu avec le jeton du bot, ni un
-refus avec un jeton factice. Cette entrée enregistre la seconde mesure, telle qu'elle a eu lieu :
-elle est acceptée comme un enregistrement, pas comme une validation de la conception. 0014 n'est
-pas réécrite ; ce qu'elle dit du PAT granulaire et de la fusion est corrigé plus bas.
+[0014](0014-gitlab-identities-measured.md) left open, for #165 and #166, what revision 3 of epic #160
+handed to #200: M08 had only been measured with curl, M10 had concluded nothing about the `glab api`
+form, and M07 had neither the 404 of an external status read with the bot's token nor a refusal with
+a dummy token. This entry records the second measurement as it happened: it is accepted as a record,
+not as a validation of the design. 0014 is not rewritten; what it says about the granular PAT and
+about merge is corrected below.
 
-Où et quand. gitlab.com, le même projet jetable, plan d'espace de noms `opensource`, GitLab
-19.7.0-pre (enterprise), `glab` 1.123.0, passage de l'humain du 2026-11-25 (run 20261125100327),
-`scripts/spike/gitlab-forge.sh --only forms`, qui ne lance que M15 à M18 après M01 et les
-vérifications du projet. Le jeton du bot est le même Developer que dans 0014 (id 44160196), celui
-de l'humain a l'id 21899033. La sortie ne contient aucun jeton.
+Where and when. gitlab.com, the same throwaway project, namespace plan `opensource`, GitLab
+19.7.0-pre (enterprise), `glab` 1.123.0, run by the human on 2026-11-25 (run 20261125100327),
+`scripts/spike/gitlab-forge.sh --only forms`, which only runs M15 to M18 after M01 and the project
+checks. The bot's token is the same Developer as in 0014 (id 44160196); the human's has id 21899033.
+The output contains no token.
 
-Ce qui n'est pas mesuré, et ne vaut donc pour personne :
+What was not measured, and so holds for nobody:
 
-- le palier Free de gitlab.com, et GitLab auto-hébergé : le plan mesuré est `opensource` ;
-- ce qu'un PAT granulaire **sans** une permission refuse : le jeton mesuré portait toutes celles
-  de la liste ci-dessous (ni la fusion sans « Merge », ni un statut sans « Create » ne sont
-  exercés) ;
-- le PAT granulaire limité au projet, face à un autre projet **privé** : l'autre projet de la
-  mesure est public (voir M18), sa lecture ne prouve rien ;
-- la forme `-f squash=true` : la fusion se fait ici en `-F`, seule forme mesurée ;
-- le bot qui lit la liste des statuts : la liste est lue avec le jeton de l'humain.
+- the Free tier of gitlab.com, and self-managed GitLab: the plan measured is `opensource`;
+- what a granular PAT **without** a given permission is refused, except one case (the status list,
+  below): the token measured carried the permissions listed below, so merge without "Merge" and a
+  status without "Create" were not exercised;
+- whether "Commit: Read" lets a granular PAT list statuses: the token measured did not have it, and
+  the list was refused (M18);
+- the project-limited granular PAT against another **private** project: the other project of the
+  measurement is public (see M18), so reading it proves nothing;
+- the `-f squash=true` form: the merge is done here with `-F`, the only form measured;
+- the bot reading the status list: the list is read with the human's token.
 
-Ce que dit l'humain, et que le script n'a pas vu : l'interface des PAT granulaires, d'après sa
-capture d'écran du 2026-11-25, liste les permissions des merge requests Approve, Create, Delete,
-Merge, Read, Subscribe, Update, séparément ; et, d'après son compte rendu du même jour, le menu
-« Commit Status » ne propose que **Create**. La capture n'est pas dans le dépôt.
+What comes from the human and not from the script. The script's output does not say which
+permissions the granular token carried; the list below is the human's, from their screenshot of the
+granular PAT interface of 2026-11-25, which lists the merge request permissions Approve, Create,
+Delete, Merge, Read, Subscribe, Update, separately, and from their report of the same day that the
+"Commit Status" menu offers only **Create**. The screenshot is not in the repository. GitLab's REST
+permission documentation, as the review of this record read it, puts
+`GET …/repository/commits/:sha/statuses` under "Commit: Read", a permission that was not ticked;
+the run did not check that page.
 
 ## Decision
 
-On enregistre les formes et les constats suivants. Ils valent pour gitlab.com, plan `opensource`,
-glab 1.123.0.
+We record the following forms and findings. They hold for gitlab.com, plan `opensource`, glab
+1.123.0.
 
-### M15 : la forme du statut tient
+### M15: the status form holds
 
-- `glab api --include -X POST projects/<chemin encodé>/statuses/<SHA> -f state=… -f name=… -f
-  description=…` : HTTP/2.0 201, code de sortie 0, pour l'humain comme pour le bot. `author.id` dit
-  qui l'a écrit : 21899033 pour l'humain, 44160196 pour le bot, trois statuts successifs (humain,
-  bot, humain). Sans `--include`, la forme répond de même (code 0, `status` `success`, `author.id`
-  de l'humain).
-- La liste `GET …/commits/<SHA>/statuses?name=<n>&per_page=100`, sans `all=true`, ne rend
-  **qu'une entrée** pour les trois statuts du même nom (la dernière, #18351150092) ; avec
-  `all=true` elle en rend **trois** (#18351148630, #18351149626, #18351150092), par `id`
-  croissant. Le plus grand `id` est le dernier posté, dans les deux cas. Les trois statuts étaient
-  sur une seule référence : 0014 (M06) avait vu que, sans `all=true`, la liste rend une entrée par
-  référence ; ce passage ne distingue pas cela d'une entrée par nom. La liste est lue sans
-  `--include` (code 0, pas de ligne d'état).
-- Le paging n'est toujours pas exercé : trois entrées au plus.
+- `glab api --include -X POST projects/<encoded path>/statuses/<SHA> -f state=… -f name=… -f
+  description=…`: HTTP/2.0 201, exit code 0, for the human as for the bot. `author.id` says who
+  wrote it: 21899033 for the human, 44160196 for the bot, three successive statuses (human, bot,
+  human). Without `--include`, the form answers the same way (code 0, `status` `success`, the
+  human's `author.id`).
+- The list `GET …/commits/<SHA>/statuses?name=<n>&per_page=100`, without `all=true`, returns
+  **only one entry** for the three statuses of the same name (the last, #18351150092); with
+  `all=true` it returns **three** (#18351148630, #18351149626, #18351150092), by increasing `id`.
+  The largest `id` is the last posted, in both cases. The three statuses were on a single reference:
+  0014 (M06) had seen that, without `all=true`, the list returns one entry per reference; this run
+  does not tell that apart from one entry per name. The list is read without `--include` (code 0, no
+  status line).
+- Paging is still not exercised: three entries at most.
 
-### M16 : un job CI et un statut externe se distinguent
+### M16: a CI job and an external status can be told apart
 
-`GET projects/<chemin>/jobs/<id>` avec le jeton du bot : pour un job CI (`agent-review`, id
-18351154184) **200** ; pour un statut externe (id 18351156216) **404**, corps « 404 Not found »,
-code de sortie 1 ; avec un jeton factice **401**, corps « 401 Unauthorized ». Le 404 d'un statut
-externe n'est donc pas « 404 Project Not Found » : le projet est vu, c'est l'objet qui n'est pas
-un job. C'est ce que 0014 n'avait pas observé (A6, la moitié « le 404 »).
+`GET projects/<path>/jobs/<id>` with the bot's token: for a CI job (`agent-review`, id 18351154184)
+**200**; for an external status (id 18351156216) **404**, body "404 Not found", exit code 1; with a
+dummy token **401**, body "401 Unauthorized". The 404 of an external status is therefore not "404
+Project Not Found": the project is seen, it is the object that is not a job. This is what 0014 had
+not observed (A6, the "404" half).
 
-### M17 : la forme de la fusion tient
+### M17: the merge form holds
 
-`glab api --include -X PUT projects/<chemin encodé>/merge_requests/<N>/merge -F squash=true -f
-sha=<SHA>` :
+`glab api --include -X PUT projects/<encoded path>/merge_requests/<N>/merge -F squash=true -f
+sha=<SHA>`:
 
-- un `sha` faux : **409** « SHA does not match HEAD of source branch: <sha de la tête> », code 1 ;
-- le bot, bon `sha` : **401**, code 1 ; la merge request reste `opened`, non programmée (corps non
-  consigné) ;
-- l'humain, bon `sha` : **200**, `state` `merged`, `squash_commit_sha` renseigné, et le titre du
-  commit de squash est celui de la merge request. `-F squash=true` squashe donc, là où `-f`
-  laissait `squash` à `false` en M10 de 0014 (qui ne pouvait pas trancher).
+- a wrong `sha`: **409** "SHA does not match HEAD of source branch: <head sha>", code 1;
+- the bot, right `sha`: **401**, code 1; the merge request stays `opened`, not scheduled (body not
+  recorded);
+- the human, right `sha`: **200**, `state` `merged`, `squash_commit_sha` filled in, and the title of
+  the squash commit is the merge request's. `-F squash=true` therefore squashes, where `-f` left
+  `squash` at `false` in 0014's M10 (which could not settle it).
 
-### Comment glab rend les refus
+### How glab renders refusals
 
-Un 2xx donne le code de sortie 0 ; un 4xx (404, 409, 401, 403) donne 1. Avec `--include`, la ligne
-d'état (`HTTP/2.0 404 Not Found`) est dans la sortie de glab, et le corps du refus la suit ;
-l'erreur standard ne porte que l'avertissement ci-dessous, rien du refus. glab 1.123.0 écrit sur
-l'erreur standard, à chaque appel, `DEPRECATION WARNING: The environment variable NO_PROMPT has
-been deprecated and will be removed in future releases. Use GLAB_NO_PROMPT instead.` : le script
-règle `NO_PROMPT`. Que `GLAB_NO_PROMPT` fasse taire l'avertissement n'est pas mesuré.
+A 2xx gives exit code 0; a 4xx (404, 409, 401, 403) gives 1. With `--include`, the status line
+(`HTTP/2.0 404 Not Found`) is in glab's output, and the body of the refusal follows it; standard
+error carries only the warning below, nothing of the refusal. glab 1.123.0 writes to standard error,
+on every call, `DEPRECATION WARNING: The environment variable NO_PROMPT has been deprecated and will
+be removed in future releases. Use GLAB_NO_PROMPT instead.`: the script sets `NO_PROMPT`. Whether
+`GLAB_NO_PROMPT` silences the warning was not measured.
 
-### M18 : le PAT granulaire limité au projet jetable
+### M18: the granular PAT limited to the throwaway project
 
-Permissions cochées : Commit Status : Create ; Merge Request : Read, Update, Merge ; rien d'autre.
+Permissions ticked (the human's list, see Context): Commit Status: Create; Merge Request: Read,
+Update, Merge; nothing else.
 
-- `GET /user` et `GET /personal_access_tokens/self` : **403** `insufficient_granular_scope` (champs
-  `error`, `error_description`). Sans aucune permission au niveau de l'utilisateur, le jeton ne
-  peut pas dire à qui il est, ni ses portées, ni son expiration (0014, M13, les lisait avec un PAT
-  classique).
-- Statut créé : **201**, `author.id` = l'humain (21899033). Un PAT granulaire écrit **comme son
-  propriétaire**, jamais comme une identité à part.
-- Lecture de la liste des statuts : **403** `insufficient_granular_scope`. Le script attendait un
-  200 ; le compte rendu de l'humain est que l'interface ne propose que « Create » pour Commit
-  Status : un PAT granulaire ne peut pas lire les statuts, la lecture est faite avec un autre
-  jeton.
-- Lecture de la merge request : 200 ; fusion, bon `sha`, `-F squash=true` : **200**, `merged`,
-  `squash_commit_sha` renseigné, avec la permission « Merge ».
-- **La fusion est une permission à part** (capture de l'humain, liste ci-dessus). Cela contredit ce
-  que 0014 enregistrait comme observation du 2026-11-18, et la révision 3 sur #160 (« la fusion
-  n'est pas une permission séparée »), ainsi que l'en-tête du script. La lecture du 2026-11-18 était
-  donc fausse, et ce que 0014 en tirait (un PAT granulaire ne peut pas se voir refuser la fusion
-  qu'on lui donnerait, donc il ne peut pas être le jeton de base) ne tient plus sur ce motif : voir
-  les questions ouvertes.
-- Autre projet : la lecture répond 200, mais ce projet est **public** (le coordinator l'a vérifié
-  le 2026-11-25 sans jeton : `GET /api/v4/projects/incubateur-territoires%2Fincubateur%2Fola-workflow-spike-other`
-  rend 200, visibilité publique). Cette lecture ne prouve donc rien sur la limite. Le statut écrit
-  sur cet autre projet : **403** `insufficient_granular_scope` : l'écriture est limitée au projet
-  choisi.
+- `GET /user` and `GET /personal_access_tokens/self`: **403** `insufficient_granular_scope` (fields
+  `error`, `error_description`). With no user-level permission at all, the token cannot say who it
+  is, nor its scopes, nor its expiry (0014, M13, read them with a classic PAT).
+- Status created: **201**, `author.id` = the human (21899033). A granular PAT writes **as its
+  owner**, never as a separate identity.
+- Reading the status list: **403** `insufficient_granular_scope`. The script expected a 200. What was
+  measured is that a token without "Commit: Read" is refused the list. Whether "Commit: Read" lets a
+  granular PAT list statuses was not measured: the human's report is that the "Commit Status" menu
+  offers only "Create", but GitLab's REST permission documentation puts that list under "Commit:
+  Read", which was not ticked.
+- Reading the merge request: 200; merge, right `sha`, `-F squash=true`: **200**, `merged`,
+  `squash_commit_sha` filled in, with the "Merge" permission.
+- **Merge is a separate permission** (the human's screenshot, list above). This contradicts what
+  0014 recorded as the observation of 2026-11-18, and revision 3 on #160 ("merging is not a
+  separate permission"), as well as the script's header. The reading of 2026-11-18 was therefore
+  wrong, and what 0014 drew from it (a granular PAT cannot be denied the merge it would be given,
+  so it cannot be the base token) no longer holds on that ground: see the open questions.
+- Other project: the read answers 200, but that project is **public** (the coordinator checked it
+  on 2026-11-25 without a token: `GET /api/v4/projects/incubateur-territoires%2Fincubateur%2Fola-workflow-spike-other`
+  returns 200, public visibility). That read therefore proves nothing about the limit. The status
+  written to that other project: **403** `insufficient_granular_scope`: writing is limited to the
+  chosen project.
 
 ## Consequences
 
-- **Les formes de #165 et #166 sont arrêtées, en glab.** Statut et fusion s'écrivent comme
-  ci-dessus ; un hook lit le résultat par le code de sortie et par la ligne d'état de `--include`
-  (201, 200 ; 401, 403, 404, 409 en refus), jamais en attendant un 403 comme le texte de GitHub. Le
-  chemin du projet est encodé (`incubateur-territoires%2F…`). L'avertissement `NO_PROMPT` est sur
-  l'erreur standard à chaque appel : un hook ne doit pas lire l'erreur standard comme le signe d'un
-  échec.
-- **#165, le statut de revue et son auteur.** `author.id` de la réponse et de la liste dit qui a
-  écrit ; le dernier statut d'un nom est celui du plus grand `id` de
-  `…?name=<n>&per_page=100&all=true` ; sans `all=true`, ne pas s'y fier pour « le dernier », et le
-  paging reste à refuser quand la page est pleine. Le signal job / statut externe est `GET
-  jobs/<id>` avec le jeton du bot : 200 un job, 404 « 404 Not found » un statut externe. Un PAT
-  granulaire pour la revue **écrit** (auteur = l'humain) mais **ne lit pas** les statuts : la
-  lecture du dernier statut passe par un autre jeton (la mesure l'a faite avec celui de l'humain ;
-  avec celui du bot, elle n'est pas mesurée).
-- **#166, la fusion.** La forme tient, 409 sur un `sha` faux, 401 pour le bot. Un jeton granulaire
-  qui porte « Merge » fusionne : la fusion peut être donnée ou retirée par permission, ce que 0014
-  tenait pour impossible.
-- **#167, créer et vérifier les jetons.** La vérification d'identité **ne peut pas** passer par
-  `/user` ni par `/personal_access_tokens/self` avec un jeton granulaire minimal (403
-  `insufficient_granular_scope`) : ni l'identité, ni l'expiration ne se lisent. Un 403 de cette
-  forme dit que le jeton est reconnu (un jeton factice rend 401, M16) sans dire à qui il est ; l'id
-  de l'auteur d'un statut créé le montre, mais il faut écrire pour le savoir. Les permissions à
-  cocher, d'après l'interface : Commit Status : Create (pas de lecture à demander) ; Merge Request :
-  Read, Update, Merge, chacune à part ; limite au projet.
-- **#172, les docs** disent : le PAT granulaire écrit comme son propriétaire ; il ne lit pas les
-  statuts ; la fusion est une permission séparée ; l'écriture est limitée au projet ; `/user` lui
-  est refusé ; et ce qui n'est pas mesuré (le palier Free, GitLab auto-hébergé, un autre projet
-  privé, le refus faute d'une permission, `-f squash=true`, `GLAB_NO_PROMPT`).
-- **Le coordinator signale à l'architecte, avant #165, la correction de l'observation du
-  2026-11-18** : la fusion est une permission séparée. Cette entrée ne redessine rien.
+- **The forms for #165 and #166 are settled, in glab.** Status and merge are written as above; a
+  hook reads the result by the exit code and by the status line of `--include` (201, 200; 401, 403,
+  404, 409 as refusals), never by waiting for a 403 as GitHub's text does. The project path is
+  encoded (`incubateur-territoires%2F…`). The `NO_PROMPT` warning is on standard error on every
+  call: a hook must not read standard error as a sign of failure.
+- **#165, the review status and its author.** The response's `author.id`, and the list's, say who
+  wrote; the latest status of a name is the one with the largest `id` of
+  `…?name=<n>&per_page=100&all=true`; without `all=true`, do not rely on it for "the latest", and
+  paging is still to be refused when the page is full. The job / external status signal is `GET
+  jobs/<id>` with the bot's token: 200 a job, 404 "404 Not found" an external status. A granular PAT
+  for review **writes** (author = the human); the token measured, without "Commit: Read", was
+  **refused** the status list. Whether it reads with "Commit: Read" is not measured, so a second
+  token for reading is not established: measure that before building one (the list was measured
+  with the human's token; with the bot's it was not).
+- **#166, the merge.** The form holds, 409 on a wrong `sha`, 401 for the bot. A granular token that
+  carries "Merge" merges: merging can be given or withdrawn by permission, which 0014 held to be
+  impossible.
+- **#167, creating and checking tokens.** Checking identity **cannot** go through `/user` or
+  `/personal_access_tokens/self` with a minimal granular token (403 `insufficient_granular_scope`):
+  neither identity nor expiry can be read. A 403 of that form says the token is recognised (a dummy
+  token gets 401, M16) without saying whose it is; the author id of a status created shows it, but
+  writing is needed to know. The permissions ticked on the token measured, per the human: Commit
+  Status: Create; Merge Request: Read, Update, Merge, each separately; limited to the project. Which
+  permission lets a granular PAT list statuses ("Commit: Read" is the candidate) is to be measured
+  before #167 builds a second token for reading.
+- **#172, the docs** say: the granular PAT writes as its owner; a token without "Commit: Read" was
+  refused the status list, and whether "Commit: Read" allows it is not measured; merge is a separate
+  permission; writing is limited to the project; `/user` is refused to it; and what was not measured
+  (the Free tier, self-managed GitLab, another private project, the refusal for lack of a permission
+  other than the status list, whether "Commit: Read" lets a granular PAT list statuses,
+  `-f squash=true`, `GLAB_NO_PROMPT`).
+- **The coordinator tells the architect, before #165, of the correction to the observation of
+  2026-11-18**: merge is a separate permission. This entry redesigns nothing.
 
-Questions ouvertes (une décision de l'architecte ou de l'humain, pas de cette entrée) :
+Open questions (a decision for the architect or the human, not for this entry):
 
-1. 0014 écartait le PAT granulaire comme jeton de base parce que la fusion n'en était pas
-   séparable. Ce motif tombe. Un PAT granulaire sans « Merge » ni « Create » de statut, qui agit
-   comme l'humain, peut-il être le jeton de base, ou la conception garde-t-elle un Developer bot ?
-   Le refus faute d'une permission n'est pas mesuré.
-2. Comme jeton de revue ou de fusion, un PAT granulaire réduit les droits à ce que la tâche fait
-   (écrire un statut, ou fusionner), limité au projet. Le choix est à faire pour #167.
-3. Comment #167 vérifie-t-il l'identité et l'expiration d'un jeton granulaire minimal, qui ne lit
-   ni `/user` ni `/personal_access_tokens/self` : ajouter une permission au niveau de
-   l'utilisateur, se fier à la création, ou lire autrement ?
-4. Le script de mesure règle encore `NO_PROMPT` (`GLAB_NO_PROMPT` à la place) et son en-tête dit que
-   la fusion n'est pas une permission séparée : à corriger dans une tâche à part, pas ici.
+1. 0014 set the granular PAT aside as the base token because merge could not be separated from it.
+   That ground falls. Can a granular PAT without "Merge" and without status "Create", acting as the
+   human, be the base token, or does the design keep a Developer bot? The refusal for lack of a
+   permission is not measured, except for the status list.
+2. As a review or merge token, a granular PAT narrows the rights to what the task does (write a
+   status, or merge), limited to the project. The choice is for #167. For review, does the design
+   need a second token for reading statuses, or does "Commit: Read" on the same token do? The run
+   does not say.
+3. How does #167 check the identity and expiry of a minimal granular token, which reads neither
+   `/user` nor `/personal_access_tokens/self`: add a user-level permission, trust the creation, or
+   read another way?
+4. The measuring script still sets `NO_PROMPT` (`GLAB_NO_PROMPT` instead) and its header says merge
+   is not a separate permission: to be fixed in a separate task, not here.
 
 ## Evidence
 
-La mesure du 2026-11-25 par l'humain sur gitlab.com, dans le projet
-`incubateur-territoires/incubateur/ola-workflow-spike` : la tâche
-https://github.com/olaurendeau/ola-workflow/issues/200, de l'epic
-https://github.com/olaurendeau/ola-workflow/issues/160 (révision 3 :
-https://github.com/olaurendeau/ola-workflow/issues/160#issuecomment-6975562802), avec le script de
-https://github.com/olaurendeau/ola-workflow/pull/204. Sa sortie entière, jetons masqués (aucun
-`glpat-` n'y figure) :
+The human's measurement of 2026-11-25 on gitlab.com, in the project
+`incubateur-territoires/incubateur/ola-workflow-spike`: the task
+https://github.com/olaurendeau/ola-workflow/issues/200, of the epic
+https://github.com/olaurendeau/ola-workflow/issues/160 (revision 3:
+https://github.com/olaurendeau/ola-workflow/issues/160#issuecomment-6975562802), with the script of
+https://github.com/olaurendeau/ola-workflow/pull/204. Its whole output, tokens masked (no `glpat-`
+appears in it):
 
 ```text
 ola-workflow GitLab spike

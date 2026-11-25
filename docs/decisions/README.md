@@ -39,4 +39,4 @@ number of the entry that replaces it), Date, Context, Decision, Consequences, Ev
 | [0012](0012-writing-convention-by-whitelist.md) | The prompts follow a writing convention enforced with a whitelist | accepted | 2026-10-14 |
 | [0013](0013-globs-are-git-pathspecs.md) | Every glob of a profile is a git pathspec | accepted | 2026-10-12 |
 | [0014](0014-gitlab-identities-measured.md) | GitLab's identities, statuses and merge are measured on gitlab.com: A1 is false, the model stands | accepted | 2026-11-12 |
-| [0015](0015-glab-forms-and-granular-pat-measured.md) | Les formes glab du statut et de la fusion tiennent ; un PAT granulaire écrit comme son propriétaire, ne lit pas les statuts, et la fusion est une permission à part | accepted | 2026-11-25 |
+| [0015](0015-glab-forms-and-granular-pat-measured.md) | The glab forms for status and merge hold; a granular PAT writes as its owner, one without Commit: Read is refused the status list, and merge is a separate permission | accepted | 2026-11-25 |
