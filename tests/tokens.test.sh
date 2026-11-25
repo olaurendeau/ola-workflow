@@ -22,7 +22,10 @@ trap 'rm -rf "${WORK:?}"' EXIT
 export HOME=$WORK/home
 mkdir -p "$HOME"
 
-# The fake keychain: one file per service, holding the token.
+# The fake keychain: one file per service for the default account, one per service and
+# account for any other (the account's slashes written as %), holding the token. An item
+# that exists and is empty is answered as such (exit 0, nothing on stdout), as the real one
+# does, so that the code under test is the one that treats it as missing.
 KEYCHAIN=$WORK/keychain
 mkdir -p "$KEYCHAIN" "$WORK/bin"
 cat >"$WORK/bin/security" <<EOF
@@ -30,22 +33,34 @@ cat >"$WORK/bin/security" <<EOF
 [ "\$1" = find-generic-password ] || exit 2
 shift
 svc=""
+acct=ola-workflow
 while [ \$# -gt 0 ]; do
-  case \$1 in -s) svc=\$2; shift 2 ;; -a) printf '%s\\n' "\$2" >>"$WORK/accounts"; shift 2 ;; *) shift ;; esac
+  case \$1 in -s) svc=\$2; shift 2 ;; -a) acct=\$2; printf '%s\\n' "\$2" >>"$WORK/accounts"; shift 2 ;; *) shift ;; esac
 done
-[ -s "$KEYCHAIN/\$svc" ] || { echo "security: item not found" >&2; exit 44; }
+[ "\$acct" = ola-workflow ] || svc=\$svc@\${acct//\//%}
+[ -e "$KEYCHAIN/\$svc" ] || { echo "security: item not found" >&2; exit 44; }
 cat "$KEYCHAIN/\$svc"
 EOF
 chmod +x "$WORK/bin/security"
 export PATH="$WORK/bin:$PATH"
 store() { printf '%s' "$2" >"$KEYCHAIN/ola-workflow-$1"; }
 forget() { rm -f "$KEYCHAIN/ola-workflow-$1"; }
+# store_at <kind> <account> <token>: the token of a GitLab account (host, group or project).
+store_at() { printf '%s' "$3" >"$KEYCHAIN/ola-workflow-$1@${2//\//%}"; }
+forget_all() { rm -f "$KEYCHAIN"/*; }
 
 project() { # project <name> <profile json> → a repository with that committed profile
   local dir=$WORK/$1
   mkdir -p "$dir/.claude"
   git -C "$dir" -c init.defaultBranch=main init -q 2>/dev/null
   printf '%s\n' "$2" >"$dir/.claude/workflow.json"
+  printf '%s' "$dir"
+}
+# remote_project <name> <profile json> <remote url> → the same, with an origin.
+remote_project() {
+  local dir
+  dir=$(project "$1" "$2")
+  git -C "$dir" remote add origin "$3"
   printf '%s' "$dir"
 }
 NOWHERE=$WORK/nowhere
@@ -57,6 +72,10 @@ GITHUB=$(project github '{"mode":"integrated","forge":"github"}')
 OFF=$(project off '{"mode":"integrated","github_tokens":"off"}')
 CUSTOM=$(project custom '{"mode":"integrated","merge":{"review_status":"ci.review"}}')
 ODD=$(project odd '{"mode":"integrated","merge":{"review_status":"c++-review"}}')
+GL_JSON='{"mode":"integrated","forge":"gitlab"}'
+GL=$(remote_project gl "$GL_JSON" git@gl.example.com:grp/sub/proj.git)
+GL_DISCREET=$(remote_project gldiscreet '{"mode":"discreet","forge":"gitlab"}' git@gl.example.com:grp/sub/proj.git)
+GH_REMOTE=$(remote_project ghremote '{"mode":"integrated","forge":"github"}' git@github.com:o/r.git)
 PLUS=$(project plus '{"mode":"integrated","merge":{"review_status":"a+b"}}')
 
 SHA=0123456789abcdef0123456789abcdef01234567
@@ -225,9 +244,8 @@ else
   ko "with-token: an empty token ran the command (exit $rc, '$out')"
 fi
 
-# The forge comes first. One that is unknown, or missing, runs nothing; GitLab has no token
-# to lend yet, so it runs nothing either.
-for args in "merge printenv GH_TOKEN" "gitlab merge printenv GH_TOKEN" "bitbucket merge printenv GH_TOKEN" "github"; do
+# The forge comes first. One that is unknown, or missing, runs nothing.
+for args in "merge printenv GH_TOKEN" "bitbucket merge printenv GH_TOKEN" "github"; do
   # shellcheck disable=SC2086
   out=$(bash "$ROOT/hooks/lib/with-token.sh" $args 2>/dev/null); rc=$?
   if [ "$rc" != 0 ] && [ -z "$out" ]; then
@@ -299,6 +317,193 @@ if printf '%s' "$out" | grep -q "human's own GitHub login"; then
 else
   ko "session: no CLAUDE_ENV_FILE should be said out loud, got '$out'"
 fi
+
+# ----------------------------------------------------------------------- GitLab
+# shellcheck source=hooks/lib/profile.sh
+. "$ROOT/hooks/lib/profile.sh"
+# shellcheck source=hooks/lib/gitlab-tokens.sh
+. "$ROOT/hooks/lib/gitlab-tokens.sh"
+sourced_var() { # sourced_var <env file> <name> → that variable after sourcing the file
+  # Claude Code sources the line in the user's shell, bash or zsh: under both when zsh is
+  # installed, and a difference between them is an answer no check can match.
+  local b z
+  b=$(env -u GH_TOKEN -u GITLAB_TOKEN -u GITLAB_HOST bash -c '. "$1"; printf "%s" "${!2}"' _ "$1" "$2")
+  if command -v zsh >/dev/null 2>&1; then
+    z=$(env -u GH_TOKEN -u GITLAB_TOKEN -u GITLAB_HOST zsh -c '. "$1"; printf "%s" "${(P)2}"' _ "$1" "$2")
+    [ "$b" = "$z" ] || b="DIFFERS bash='$b' zsh='$z'"
+  fi
+  printf '%s' "$b"
+}
+gitlab_session() { # gitlab_session <dir> → the env file the hook wrote; what it said is in $WORK/said
+  local envfile=$WORK/env-gl-$RANDOM
+  : >"$envfile"
+  session "$1" "$envfile" >"$WORK/said" 2>&1
+  printf '%s' "$envfile"
+}
+check() { # check <label> <0 when it holds>
+  if [ "$2" = 0 ]; then ok "$1"; else ko "$1"; fi
+}
+is() { [ "$1" = "$2" ] && echo 0 || echo 1; } # is <got> <want> → 0 when equal
+
+# The accounts, from the project up to the host.
+got=$(ola_gitlab_accounts gl.example.com/grp/sub/proj | tr '\n' ' ')
+check "gitlab: the accounts go from the project up to the host" \
+  "$(is "$got" 'gitlab:gl.example.com/grp/sub/proj gitlab:gl.example.com/grp/sub gitlab:gl.example.com/grp gitlab:gl.example.com ')"
+got=$(ola_gitlab_accounts gl.example.com/proj | tr '\n' ' ')
+check "gitlab: a project at the root of the host has two accounts" \
+  "$(is "$got" 'gitlab:gl.example.com/proj gitlab:gl.example.com ')"
+
+# The project's own token goes before a group's, which goes before the host's.
+forget_all
+store base github-base
+store_at base gitlab:gl.example.com host-token
+env=$(gitlab_session "$GL")
+check "gitlab: a token kept at the host serves the project" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" host-token)"
+store_at base gitlab:gl.example.com/grp group-token
+store_at base gitlab:gl.example.com/grp/sub/proj project-token
+env=$(gitlab_session "$GL")
+check "gitlab: a project's token goes before the group's and the host's" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" project-token)"
+forget_all; store base github-base
+store_at base gitlab:gl.example.com/grp group-token
+store_at base gitlab:gl.example.com host-token
+env=$(gitlab_session "$GL")
+check "gitlab: a group's token goes before the host's" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" group-token)"
+check "gitlab: GITLAB_HOST is the host of the remote" "$(is "$(sourced_var "$env" GITLAB_HOST)" gl.example.com)"
+check "gitlab: the file never holds a token" "$(grep -qE 'group-token|host-token|project-token' "$env" && echo 1 || echo 0)"
+check "gitlab: the GH_TOKEN line is still written" "$(is "$(sourced_var "$env" GH_TOKEN)" github-base)"
+check "gitlab: the GH_TOKEN line comes first" "$(head -1 "$env" | grep -q '^export GH_TOKEN=' && echo 0 || echo 1)"
+
+# No token: a value GitLab rejects, never an empty one (an empty GITLAB_TOKEN makes glab
+# fall back to the human's own login), and the session is told.
+forget_all
+env=$(gitlab_session "$GL")
+check "gitlab: no base token — GITLAB_TOKEN is a value GitLab rejects, never empty" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" ola-workflow-has-no-base-token)"
+check "gitlab: no base token — the session is told, naming GitLab and the fix" \
+  "$(grep -q 'every glab call of this session will fail with a 401' "$WORK/said" && grep -q 'ola-workflow-tokens setup' "$WORK/said" && echo 0 || echo 1)"
+store_at base gitlab:gl.example.com ""
+env=$(gitlab_session "$GL")
+check "gitlab: an empty token is a missing one" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" ola-workflow-has-no-base-token)"
+# ... and the ascent goes on past it: an empty item at the project is not the end of the road.
+store_at base gitlab:gl.example.com/grp/sub/proj ""
+store_at base gitlab:gl.example.com host-token
+env=$(gitlab_session "$GL")
+check "gitlab: an empty token at the project is passed over, the host's serves" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" host-token)"
+
+# A token kept for host A is never exported for host B, nor for a sibling or parent domain.
+forget_all
+store_at base gitlab:a.example.com host-a-token
+store_at base gitlab:gl.example.com.evil host-evil-token
+store_at base gitlab:example.com host-parent-token
+env=$(gitlab_session "$GL")
+check "gitlab: the token of another host is never exported" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" ola-workflow-has-no-base-token)"
+
+# A path component with shell syntax stays inert in the sourced line, and is asked for as is.
+forget_all
+HOSTILE='gitlab:gl.example.com/g/a$(touch PWNED)"b c;`touch PWNED2`/p'
+EVIL=$(remote_project evil "$GL_JSON" 'git@gl.example.com:g/a$(touch PWNED)"b c;`touch PWNED2`/p.git')
+store_at base "$HOSTILE" evil-project-token
+: >"$WORK/accounts"
+env=$(gitlab_session "$EVIL")
+got=$(cd "$WORK" && sourced_var "$env" GITLAB_TOKEN)
+if [ "$got" = evil-project-token ] && [ ! -e "$WORK/PWNED" ] && [ ! -e "$WORK/PWNED2" ] &&
+   grep -qxF "$HOSTILE" "$WORK/accounts"; then
+  ok "gitlab: quotes, \$( ) and spaces in the path stay inert in the sourced line"
+else
+  ko "gitlab: a hostile path — got '$got', env: $(cat "$env")"
+fi
+
+# A host that starts with `=` is expanded by zsh (`==ls` is `/bin/ls`): the line escapes it,
+# and the host stays the text of the remote, under bash and zsh alike.
+forget_all; store base github-base
+EQ=$(remote_project eqhost "$GL_JSON" 'git@=ls:grp/p.git')
+store_at base 'gitlab:=ls' eq-host-token
+env=$(gitlab_session "$EQ")
+check "gitlab: a host starting with = stays that text in GITLAB_HOST" "$(is "$(sourced_var "$env" GITLAB_HOST)" '=ls')"
+check "gitlab: a host starting with = is still asked for as is" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" eq-host-token)"
+
+# The ssh-over-443 host of gitlab.com is gitlab.com: a token is kept for it, and glab is
+# sent to it, not to altssh.gitlab.com, which serves no API.
+forget_all; store base github-base
+ALT=$(remote_project altssh "$GL_JSON" 'ssh://git@altssh.gitlab.com:443/grp/p.git')
+store_at base gitlab:gitlab.com/grp gl-com-token
+env=$(gitlab_session "$ALT")
+check "gitlab: altssh.gitlab.com exports GITLAB_HOST=gitlab.com" "$(is "$(sourced_var "$env" GITLAB_HOST)" gitlab.com)"
+check "gitlab: altssh.gitlab.com reads the tokens kept for gitlab.com" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" gl-com-token)"
+store_at merge gitlab:gitlab.com merge-gl-com-token
+out=$(cd "$ALT" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge sh -c 'printf "%s|%s" "$GITLAB_TOKEN" "$GITLAB_HOST"' 2>&1)
+check "with-token gitlab: altssh.gitlab.com lends the token and the host of gitlab.com" "$(is "$out" 'merge-gl-com-token|gitlab.com')"
+
+# GitHub projects: no GitLab line at all, whatever the keychain holds. The file is the one
+# line GH_TOKEN has always been.
+store base github-base
+store_at base gitlab:github.com github-host-token
+for dir in "$INTEGRATED" "$GITHUB" "$GH_REMOTE"; do
+  envfile=$WORK/env-gh-$RANDOM; : >"$envfile"
+  session "$dir" "$envfile" >/dev/null 2>&1
+  if [ "$(wc -l <"$envfile" | tr -d ' ')" = 1 ] && ! grep -q GITLAB "$envfile" &&
+     [ "$(cat "$envfile")" = "$(ola_token_env_line)" ]; then
+    ok "gitlab: $(basename "$dir") — one GH_TOKEN line, no GitLab line"
+  else
+    ko "gitlab: $(basename "$dir") — file: $(cat "$envfile")"
+  fi
+done
+
+# Discreet GitLab: the agents read with the human's own glab login, nothing of GitLab is exported.
+envfile=$WORK/env-gl-discreet; : >"$envfile"
+out=$(session "$GL_DISCREET" "$envfile" 2>&1)
+if ! grep -q GITLAB "$envfile" && [ -z "$out" ]; then
+  ok "gitlab: a discreet profile writes no GITLAB_TOKEN line, and says nothing"
+else
+  ko "gitlab: discreet — said '$out', file: $(cat "$envfile")"
+fi
+
+# A GitLab project whose remote is unknown still never gets an empty token, and claims no host.
+env=$(gitlab_session "$GITLAB")
+check "gitlab: with no remote, GITLAB_TOKEN is the rejected value and no host is claimed" \
+  "$([ "$(sourced_var "$env" GITLAB_TOKEN)" = ola-workflow-has-no-base-token ] && ! grep -q GITLAB_HOST "$env" && echo 0 || echo 1)"
+
+# Tokens off, and no CLAUDE_ENV_FILE, in a GitLab project.
+OFF_GL=$(remote_project offgl '{"mode":"integrated","forge":"gitlab","github_tokens":"off"}' git@gl.example.com:grp/p.git)
+envfile=$WORK/env-offgl; : >"$envfile"
+out=$(session "$OFF_GL" "$envfile" 2>&1)
+check "gitlab: github_tokens off leaves the session alone" "$([ -z "$out" ] && [ ! -s "$envfile" ] && echo 0 || echo 1)"
+out=$(session "$GL" "" 2>&1)
+check "gitlab: no CLAUDE_ENV_FILE is said out loud, without naming GitHub" \
+  "$(printf '%s' "$out" | grep -q "human's own glab login" && ! printf '%s' "$out" | grep -q GitHub && echo 0 || echo 1)"
+
+# with-token.sh lends the token read by the same ascent, for the host of the project only.
+forget_all
+store_at merge gitlab:gl.example.com merge-host-token
+store_at merge gitlab:other.example.com merge-other-token
+out=$(cd "$GL" && env -u GITLAB_HOST GITLAB_TOKEN=session-token bash "$ROOT/hooks/lib/with-token.sh" gitlab merge \
+  sh -c 'printf "%s|%s" "$GITLAB_TOKEN" "$GITLAB_HOST"' 2>&1); rc=$?
+check "with-token gitlab: the token and GITLAB_HOST of the project's host (exit $rc: $out)" \
+  "$([ "$rc" = 0 ] && [ "$out" = 'merge-host-token|gl.example.com' ] && echo 0 || echo 1)"
+store_at merge gitlab:gl.example.com/grp/sub/proj merge-project-token
+out=$(cd "$GL" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>&1)
+check "with-token gitlab: the project's token goes before the host's" "$(is "$out" merge-project-token)"
+forget_all
+store_at merge gitlab:other.example.com merge-other-token
+out=$(cd "$GL" && GITLAB_TOKEN=session-token bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>"$WORK/err"); rc=$?
+check "with-token gitlab: no token for this host, nothing runs, the message names the fix" \
+  "$([ "$rc" = 3 ] && [ -z "$out" ] && grep -q 'ola-workflow-tokens setup merge' "$WORK/err" && echo 0 || echo 1)"
+store_at merge gitlab:gl.example.com ""
+out=$(cd "$GL" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>/dev/null); rc=$?
+check "with-token gitlab: an empty token is a missing one" "$([ "$rc" = 3 ] && [ -z "$out" ] && echo 0 || echo 1)"
+store_at merge gitlab:gl.example.com/grp/sub/proj ""
+store_at merge gitlab:gl.example.com merge-host-token
+out=$(cd "$GL" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>&1)
+check "with-token gitlab: an empty token at the project is passed over, the host's serves" "$(is "$out" merge-host-token)"
+out=$(cd "$NOWHERE" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge printenv GITLAB_TOKEN 2>/dev/null); rc=$?
+check "with-token gitlab: with no remote, no host is known and nothing runs" "$([ "$rc" != 0 ] && [ -z "$out" ] && echo 0 || echo 1)"
+# The token never travels in an argument: the command is run as given.
+store_at merge gitlab:gl.example.com merge-host-token
+out=$(cd "$GL" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge sh -c 'printf "%s" "$*"' _ a b 2>&1)
+check "with-token gitlab: the arguments are the command's own, no token among them" "$(is "$out" 'a b')"
 
 # ----------------------------------------------------- what the tokens may do
 # The two rights that matter, read from the one table, so that a change to it is a change
