@@ -34,10 +34,41 @@
 #   SPIKE_HUMAN_TOKEN the human's personal access token, scope api
 # (SPIKE_NAP, whole seconds between two looks at GitLab, is for the test: leave it alone.)
 #
-# Usage: scripts/spike/gitlab-forge.sh --dry-run [--host H] [--project P]
+# --only forms: the second run (task #200, epic #160 revision 3). It runs M01 and the project
+# checks first, then only M15 to M18, which measure the glab spellings of the status and of the
+# merge, how glab says a 404, a 409 and a 401, and what a granular PAT limited to the project can
+# do. Same throwaway project, same two tokens, and glab on PATH (M15 to M18 are glab's). It
+# creates two merge requests and MERGES both into the default branch (M17 as the human, M18 with
+# the granular PAT), commit statuses on one SHA, one pipeline.
+#   SPIKE_GRANULAR_TOKEN  optional: a granular PAT you create in the interface
+#                         (https://gitlab.com/-/user_settings/personal_access_tokens), expiry
+#                         tomorrow, limited to THE THROWAWAY PROJECT ALONE. Tick only
+#                           - Commit statuses: read and create;
+#                           - Merge requests: read and update (merging is no separate
+#                             permission; if the interface offers a merge or a create one, tick
+#                             it too);
+#                         nothing else, no group, no other project, no user-level permission.
+#                         With it the script: reads GET /user and GET /personal_access_tokens/self,
+#                         writes the commit status ola-spike-m18 on one SHA of the throwaway
+#                         project, merges one merge request there, and on --other-project does
+#                         one read and tries one status named ola-spike-other-refused (it is
+#                         written there only if the PAT is not limited as it should be: that is
+#                         what is measured). It also reads the statuses list and the merge request
+#                         once, to tell whether the two "read" permissions are needed. Without it
+#                         M18 says "not measurable".
+#   --other-project P     optional: another project of yours (group/.../project), where the PAT
+#                         must be able to do nothing. Not touched by any other token than the
+#                         human's read of its latest commit SHA. PICK A PROJECT THAT DOES NOT
+#                         MATTER: if the PAT is not limited to the throwaway project, the status
+#                         success ola-spike-other-refused stays on the last commit of its default
+#                         branch, with an external pipeline (M11), and nothing here removes it.
+#
+# Usage: scripts/spike/gitlab-forge.sh --dry-run [--only forms] [--host H] [--project P]
 #        scripts/spike/gitlab-forge.sh --project <group/.../project> [--host gitlab.com] [--yes] | tee run.txt
+#        scripts/spike/gitlab-forge.sh --only forms --project <group/.../project> [--other-project <group/.../project>] [--yes] | tee run2.txt
 # --dry-run prints the plan and touches nothing: no network, no git, no token read.
 # Without --yes it names the host and the project and waits for the project path to be typed.
+# (SPIKE_GRANULAR_TOKEN and --other-project are read by --only forms alone.)
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -46,6 +77,8 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 
 HOST=gitlab.com
 PROJECT=""
+OTHER=""
+ONLY=""
 DRY=0
 YES=0
 
@@ -58,6 +91,8 @@ while [ $# -gt 0 ]; do
   case $1 in
     --host) [ $# -ge 2 ] || die "--host needs a value"; HOST=$2; shift 2 ;;
     --project) [ $# -ge 2 ] || die "--project needs a value"; PROJECT=$2; shift 2 ;;
+    --other-project) [ $# -ge 2 ] || die "--other-project needs a value"; OTHER=$2; shift 2 ;;
+    --only) [ $# -ge 2 ] || die "--only needs a value"; ONLY=$2; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --yes) YES=1; shift ;;
     -h | --help) usage; exit 0 ;;
@@ -68,6 +103,10 @@ done
 printf '%s' "$HOST" | grep -Eq '^[A-Za-z0-9.-]+(:[0-9]+)?$' || die "--host is not a plain host name"
 [ -z "$PROJECT" ] || printf '%s' "$PROJECT" | grep -Eq '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$' ||
   die "--project is not a group/project path"
+[ -z "$OTHER" ] || printf '%s' "$OTHER" | grep -Eq '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$' ||
+  die "--other-project is not a group/project path"
+[ -z "$OTHER" ] || [ "$OTHER" != "$PROJECT" ] || die "--other-project is the throwaway project: it has to be another one"
+case $ONLY in '' | forms) ;; *) die "--only takes: forms" ;; esac
 
 plan() { # one line per measure: the same text the run prints in front of its observations
   cat <<'EOF'
@@ -88,6 +127,21 @@ M14 the PAT creation page pre-filled (/-/user_settings/personal_access_tokens?na
 EOF
 }
 
+plan_forms() { # M15 to M18, the same text the run prints in front of its observations
+  cat <<'EOF'
+M15 status by glab api -X POST projects/<path>/statuses/<sha> -f state -f name -f description: as the human, as the bot, as the human again (201, author.id); then the list statuses?name=<n>&per_page=100, with and without all=true: order, author.id, is the largest id the last posted
+M16 glab api --include projects/<path>/jobs/<id> with the bot token: a CI job (200 expected), an external status (404 expected), a dummy token (401 expected): glab's exit code, the state line and message it prints
+M17 merge by glab api -X PUT projects/<path>/merge_requests/<N>/merge -F squash=true -f sha=<sha>: human with a wrong sha (409 expected), bot (401 expected, MR not scheduled), human with the right sha (merged, squash_commit_sha, title = the MR's)
+M18 with SPIKE_GRANULAR_TOKEN: granular, scopes and user_id at /personal_access_tokens/self, GET /user, M15 and M17 again with it, and it reads the statuses list and the merge request once (are the two "read" permissions needed?); on --other-project a read and a status, both expected refused, with the message of their body; without the token or the project: not measurable
+EOF
+}
+
+other_warning() { # what a PAT that is not limited leaves behind on --other-project
+  echo "--other-project: pick a project that does not matter. If the PAT is not limited to the"
+  echo "throwaway project, the status ola-spike-other-refused (success) stays on the last commit of"
+  echo "that project's default branch, with an external pipeline (M11), and the script cannot remove it."
+}
+
 banner() {
   echo "ola-workflow GitLab spike"
   echo "host:    $HOST"
@@ -100,9 +154,15 @@ banner() {
 if [ "$DRY" = 1 ]; then
   banner
   echo "dry run: no network, no git, no token read. The run would measure:"
+  if [ "$ONLY" = forms ]; then
+    echo "only forms: M01 and the project checks run first (identities, protection of the default branch)."
+    echo "SPIKE_GRANULAR_TOKEN (optional): a granular PAT limited to the throwaway project alone, with"
+    echo "Commit statuses (read, create) and Merge requests (read, update) ticked, nothing else."
+    other_warning
+  fi
   # cut at 100 columns on a space, the continuation indented: a terminal that cuts a line itself
   # drops the space it cuts at, and what is copied from it reads "label,note"
-  plan | awk -v w=100 '{
+  { if [ "$ONLY" = forms ]; then plan_forms; else plan; fi; } | awk -v w=100 '{
     n = split($0, words, " "); line = words[1]
     for (i = 2; i <= n; i++) {
       if (length(line) + 1 + length(words[i]) > w) { print line; line = "    " words[i] }
@@ -118,6 +178,9 @@ for v in SPIKE_BOT_TOKEN SPIKE_HUMAN_TOKEN; do
   [ -n "${!v:-}" ] || die "$v is not set (tokens come from the environment only)"
   printf '%s' "${!v}" | grep -Eq '^[A-Za-z0-9_.=-]+$' || die "$v holds characters a token does not"
 done
+if [ "$ONLY" = forms ] && [ -n "${SPIKE_GRANULAR_TOKEN:-}" ]; then
+  printf '%s' "$SPIKE_GRANULAR_TOKEN" | grep -Eq '^[A-Za-z0-9_.=-]+$' || die "SPIKE_GRANULAR_TOKEN holds characters a token does not"
+fi
 for tool in curl jq git; do
   command -v "$tool" >/dev/null || die "$tool is not on PATH"
 done
@@ -126,9 +189,17 @@ NAP=${SPIKE_NAP:-3} # seconds between two looks at GitLab; for the test, which s
 case $NAP in '' | *[!0-9]*) die "SPIKE_NAP is for the test and takes whole seconds" ;; esac
 
 banner
-echo "It will create and delete objects in that project, merge up to four merge requests into its"
-echo "default branch (with a .gitlab-ci.yml), may set that branch's protection to Maintainers and"
-echo "briefly require a green pipeline to merge."
+if [ "$ONLY" = forms ]; then
+  echo "It will create and delete objects in that project, merge two merge requests into its default"
+  echo "branch (one as the human, one with the granular token if given), write commit statuses there,"
+  echo "and may set that branch's protection to Maintainers."
+  [ -z "$OTHER" ] || echo "On $OTHER it reads one commit as the human, and tries one read and one status with the granular token."
+  [ -z "$OTHER" ] || other_warning
+else
+  echo "It will create and delete objects in that project, merge up to four merge requests into its"
+  echo "default branch (with a .gitlab-ci.yml), may set that branch's protection to Maintainers and"
+  echo "briefly require a green pipeline to merge."
+fi
 if [ "$YES" = 0 ]; then
   printf 'Type the project path to go on: '
   read -r answer || answer=""
@@ -154,7 +225,11 @@ BASE=""
 api() { # api <bot|human> <METHOD> <path> [key=value ...] → HTTP (code), BODY (the answer)
   local who=$1 method=$2 path=$3 tok kv
   shift 3
-  if [ "$who" = bot ]; then tok=$SPIKE_BOT_TOKEN; else tok=$SPIKE_HUMAN_TOKEN; fi
+  case $who in
+    bot) tok=$SPIKE_BOT_TOKEN ;;
+    granular) tok=${SPIKE_GRANULAR_TOKEN:-} ;;
+    *) tok=$SPIKE_HUMAN_TOKEN ;;
+  esac
   : >"$BODY"
   # printf is a builtin and curl reads its config on stdin: the token is in no argument list.
   HTTP=$(
@@ -170,12 +245,16 @@ api() { # api <bot|human> <METHOD> <path> [key=value ...] → HTTP (code), BODY 
   ) || HTTP=000
 }
 jb() { jq -r "$1" "$BODY" 2>/dev/null; }
-transport() { # the last line curl said, without a token in it
-  local l t
-  l=$(tail -n 1 "$WORK/curl.err" 2>/dev/null)
-  for t in "$SPIKE_BOT_TOKEN" "$SPIKE_HUMAN_TOKEN"; do
+mask() { # mask <text> → the text, with every token in it replaced; to do BEFORE any cut
+  local t l=$1
+  for t in "$SPIKE_BOT_TOKEN" "$SPIKE_HUMAN_TOKEN" "${SPIKE_GRANULAR_TOKEN:-}"; do
     [ -z "$t" ] || l=${l//"$t"/***} # mask first: a cut would leave the start of a token on the edge
   done
+  printf '%s' "$l"
+}
+transport() { # the last line curl said, without a token in it
+  local l
+  l=$(mask "$(tail -n 1 "$WORK/curl.err" 2>/dev/null)")
   l=$(printf '%s' "$l" | cut -c1-160)
   echo "${l:-curl said nothing}"
 }
@@ -556,9 +635,15 @@ gl() { # gl <token|-|empty> <dir> <glab args...> — the token goes by environme
       empty) export GITLAB_TOKEN= ;;
       human) export GITLAB_TOKEN=$SPIKE_HUMAN_TOKEN ;;
       bot) export GITLAB_TOKEN=$SPIKE_BOT_TOKEN ;;
+      granular) export GITLAB_TOKEN=${SPIKE_GRANULAR_TOKEN:-} ;;
+      dummy) export GITLAB_TOKEN=dummy-ola-spike-0123456789 ;; # no GitLab knows it: M16's 401
     esac
     cd "$dir" || exit 1
-    if [ "${GL_STDERR:-}" = merge ]; then glab "$@" 2>&1; else glab "$@" 2>>"$WORK/glab.err"; fi
+    case ${GL_STDERR:-} in
+      merge) glab "$@" 2>&1 ;;
+      keep) glab "$@" 2>"$WORK/gl.err" ;; # glx reads it
+      *) glab "$@" 2>>"$WORK/glab.err" ;;
+    esac
   )
 }
 who_glab() { gl "$1" "$2" api user | jq -r '.username // "no user"' 2>/dev/null || echo "no answer"; }
@@ -695,10 +780,217 @@ m14() {
   manual 14 "the PAT creation page pre-filled" "open https://$HOST/-/user_settings/personal_access_tokens?name=ola-workflow-review&description=ola-workflow&scopes=api : are the name, the description and the scope pre-filled?"
 }
 
+# --- the glab forms, M15 to M18 (--only forms) ------------------------------------------
+# Every call is `glab api` with an explicit encoded path (":id" resolved nothing with an
+# upstream remote, M10), from a directory that is no repository, the host in GITLAB_HOST and
+# the token in GITLAB_TOKEN. --include prints the state line, which is the only way to read a
+# 201, a 404 or a 401; the exit code and glab's own message on its standard error come with it.
+
+glx() { # glx <human|bot|granular|dummy> <glab args...> → GLRC; glab's output in gl.out, its stderr in gl.err; BODY
+  local tok=$1
+  shift
+  : >"$WORK/gl.err"
+  GL_STDERR=keep gl "$tok" "$WORK/norepo" "$@" >"$WORK/gl.out"
+  GLRC=$?
+  if head -n 1 "$WORK/gl.out" | grep -q '^HTTP/'; then
+    awk 'b { print } !b && /^\r?$/ { b = 1 }' "$WORK/gl.out" >"$BODY" # the body, after the headers
+  else
+    cp "$WORK/gl.out" "$BODY"
+  fi
+}
+gl_seen() { # what the last glx showed: exit code, state line, first line of stderr (masked, then cut)
+  local st er
+  st=$(grep -m1 '^HTTP/' "$WORK/gl.out" | tr -d '\r')
+  er=$(grep -m1 . "$WORK/gl.err")
+  mask "exit $GLRC; ${st:-no state line}; stderr: ${er:-nothing}" | cut -c1-200
+}
+gl_body() { # the message GitLab put in the body of the last glx: glab may not copy it on stderr, and "404 Not found" against "404 Project Not Found" is the distinction #165 needs
+  local t
+  t=$(jq -r '(.message // .error // "no message") | tostring' "$BODY" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+  mask "${t:-no message}" | cut -c1-140 # masked first, cut after
+}
+gl_status() { # gl_status <token> <encoded project> <sha> <name> — the form #165 will write
+  glx "$1" api --include -X POST "projects/$2/statuses/$3" -f state=success -f "name=$4" -f "description=ola-spike $RUN"
+}
+gl_merge() { # gl_merge <token> <iid> <sha> — the form #166 will write
+  glx "$1" api --include -X PUT "projects/$ENC/merge_requests/$2/merge" -F squash=true -f "sha=$3"
+}
+merged_line() { # what a merge answered: its state and whether it names a squash commit
+  jb '"state \(.state // "?"), squash_commit_sha \(.squash_commit_sha // "null")"'
+}
+f_mr() { # f_mr <branch suffix> <title suffix> → a merge request of the bot on a new branch; MR_IID, MR_SHA
+  MR_IID=""
+  MR_SHA=""
+  mkbranch "ola-spike-$RUN-$1" plain || return 1
+  pushb "ola-spike-$RUN-$1" -o ci.skip
+  [ "$PUSH_RC" = 0 ] || return 1
+  open_mr "ola-spike-$RUN-$1" "ola-spike $RUN $2"
+  [ -n "$MR_IID" ]
+}
+status_list() { # status_list <token> <name> <last posted id> <more query> → the list a hook would read
+  local q="name=$2&per_page=100$4" ln mx
+  glx "$1" api "projects/$ENC/repository/commits/$FA_SHA/statuses?$q"
+  ln=$(jb '[.[]?] | "\(length) entries (id/author.id): " + (map("\(.id)/\(.author.id // "none")") | join(", ")) + "; first #\(.[0].id // "none"), last #\(.[-1].id // "none")"')
+  mx=$(jb '[.[]?.id] | max // "none"')
+  m 15 "list: GET …/commits/<sha>/statuses?$q" "${ln:-no list in the answer}; largest id is the last posted: $([ "$mx" = "$3" ] && echo yes || echo no) ($(gl_seen))"
+}
+
+m15() {
+  local n=ola-spike-m15 who want id last=""
+  [ "$GIT_OK" = 1 ] || { m 15 "a status by glab" "not measurable: no git clone"; return; }
+  f_mr f F || { m 15 "a status by glab" "not measurable: the merge request to post on could not be made"; return; }
+  FA_IID=$MR_IID
+  FA_SHA=$MR_SHA
+  for who in human bot human; do
+    want=$HUM_ID
+    [ "$who" != bot ] || want=$BOT_ID
+    gl_status "$who" "$ENC" "$FA_SHA" "$n"
+    id=$(jb '.id // empty')
+    last=$id
+    res 15 "$who: glab api --include -X POST …/statuses/<sha> -f state -f name -f description" "$(gl_seen); author.id $(jb '.author.id // "none"')" "^exit 0; HTTP/[0-9.]+ 201.*author.id $want\$" "a 201 and author.id $want ($who)"
+  done
+  status_list human "$n" "$last" ""
+  status_list human "$n" "$last" "&all=true"
+  glx human api -X POST "projects/$ENC/statuses/$FA_SHA" -f state=success -f "name=$n-plain" -f "description=ola-spike $RUN"
+  m 15 "human, without --include: glab api -X POST …/statuses/<sha>" "exit $GLRC; status $(jb '.status // "none"'), author.id $(jb '.author.id // "none"')"
+}
+
+gl_job() { # gl_job <bot|dummy> <id> <what it is> <regex> <expected>
+  local seen
+  glx "$1" api --include "projects/$ENC/jobs/$2"
+  seen=$(gl_seen)
+  [ "$GLRC" = 0 ] || seen="$seen; body: $(gl_body)" # a refusal: its message, beside glab's
+  res 16 "$1: glab api --include projects/<project>/jobs/<id> ($3)" "$seen" "$4" "$5"
+}
+m16() {
+  local sha pl job ext i=0
+  [ "$GIT_OK" = 1 ] || { m 16 "a CI job and an external status" "not measurable: no git clone"; return; }
+  mkbranch "ola-spike-$RUN-j" ci
+  sha=$LAST_SHA
+  [ -n "$sha" ] || { m 16 "a CI job and an external status" "not measurable: the branch could not be made"; return; }
+  pushb "ola-spike-$RUN-j" # no ci.skip: the push has to start the pipeline
+  m 16 "push a branch with a .gitlab-ci.yml job named agent-review, as the human" "$(push_result)"
+  [ "$PUSH_RC" = 0 ] || { m 16 "the pipeline of that push" "not measurable: the push failed, so no pipeline can come of it"; return; }
+  while [ $i -lt 20 ]; do # 20 looks, NAP seconds apart: 60 s at the default
+    api human GET "/projects/$PID/pipelines?sha=$sha"
+    [ "$(jb 'length')" != 0 ] && break
+    sleep "$NAP"
+    i=$((i + 1))
+  done
+  pl=$(jb '.[0].id // empty')
+  [ -n "$pl" ] || { m 16 "the pipeline of that push" "not measurable: none within $((20 * NAP)) s (CI disabled, no runner, or the account not verified)"; return; }
+  api human GET "/projects/$PID/pipelines/$pl/jobs"
+  job=$(jb '[.[]? | select(.name == "agent-review")][0].id // empty')
+  gl_status human "$ENC" "$sha" ola-spike-m16-ext
+  ext=$(jb '.id // empty')
+  m 16 "ids on that SHA: the CI job agent-review, and an external status ola-spike-m16-ext" "job ${job:-none}, status ${ext:-none}"
+  if [ -z "$job" ] || [ -z "$ext" ]; then
+    m 16 "the probes" "not measurable: a job or a status id is missing"
+    return
+  fi
+  gl_job bot "$job" "a CI job" '^exit 0; HTTP/[0-9.]+ 200' "exit 0 and 200"
+  gl_job bot "$ext" "an external status" '^exit [1-9][0-9]*; HTTP/[0-9.]+ 404' "a non-zero exit and 404"
+  gl_job dummy "$job" "a dummy token" '^exit [1-9][0-9]*; HTTP/[0-9.]+ 401' "a non-zero exit and 401"
+}
+
+m17() {
+  local im=${FA_IID:-} sha=${FA_SHA:-} title sq=""
+  [ -n "$im" ] && [ -n "$sha" ] || { m 17 "a merge by glab" "not measurable: no merge request from M15"; return; }
+  title="ola-spike $RUN F"
+  m 17 "merge request ready?" "$(wait_mergeable "$im")"
+  gl_merge human "$im" 0000000000000000000000000000000000000000
+  res 17 "human, wrong sha: glab api --include -X PUT …/merge -F squash=true -f sha=<wrong>" "$(gl_seen); body: $(gl_body)" '^exit [1-9][0-9]*; HTTP/[0-9.]+ 409' "a non-zero exit and 409"
+  gl_merge bot "$im" "$sha"
+  res 17 "bot, right sha: glab api --include -X PUT …/merge -F squash=true -f sha=<sha>" "$(gl_seen)" '^exit [1-9][0-9]*; HTTP/[0-9.]+ 401' "a non-zero exit and 401"
+  api human GET "/projects/$PID/merge_requests/$im"
+  res 17 "the MR after the bot's attempt" "state $(jb .state), scheduled $(jb '.merge_when_pipeline_succeeds // .auto_merge_enabled // false')" '^state opened, scheduled false' "opened and nothing scheduled"
+  gl_merge human "$im" "$sha"
+  res 17 "human, right sha: glab api --include -X PUT …/merge -F squash=true -f sha=<sha>" "$(gl_seen); $(merged_line)" '^exit 0; HTTP/[0-9.]+ 200.*state merged, squash_commit_sha [0-9a-f]' "exit 0, merged, a squash_commit_sha"
+  sq=$(jb '.squash_commit_sha // empty')
+  if [ -z "$sq" ]; then # the answer may come before the squash commit is named: look again
+    sleep "$NAP"
+    api human GET "/projects/$PID/merge_requests/$im"
+    sq=$(jb '.squash_commit_sha // empty')
+  fi
+  if [ -n "$sq" ]; then
+    api human GET "/projects/$PID/repository/commits/$sq"
+    m 17 "the squash commit's title against the MR's" "'$(jb .title)' — $([ "$(jb .title)" = "$title" ] && echo equal || echo "different from '$title'")"
+  else
+    m 17 "the squash commit's title against the MR's" "not measurable: no squash_commit_sha, in the merge answer nor in the MR"
+  fi
+}
+
+m18() {
+  local osha oenc
+  if [ -z "${SPIKE_GRANULAR_TOKEN:-}" ]; then
+    m 18 "granular token" "not measurable: no granular token given"
+    return
+  fi
+  api granular GET /personal_access_tokens/self
+  m 18 "granular: GET /personal_access_tokens/self" "$(h); granular $(jb '.granular | if . == null then "absent" else tostring end'), scopes $(jb '[.scopes[]? | tostring] | join(",")'), user_id $(jb '.user_id // "?"') (the human is $HUM_ID), expires_at $(jb '.expires_at // "never"'), fields $(jb 'keys | join(",")')"
+  api granular GET /user
+  m 18 "granular: GET /user" "$(h); user $(jb '.username // "?"') (id $(jb '.id // "?"')), bot $(jb '.bot // false')"
+  if [ -n "${FA_SHA:-}" ]; then
+    gl_status granular "$ENC" "$FA_SHA" ola-spike-m18
+    res 18 "granular: glab api --include -X POST …/statuses/<sha>" "$(gl_seen); author.id $(jb '.author.id // "none"')" "^exit 0; HTTP/[0-9.]+ 201.*author.id $HUM_ID\$" "a 201 and the human as author.id"
+    # the read side of "Commit statuses": only the granular token reads, so a refusal says it is needed
+    glx granular api --include "projects/$ENC/repository/commits/$FA_SHA/statuses?name=ola-spike-m18&per_page=100"
+    res 18 "granular: list, glab api --include projects/<project>/repository/commits/<sha>/statuses?name=ola-spike-m18&per_page=100" "$(gl_seen); $(if jq -e 'type == "array"' "$BODY" >/dev/null 2>&1; then jb '"\(length) entries"'; else echo "body: $(gl_body)"; fi)" '^exit 0; HTTP/[0-9.]+ 200' "a 200 (a refusal means 'Commit statuses: read' is not enough or not ticked)"
+  else
+    m 18 "granular: a status" "not measurable: no SHA from M15"
+  fi
+  if f_mr g G; then
+    m 18 "merge request ready?" "$(wait_mergeable "$MR_IID")"
+    # the read side of "Merge requests", before the update
+    glx granular api --include "projects/$ENC/merge_requests/$MR_IID"
+    res 18 "granular: the merge request, glab api --include projects/<project>/merge_requests/<N>" "$(gl_seen); $(if [ "$GLRC" = 0 ]; then echo "state $(jb '.state // "?"')"; else echo "body: $(gl_body)"; fi)" '^exit 0; HTTP/[0-9.]+ 200' "a 200 (a refusal means 'Merge requests: read' is not enough or not ticked)"
+    gl_merge granular "$MR_IID" "$MR_SHA"
+    res 18 "granular, right sha: glab api --include -X PUT …/merge -F squash=true -f sha=<sha>" "$(gl_seen); $(merged_line)" 'state merged' "merged: the PAT acts as the human"
+  else
+    m 18 "granular: a merge" "not measurable: the merge request could not be made"
+  fi
+  if [ -z "$OTHER" ]; then
+    m 18 "other project" "not measurable: no --other-project given"
+    return
+  fi
+  oenc=$(jq -rn --arg p "$OTHER" '$p|@uri')
+  api human GET "/projects/$oenc/repository/commits?per_page=1"
+  osha=$(jb '.[0].id // empty')
+  glx granular api --include "projects/$oenc"
+  res 18 "other project: read, glab api --include projects/<other project>" "$(gl_seen); body: $(gl_body)" 'HTTP/[0-9.]+ 40[134]' "a refusal (401, 403 or 404)"
+  if [ -z "$osha" ]; then
+    m 18 "other project: a status" "not measurable: the human token reads no commit there ($(h))"
+    return
+  fi
+  gl_status granular "$oenc" "$osha" ola-spike-other-refused
+  res 18 "other project: a status, glab api --include -X POST projects/<other project>/statuses/<sha>" "$(gl_seen); body: $(gl_body)" 'HTTP/[0-9.]+ 40[134]' "a refusal (401, 403 or 404): a 201 would mean the PAT is not limited to the project"
+}
+
+forms() {
+  local k
+  mkdir -p "$WORK/glab-config" "$WORK/glab-home" "$WORK/norepo"
+  GL_HOST_ENV=$HOST
+  if ! command -v glab >/dev/null; then
+    for k in 15 16 17 18; do m "$k" "glab" "not measurable: glab is not on PATH"; done
+    return
+  fi
+  pre "glab version" "$(glab --version 2>&1 | head -n 1)"
+  m15
+  m16
+  m17
+  m18
+}
+
 echo
 echo "run $RUN — $(date -u +%FT%TZ)"
 GIT_OK=0
 HUM_U=""; HUM_ID=""; BOT_U=""; BOT_ID=""
+if [ "$ONLY" = forms ]; then
+  m01
+  pre_project
+  forms
+  exit 0
+fi
 m01
 pre_project
 m02

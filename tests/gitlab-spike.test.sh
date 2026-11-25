@@ -23,6 +23,7 @@ trap 'rm -rf "${WORK:?}"' EXIT
 
 BOT=glpat-botsecret0123456789
 HUMAN=glpat-humansecret0123456789
+GRAN=glpat-granularsecret0123456789
 
 # The fakes. curl answers like a GitLab that knows nothing: it reads the config on stdin (as
 # the script feeds it, so the token never is in argv), tells the two tokens apart, writes a
@@ -53,9 +54,15 @@ for a in "$@"; do
   prev=$a
 done
 user=human
-case $cfg in *"$FAKE_BOT"*) user=bot ;; esac
+kind=human
+case $cfg in *"$FAKE_BOT"*) user=bot; kind=bot ;; esac
+[ -z "${FAKE_GRAN:-}" ] || case $cfg in *"$FAKE_GRAN"*) kind=granular ;; esac
 url=$(printf '%s\n' "$cfg" | sed -n 's/^url = "\(.*\)"$/\1/p')
 case $url in
+  */repository/commits\?per_page=1) body='[{"id":"fedcba9876543210fedcba9876543210fedcba98"}]' ;;
+  */pipelines/*/jobs) body='[{"id":111,"name":"agent-review","status":"pending"},{"id":112,"name":"manual-job","status":"manual"}]' ;;
+  # a granular PAT says so, and acts as the human
+  */personal_access_tokens/self) body="{\"id\":5,\"granular\":$([ $kind = granular ] && echo true || echo false),\"scopes\":[\"read_repository\"],\"user_id\":1,\"expires_at\":\"2026-11-19\"}" ;;
   # a SHA that has no pipeline, ever (FAKE_NOPIPE=1)
   */pipelines\?sha=*) body=$([ "${FAKE_NOPIPE:-}" = 1 ] && echo '[]' || echo '[{"id":9,"source":"push","status":"pending"}]') ;;
   */api/v4/user) body="{\"id\":$([ $user = bot ] && echo 2 || echo 1),\"username\":\"$user\",\"bot\":$([ $user = bot ] && echo true || echo false)}" ;;
@@ -95,8 +102,59 @@ EOF
 cat >"$FAKES/glab" <<'EOF'
 #!/usr/bin/env bash
 printf 'glab %s\n' "$*" >>"$CALLS"
-printf 'glab %s HOME=%s XDG_CONFIG_HOME=%s\n' "$*" "$HOME" "${XDG_CONFIG_HOME:-}" >>"$GLAB_ENV"
+case "${GITLAB_TOKEN:-}" in
+  "") kind=none ;;
+  "${FAKE_BOT:-x}") kind=bot ;;
+  "${FAKE_GRAN:-x}") kind=granular ;;
+  "${FAKE_HUMAN:-x}") kind=human ;;
+  *) kind=other ;;
+esac
+printf 'glab %s HOME=%s XDG_CONFIG_HOME=%s TOKEN=%s\n' "$*" "$HOME" "${XDG_CONFIG_HOME:-}" "$kind" >>"$GLAB_ENV"
 cat >/dev/null </dev/stdin 2>/dev/null || true
+# FAKE_API=1: `glab api` as a GitLab answers it (job 111 is a job; any other id is a status)
+if [ "${FAKE_API:-}" = 1 ] && [ "$1" = api ]; then
+  inc=0; method=GET; url=""; prev=""
+  for a in "$@"; do
+    [ "$a" != --include ] || inc=1
+    [ "$prev" != -X ] || method=$a
+    case $a in projects/*) url=$a ;; esac
+    prev=$a
+  done
+  code=404; body='{"message":"404 Not found"}'
+  if [ $kind = other ]; then
+    code=401; body='{"message":"401 Unauthorized"}'
+  else
+    case "$method $url" in
+      *group%2Fother*) [ $kind != granular ] || { code=404; body='{"message":"404 Project Not Found"}'; } ;;
+      "POST "*/statuses/*)
+        n=$(($(cat "$CALLS.n" 2>/dev/null || echo 9) + 1)); echo $n >"$CALLS.n"
+        code=201; body="{\"id\":$n,\"status\":\"success\",\"author\":{\"id\":$([ $kind = bot ] && echo 2 || echo 1)}}" ;;
+      "GET "*/statuses\?*) code=200; body='[{"id":10,"author":{"id":1}},{"id":11,"author":{"id":2}},{"id":12,"author":{"id":1}}]' ;;
+      "GET "*/jobs/111) code=200; body='{"id":111}' ;;
+      "GET "*/merge_requests/[0-9]) code=200; body='{"iid":3,"state":"opened"}' ;;
+      "PUT "*/merge)
+        case " $* " in
+          *"sha=0000"*) code=409; body='{"message":"SHA does not match HEAD of source branch"}' ;;
+          *) if [ $kind = bot ]; then
+               code=401; body='{"message":"401 Unauthorized"}'
+             else
+               code=200; body='{"state":"merged","squash_commit_sha":"5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e"}'
+             fi ;;
+        esac ;;
+    esac
+  fi
+  # FAKE_REFUSE_READ=1: a granular PAT without the read permissions is refused 403 on the two reads
+  [ "${FAKE_REFUSE_READ:-}" != 1 ] || [ $kind != granular ] || case "$method $url" in
+    "GET "*/statuses\?*|"GET "*/merge_requests/[0-9]) code=403; body='{"message":"403 Forbidden"}' ;;
+  esac
+  # FAKE_ECHO_TOKEN=1: a GitLab whose 404 message repeats the token too, in the body
+  [ "${FAKE_ECHO_TOKEN:-}" != 1 ] || [ $code != 404 ] || body="{\"message\":\"404 Not found ${PAD:-}(token $GITLAB_TOKEN)\"}"
+  case $code in 200) w=OK ;; 201) w=Created ;; 401) w=Unauthorized ;; 403) w=Forbidden ;; 409) w=Conflict ;; *) w="Not Found" ;; esac
+  if [ $inc = 1 ]; then printf 'HTTP/2.0 %s %s\r\nContent-Type: application/json\r\n\r\n%s\n' "$code" "$w" "$body"; else printf '%s\n' "$body"; fi
+  # FAKE_ECHO_TOKEN=1: a glab whose message repeats the token it was given, after PAD characters
+  [ "${FAKE_ECHO_TOKEN:-}" != 1 ] || tail=" ${PAD:-}(token $GITLAB_TOKEN)"
+  case $code in 2??) exit 0 ;; *) echo "glab: $code $w${tail:-}" >&2; exit 1 ;; esac
+fi
 case "$*" in
   *"auth login"*)
     [ "${FAKE_GLAB:-}" != fails ] || exit 1
@@ -110,11 +168,11 @@ chmod +x "$FAKES"/*
 : >"$CALLS"
 
 run() { # run [args...] → OUT (stdout and stderr together), STATUS; stdin is empty
-  OUT=$(PATH="$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" "$SCRIPT" "$@" 2>&1 </dev/null)
+  OUT=$(PATH="$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" FAKE_HUMAN="$HUMAN" FAKE_GRAN="$GRAN" "$SCRIPT" "$@" 2>&1 </dev/null)
   STATUS=$?
 }
 no_secret() { # no_secret <label> → the tokens are in neither the output nor a recorded command line
-  if printf '%s\n' "$OUT" | grep -qF -e "$BOT" -e "$HUMAN" || grep -qF -e "$BOT" -e "$HUMAN" "$CALLS"; then
+  if printf '%s\n' "$OUT" | grep -qF -e "$BOT" -e "$HUMAN" -e "$GRAN" || grep -qF -e "$BOT" -e "$HUMAN" -e "$GRAN" "$CALLS"; then
     ko "$1: a token reached the output or a command line"
   else
     ok "$1: no token in the output nor in a command line"
@@ -252,15 +310,25 @@ printf '%s\n' "$OUT" | grep -qx 'M07 the pipeline of that push → not measurabl
 # --- M07 waits NAP seconds between two looks, never a fixed 5 (a fake sleep records the delays)
 SLEEPS=$WORK/sleeps
 mkdir -p "$WORK/sleepbin"
+# Each sleep is written with the label of the last measure the run had printed (the output goes to
+# a file the fake reads), so that M07's sleeps are counted alone: M11 sleeps too, and eleven of
+# its sleeps once satisfied a test that M07's own had been removed from.
 cat >"$WORK/sleepbin/sleep" <<'EOF'
 #!/usr/bin/env bash
-echo "$*" >>"$SLEEPS"
+echo "$(grep -o '^M[0-9][0-9]' "$OUTF" | tail -n 1) $*" >>"$SLEEPS"
 EOF
 chmod +x "$WORK/sleepbin/sleep"
-: >"$SLEEPS"
-: >"$CALLS"
-OUT=$(SLEEPS="$SLEEPS" FAKE_NOPIPE=1 PATH="$WORK/sleepbin:$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" "$SCRIPT" --yes --project group/throwaway 2>&1 </dev/null)
-printf '%s\n' "$OUT" | grep -q '^M07 the pipeline of that push → not measurable: none within' && [ -s "$SLEEPS" ] && ! grep -qvx 0 "$SLEEPS" && ok "M07 sleeps SPIKE_NAP between two looks for a pipeline, nothing else" || ko "M07 sleeps: $(sort "$SLEEPS" | uniq -c | tr '\n' ' ')"
+OUTF=$WORK/out-sleeps
+nap_run() { # nap_run [script args...] → the run with a fake sleep; OUT, and $SLEEPS labelled by measure
+  : >"$SLEEPS"
+  : >"$CALLS"
+  rm -f "$CALLS.n"
+  OUTF=$OUTF SLEEPS="$SLEEPS" FAKE_NOPIPE=1 FAKE_API=1 PATH="$WORK/sleepbin:$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="$GLAB_ENV" SPIKE_NAP=0 FAKE_BOT="$BOT" FAKE_HUMAN="$HUMAN" FAKE_GRAN="$GRAN" "$SCRIPT" "$@" >"$OUTF" 2>&1 </dev/null
+  OUT=$(cat "$OUTF")
+}
+nap_run --yes --project group/throwaway
+n=$(grep -c '^M07 ' "$SLEEPS")
+printf '%s\n' "$OUT" | grep -q '^M07 the pipeline of that push → not measurable: none within' && [ "$n" = 20 ] && ! grep '^M07 ' "$SLEEPS" | grep -qv ' 0$' && ok "M07 sleeps SPIKE_NAP between its 20 looks for a pipeline, counted alone" || ko "M07 sleeps: $n of its own; all: $(sort "$SLEEPS" | uniq -c | tr '\n' ' ')"
 
 # --- the plan: lines that fit a terminal, and nothing lost where they are cut
 run --dry-run
@@ -308,6 +376,108 @@ OUT=$(FAKE_GLAB=fails PATH="$FAKES:$PATH" CALLS="$CALLS" CFGS="$CFGS" GLAB_ENV="
 STATUS=$?
 [ "$STATUS" = 0 ] && printf '%s\n' "$OUT" | grep -q '^M10 glab → not measurable: glab could not log in (exit 1)' && ! printf '%s\n' "$OUT" | grep -q 'ignores GLAB_CONFIG_DIR' && ok "a refused glab login says so, not that GLAB_CONFIG_DIR is ignored" || ko "refused login: status $STATUS: $(printf '%s\n' "$OUT" | grep '^M10')"
 printf '%s\n' "$OUT" | grep -q '^M14 ' && ok "…and M11 to M14 are still measured" || ko "the run stopped after a refused login"
+
+# --- --only forms: M15 to M18 (the glab forms and a granular PAT), epic #160 revision 3, task #200
+unset SPIKE_BOT_TOKEN SPIKE_HUMAN_TOKEN
+: >"$CALLS"
+SPIKE_BOT_TOKEN=$BOT SPIKE_HUMAN_TOKEN=$HUMAN SPIKE_GRANULAR_TOKEN=$GRAN run --dry-run --only forms --project group/throwaway --other-project group/other
+n=$(printf '%s\n' "$OUT" | grep -cE '^M1[5-8] ')
+[ "$STATUS" = 0 ] && [ "$n" = 4 ] && ! printf '%s\n' "$OUT" | grep -qE '^M(0[1-9]|1[0-4]) ' && ok "--dry-run --only forms prints M15 to M18 and none of M01 to M14" || ko "--only forms plan: status $STATUS, $n lines: $OUT"
+[ ! -s "$CALLS" ] && ok "--dry-run --only forms calls neither curl, git nor glab" || ko "--dry-run --only forms called: $(cat "$CALLS")"
+no_secret "--dry-run --only forms"
+unwrapped=$(printf '%s\n' "$OUT" | awk '/^ +/ { sub(/^ +/, ""); line = line " " $0; next } { if (line != "") print line; line = $0 } END { print line }')
+for phrase in '-F squash=true' 'per_page=100' 'a dummy token' 'not measurable' 'Commit statuses' 'Merge requests' 'pick a project that does not matter' 'cannot remove it' 'reads the statuses list'; do
+  printf '%s\n' "$unwrapped" | grep -qF -e "$phrase" && ok "--only forms plan says '$phrase'" || ko "the forms plan does not say '$phrase': $OUT"
+done
+! printf '%s\n' "$OUT" | grep -q 'EOF' && printf '%s\n' "$unwrapped" | grep '^M18 ' | grep -q 'not measurable$' && ok "--only forms plan: the M18 line ends on its own words, no heredoc delimiter glued to it" || ko "the M18 plan line is glued to something: $(printf '%s\n' "$OUT" | grep -n 'EOF\|^M18')"
+long=$(printf '%s\n' "$OUT" | awk 'length($0) > 100' | head -n 1)
+[ -z "$long" ] && ok "--only forms plan has no line longer than 100 columns" || ko "a forms plan line is longer than 100 columns: $long"
+
+run --dry-run --only nothing
+[ "$STATUS" = 2 ] && ok "--only takes forms and nothing else" || ko "--only nothing exited $STATUS"
+run --dry-run --only forms --project group/throwaway --other-project 'a/b c'
+[ "$STATUS" = 2 ] && ok "a bad --other-project path exits 2" || ko "bad --other-project exited $STATUS"
+run --dry-run --only forms --project group/throwaway --other-project group/throwaway
+[ "$STATUS" = 2 ] && ok "--other-project must not be the throwaway project" || ko "same --other-project exited $STATUS"
+SPIKE_BOT_TOKEN=$BOT SPIKE_HUMAN_TOKEN=$HUMAN SPIKE_GRANULAR_TOKEN='bad token;x' run --yes --only forms --project group/throwaway
+[ "$STATUS" = 2 ] && ! printf '%s' "$OUT" | grep -qF 'bad token' && ok "a granular token with odd characters exits 2 without being printed" || ko "odd granular token exited $STATUS: $OUT"
+
+# a run: glab answers like a GitLab (FAKE_API), the granular PAT and another project are given
+export SPIKE_BOT_TOKEN=$BOT SPIKE_HUMAN_TOKEN=$HUMAN
+: >"$CALLS"
+: >"$GLAB_ENV"
+rm -f "$CALLS.n"
+SPIKE_GRANULAR_TOKEN=$GRAN FAKE_API=1 run --yes --only forms --project group/throwaway --other-project group/other
+M15=$(printf '%s\n' "$OUT" | grep '^M15 ')
+[ "$STATUS" = 0 ] && printf '%s\n' "$OUT" | grep -q '^M01 ' && ! printf '%s\n' "$OUT" | grep -qE '^M(0[2-9]|1[0-4]) ' && ok "--only forms runs M01, then M15 to M18, and no other measure" || ko "forms run: status $STATUS: $OUT"
+no_secret "--only forms run"
+printf '%s\n' "$OUT" | grep -q '^Cleanup' && ok "the forms run says what it cleaned up" || ko "no Cleanup line in the forms run"
+SHA=0123456789abcdef0123456789abcdef01234567
+grep -qF "glab api --include -X POST projects/group%2Fthrowaway/statuses/$SHA -f state=success -f name=ola-spike-m15 -f description=ola-spike " "$CALLS" && ok "M15 posts the status by the exact glab form, the path encoded" || ko "no status form in the glab calls: $(grep '^glab' "$CALLS" | head -n 3)"
+grep -qF "glab api --include -X PUT projects/group%2Fthrowaway/merge_requests/3/merge -F squash=true -f sha=$SHA" "$CALLS" && ok "M17 merges by the exact glab form, -F squash=true and -f sha" || ko "no merge form in the glab calls: $(grep '^glab' "$CALLS" | grep merge | head -n 3)"
+printf '%s\n' "$M15" | grep -q '^M15 human: .*→ exit 0; HTTP/2.0 201 Created; stderr: nothing; author.id 1 — ok$' && ok "M15: the human's status is 201 with the human as author.id" || ko "M15 human line: $(printf '%s\n' "$M15" | grep 'human:')"
+printf '%s\n' "$M15" | grep -q '^M15 bot: .*→ exit 0; HTTP/2.0 201 Created; stderr: nothing; author.id 2 — ok$' && ok "M15: the bot's status is 201 with the bot as author.id, no refusal" || ko "M15 bot line: $(printf '%s\n' "$M15" | grep 'bot:')"
+printf '%s\n' "$M15" | grep -q 'per_page=100 → 3 entries (id/author.id): 10/1, 11/2, 12/1; first #10, last #12; largest id is the last posted: yes' && ok "M15: the list gives the order, author.id, and whether the largest id is the last posted" || ko "M15 list line: $(printf '%s\n' "$M15" | grep 'per_page')"
+printf '%s\n' "$M15" | grep -q 'all=true → 3 entries' && ok "M15: the same list is read with all=true" || ko "no all=true list in M15"
+M16=$(printf '%s\n' "$OUT" | grep '^M16 ')
+printf '%s\n' "$M16" | grep -q 'bot: glab api --include projects/<project>/jobs/<id> (a CI job) → exit 0; HTTP/2.0 200 OK; stderr: nothing — ok$' && ok "M16: a CI job is 200 for the bot" || ko "M16 job line: $(printf '%s\n' "$M16" | grep 'CI job')"
+printf '%s\n' "$M16" | grep -q '(an external status) → exit 1; HTTP/2.0 404 Not Found; stderr: glab: 404 Not Found; body: 404 Not found — ok$' && ok "M16: an external status is 404, with glab's exit code and message" || ko "M16 status line: $(printf '%s\n' "$M16" | grep 'external')"
+printf '%s\n' "$M16" | grep -q '(an external status) .*; body: 404 Not found — ok$' && ok "M16: the body's own message is printed, to tell 404 Not found from 404 Project Not Found" || ko "M16 status body: $(printf '%s\n' "$M16" | grep 'external')"
+printf '%s\n' "$M16" | grep -q '(a dummy token) → exit 1; HTTP/2.0 401 Unauthorized; stderr: glab: 401 Unauthorized; body: 401 Unauthorized — ok$' && ok "M16: a dummy token is 401" || ko "M16 dummy line: $(printf '%s\n' "$M16" | grep 'dummy')"
+M17=$(printf '%s\n' "$OUT" | grep '^M17 ')
+printf '%s\n' "$M17" | grep -q 'wrong sha.*HTTP/2.0 409 Conflict.*body: SHA does not match.* — ok$' && ok "M17: a wrong sha is 409 with GitLab's message" || ko "M17 wrong sha line: $(printf '%s\n' "$M17" | grep 'wrong')"
+printf '%s\n' "$M17" | grep -q 'bot, right sha.*HTTP/2.0 401 Unauthorized.* — ok$' && ok "M17: the bot's merge is 401" || ko "M17 bot line: $(printf '%s\n' "$M17" | grep 'bot')"
+printf '%s\n' "$M17" | grep -q 'human, right sha.*state merged, squash_commit_sha 5ca1ab1e' && ok "M17: the right sha merges, squash_commit_sha is not null" || ko "M17 merged line: $(printf '%s\n' "$M17" | grep 'right sha')"
+printf '%s\n' "$M17" | grep -qE "the squash commit's title against the MR's → .*(equal|different)" && ok "M17: the title of the squash commit is compared with the MR's" || ko "no M17 title line: $M17"
+printf '%s\n' "$OUT" | grep -B1 -A3 -m1 'pick a project that does not matter' | grep -q 'ola-spike-other-refused' && ok "the live run warns, before it asks, that a status may stay on the other project" || ko "no warning about the other project in the live run: $(printf '%s\n' "$OUT" | head -n 12)"
+M18=$(printf '%s\n' "$OUT" | grep '^M18 ')
+printf '%s\n' "$M18" | grep -q 'GET /personal_access_tokens/self → HTTP 200; granular true, scopes read_repository, user_id 1' && ok "M18: the granular token's own fields are read" || ko "M18 self line: $(printf '%s\n' "$M18" | grep 'self')"
+printf '%s\n' "$M18" | grep -q 'granular: glab api --include -X POST .*statuses.* HTTP/2.0 201 Created.*author.id 1 — ok$' && ok "M18: a status written with the granular token is the human's" || ko "M18 status line: $(printf '%s\n' "$M18" | grep 'POST')"
+printf '%s\n' "$M18" | grep -q 'granular, right sha.*state merged' && ok "M18: the merge is redone with the granular token" || ko "M18 merge line: $(printf '%s\n' "$M18" | grep 'merge')"
+printf '%s\n' "$M18" | grep -q 'other project: read.*HTTP/2.0 404 Not Found.* — ok$' && printf '%s\n' "$M18" | grep -q 'other project: a status.*HTTP/2.0 404 Not Found.* — ok$' && ok "M18: on the other project a read and a status are refused, with their code" || ko "M18 other project lines: $(printf '%s\n' "$M18" | grep 'other')"
+printf '%s\n' "$M18" | grep -q 'other project: read.*; body: 404 Project Not Found — ok$' && printf '%s\n' "$M18" | grep -q 'other project: a status.*; body: 404 Project Not Found — ok$' && ok "M18: the other project's refusals print the body's message" || ko "M18 other project bodies: $(printf '%s\n' "$M18" | grep 'other')"
+printf '%s\n' "$M18" | grep -q 'granular: list, glab api --include .*statuses?name=ola-spike-m18.*HTTP/2.0 200 OK.* — ok$' && ok "M18: the granular token reads the statuses list" || ko "M18 list line: $(printf '%s\n' "$M18" | grep 'list')"
+printf '%s\n' "$M18" | grep -q 'granular: the merge request, glab api --include .*merge_requests/<N>.*HTTP/2.0 200 OK.* — ok$' && grep -qF 'glab api --include projects/group%2Fthrowaway/merge_requests/3' "$CALLS" && ok "M18: the granular token reads the merge request" || ko "M18 MR read line: $(printf '%s\n' "$M18" | grep 'merge request')"
+grep 'TOKEN=granular' "$GLAB_ENV" | grep -q ' api ' && ok "the granular token reaches glab by the environment" || ko "no glab call ran with the granular token"
+grep -c 'TOKEN=other' "$GLAB_ENV" | grep -qx 1 && ok "a dummy token is used once, for M16's 401" || ko "the dummy token ran $(grep -c 'TOKEN=other' "$GLAB_ENV") times"
+
+# a granular PAT refused on the two reads: the answer to "are the read permissions needed" is the body
+: >"$CALLS"
+rm -f "$CALLS.n"
+SPIKE_GRANULAR_TOKEN=$GRAN FAKE_API=1 FAKE_REFUSE_READ=1 run --yes --only forms --project group/throwaway --other-project group/other
+M18=$(printf '%s\n' "$OUT" | grep '^M18 ')
+printf '%s\n' "$M18" | grep -q 'granular: list, .*HTTP/2.0 403 Forbidden.*; body: 403 Forbidden' && ok "M18: a refused list prints the body's message" || ko "M18 refused list: $(printf '%s\n' "$M18" | grep 'list')"
+printf '%s\n' "$M18" | grep 'granular: list, ' | grep -q 'entries' && ko "M18: a refused list reports an entry count" || ok "M18: a refused list reports no entry count"
+printf '%s\n' "$M18" | grep -q 'granular: the merge request, .*HTTP/2.0 403 Forbidden.*; body: 403 Forbidden' && ok "M18: a refused merge request read prints the body's message" || ko "M18 refused MR read: $(printf '%s\n' "$M18" | grep 'merge request')"
+no_secret "M18 with refused reads"
+
+# without a granular token: said, and M15 to M17 still measured
+: >"$CALLS"
+rm -f "$CALLS.n"
+FAKE_API=1 run --yes --only forms --project group/throwaway
+printf '%s\n' "$OUT" | grep -qx 'M18 granular token → not measurable: no granular token given' && printf '%s\n' "$OUT" | grep -q '^M17 ' && [ "$STATUS" = 0 ] && ok "no granular token: M18 says not measurable, the rest runs" || ko "no granular token: status $STATUS: $(printf '%s\n' "$OUT" | grep '^M18')"
+FAKE_API=1 SPIKE_GRANULAR_TOKEN=$GRAN run --yes --only forms --project group/throwaway
+printf '%s\n' "$OUT" | grep -q '^M18 other project → not measurable: no --other-project given' && ok "a granular token without --other-project: the other project is not measurable" || ko "no --other-project: $(printf '%s\n' "$OUT" | grep '^M18')"
+
+# M16 waits NAP seconds between two looks for the pipeline, counted alone
+FAKE_API=1 nap_run --yes --only forms --project group/throwaway
+n=$(grep -c '^M16 ' "$SLEEPS")
+printf '%s\n' "$OUT" | grep -q '^M16 the pipeline of that push → not measurable: none within' && [ "$n" = 20 ] && ! grep '^M16 ' "$SLEEPS" | grep -qv ' 0$' && ok "M16 sleeps SPIKE_NAP between its 20 looks for a pipeline" || ko "M16 sleeps: $n of its own; all: $(sort "$SLEEPS" | uniq -c | tr '\n' ' ')"
+no_secret "M16 without a pipeline"
+
+# a token that glab was given and that glab repeats on its standard error is masked, then cut
+for pad in 0 100 130 160; do
+  : >"$CALLS"
+  PAD=$(printf "%0${pad}d" 0)
+  SPIKE_GRANULAR_TOKEN=$GRAN FAKE_API=1 FAKE_ECHO_TOKEN=1 PAD=$PAD run --yes --only forms --project group/throwaway --other-project group/other
+  # from 130 on the token is on the cut at column 200: masked first, only stars (or nothing) are left
+  if { [ "$pad" -ge 130 ] || printf '%s\n' "$OUT" | grep -qF '***'; } && ! printf '%s\n' "$OUT" | grep -qF 'glp'; then
+    ok "a token glab repeats after $pad characters is masked, not cut (no start of it shows)"
+  else
+    ko "pad $pad: a token or the start of one shows: $(printf '%s\n' "$OUT" | grep 'glp' | head -n 2)"
+  fi
+  no_secret "glab repeating a token after $pad characters"
+done
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures of $total gitlab-spike test(s) failed"
