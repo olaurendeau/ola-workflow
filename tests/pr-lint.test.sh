@@ -284,6 +284,8 @@ for item in '- a.' '* a.' '+ a.' '1. a.' '# a.' '| a | b |' '> a.' '<b>a.</b>'; 
   sum s-struct "$(printf 'Une phrase.\n%s' "$item")"
   refuse "2: a summary line starting with '${item%% *}' is refused" fr s-struct 'the summary has '
 done
+sum s-hashtab "$(printf 'Une phrase.\n#\tTitre')"
+refuse "2: a # followed by a tab is a heading, as in CommonMark" fr s-hashtab 'the summary has a heading'
 sum s-dash 'Une phrase - avec un tiret. Deux.'
 accept "2: a dash inside a line is not a list" fr s-dash
 # A no-break space is 2 bytes (U+00A0) or 3 (U+202F): it is one blank, not the start of a word.

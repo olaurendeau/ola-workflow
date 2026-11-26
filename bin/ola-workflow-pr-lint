@@ -273,7 +273,7 @@ analysis=$(
             # A number starts a list at the head of a paragraph; inside one, only 1. does.
             para = (i == 1 || sumline[i] != sumline[i - 1] + 1)
             if ((para && s ~ /^[0-9]+\. /) || s ~ /^1\. /) problem(sumline[i], "the summary has a list: it is 1 to 3 sentences of prose")
-            if (s ~ /^#+( |$)/) problem(sumline[i], "the summary has a heading: it is 1 to 3 sentences of prose")
+            if (s ~ /^#+([ \t]|$)/) problem(sumline[i], "the summary has a heading: it is 1 to 3 sentences of prose")
             if (c == "|") problem(sumline[i], "the summary has a table: it is 1 to 3 sentences of prose")
             if (c == ">") problem(sumline[i], "the summary has a quote: it is 1 to 3 sentences of prose")
             if (c == "<") problem(sumline[i], "the summary has HTML: it is 1 to 3 sentences of prose")

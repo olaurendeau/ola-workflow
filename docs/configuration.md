@@ -144,7 +144,7 @@ A third script, also on the PATH of every Bash call, checks the form of a descri
   the substance. It always prints the number of lines outside `<details>`, which never decides
   the exit status, and the digest of the bytes it read; `--expect` refuses bytes that are not
   those of that digest, so that what is published is what was reviewed. Exit status 0 follows
-  the form, 1 does not, 2 a usage error.
+  the form, 1 does not, 2 a usage error or an awk failure (no verdict).
 
 ### Globs
 
