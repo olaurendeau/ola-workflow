@@ -452,14 +452,81 @@ for dir in "$INTEGRATED" "$GITHUB" "$GH_REMOTE"; do
   fi
 done
 
-# Discreet GitLab: the agents read with the human's own glab login, nothing of GitLab is exported.
-envfile=$WORK/env-gl-discreet; : >"$envfile"
-out=$(session "$GL_DISCREET" "$envfile" 2>&1)
-if ! grep -q GITLAB "$envfile" && [ -z "$out" ]; then
-  ok "gitlab: a discreet profile writes no GITLAB_TOKEN line, and says nothing"
+# Discreet GitLab: the agents act as the human through a granular token limited to the project,
+# kept at the project's own account and nowhere above it.
+forget_all
+store_at base gitlab:gl.example.com/grp/sub/proj granular-token
+: >"$WORK/accounts"
+env=$(gitlab_session "$GL_DISCREET")
+check "gitlab discreet: the line exports the base token of the project's own account" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" granular-token)"
+check "gitlab discreet: GITLAB_HOST is the host of the remote" "$(is "$(sourced_var "$env" GITLAB_HOST)" gl.example.com)"
+check "gitlab discreet: the only account asked for is the project's" \
+  "$([ "$(grep -vx ola-workflow "$WORK/accounts" | sort -u)" = gitlab:gl.example.com/grp/sub/proj ] && echo 0 || echo 1)"
+check "gitlab discreet: GH_TOKEN stays the first line" \
+  "$([ "$(head -n 1 "$env")" = "$(ola_token_env_line)" ] && [ "$(wc -l <"$env" | tr -d ' ')" = 2 ] && echo 0 || echo 1)"
+check "gitlab discreet: a token that is found says nothing" "$([ ! -s "$WORK/said" ] && echo 0 || echo 1)"
+
+# A token kept higher up is a classic or a group token: not limited to the project, never exported
+# in discreet mode, while integrated mode still reads it (#164).
+for acct in gitlab:gl.example.com/grp/sub gitlab:gl.example.com/grp gitlab:gl.example.com; do
+  forget_all
+  store_at base "$acct" higher-token
+  env=$(gitlab_session "$GL_DISCREET")
+  check "gitlab discreet: a token at $acct is never exported" \
+    "$(is "$(sourced_var "$env" GITLAB_TOKEN)" ola-workflow-has-no-base-token)"
+  env=$(gitlab_session "$GL")
+  check "gitlab integrated: a token at $acct is still read" "$(is "$(sourced_var "$env" GITLAB_TOKEN)" higher-token)"
+done
+
+# No token: a value GitLab rejects, never an empty one, and the session is told why.
+forget_all
+env=$(gitlab_session "$GL_DISCREET")
+check "gitlab discreet: no token — the rejected value, never an empty one" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" ola-workflow-has-no-base-token)"
+want="ola-workflow: there is no GitLab token in the keychain for gl.example.com/grp/sub/proj. In discreet mode the agents act as you only through a granular token limited to this project, so every glab call of this session will fail with a 401. Tell the human to run: ola-workflow-tokens setup base"
+check "gitlab discreet: no token — one line on stdout, naming the project" "$(is "$(cat "$WORK/said")" "$want")"
+store_at base gitlab:gl.example.com/grp/sub/proj ''
+env=$(gitlab_session "$GL_DISCREET")
+check "gitlab discreet: an empty token is a missing one" \
+  "$(is "$(sourced_var "$env" GITLAB_TOKEN)" ola-workflow-has-no-base-token)"
+
+# A path with shell syntax stays inert under bash and zsh, and is the one account asked for.
+forget_all
+EVIL_D=$(remote_project evild '{"mode":"discreet","forge":"gitlab"}' 'git@gl.example.com:g/a$(touch PWNED)"b c;`touch PWNED2`/p.git')
+store_at base "$HOSTILE" evil-granular-token
+: >"$WORK/accounts"
+env=$(gitlab_session "$EVIL_D")
+got=$(cd "$WORK" && sourced_var "$env" GITLAB_TOKEN)
+if [ "$got" = evil-granular-token ] && [ ! -e "$WORK/PWNED" ] && [ ! -e "$WORK/PWNED2" ] &&
+   [ "$(grep -vx ola-workflow "$WORK/accounts" | sort -u)" = "$HOSTILE" ]; then
+  ok "gitlab discreet: quotes, \$( ) and spaces in the path stay inert"
 else
-  ko "gitlab: discreet — said '$out', file: $(cat "$envfile")"
+  ko "gitlab discreet: a hostile path — got '$got', env: $(cat "$env")"
 fi
+
+# Without the second argument the line is the one of integrated mode, byte for byte.
+check "gitlab: ola_gitlab_env_line with one argument is unchanged" \
+  "$([ "$(ola_gitlab_env_line gl.example.com/grp/sub/proj)" = "$(sed -n 2p "$(gitlab_session "$GL")")" ] && echo 0 || echo 1)"
+
+# No remote: the rejected value alone, and the message of #164.
+NOREMOTE_D=$(project noremoted '{"mode":"discreet","forge":"gitlab"}')
+env=$(gitlab_session "$NOREMOTE_D")
+check "gitlab discreet: with no remote, the rejected value and no host" \
+  "$([ "$(sourced_var "$env" GITLAB_TOKEN)" = ola-workflow-has-no-base-token ] && ! grep -q GITLAB_HOST "$env" &&
+     grep -q 'no remote the hook can read' "$WORK/said" && echo 0 || echo 1)"
+
+# A GitHub project in discreet mode: the file is the one GH_TOKEN line, as ever.
+envfile=$WORK/env-gh-discreet; : >"$envfile"
+session "$DISCREET" "$envfile" >/dev/null 2>&1
+check "gitlab: a discreet GitHub project writes the one GH_TOKEN line" \
+  "$([ "$(cat "$envfile")" = "$(ola_token_env_line)" ] && echo 0 || echo 1)"
+
+# "github_tokens": "off" in a discreet GitLab project: no line at all.
+OFF_GLD=$(remote_project offgld '{"mode":"discreet","forge":"gitlab","github_tokens":"off"}' git@gl.example.com:grp/p.git)
+envfile=$WORK/env-offgld; : >"$envfile"
+out=$(session "$OFF_GLD" "$envfile" 2>&1)
+check "gitlab discreet: github_tokens off writes no line" "$([ -z "$out" ] && [ ! -s "$envfile" ] && echo 0 || echo 1)"
 
 # A GitLab project whose remote is unknown still never gets an empty token, and claims no host.
 env=$(gitlab_session "$GITLAB")

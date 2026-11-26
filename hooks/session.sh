@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SessionStart: every Bash command of a session in a project with a profile runs with the
 # base token of the project's forge: on GitHub, one that can neither merge nor write a commit
-# status; on GitLab (integrated mode only), the agents' own identity, for the project's host
-# only.
+# status; on GitLab, for the project's host only, in integrated mode the agents' bot, in
+# discreet mode the human's granular token for this project only.
 #
 # Claude Code sources CLAUDE_ENV_FILE before each Bash command, in the main session and in
 # every subagent, so one line here covers every agent of the session. A project with no
@@ -43,13 +43,18 @@ fi
 ola_token_env_line >>"$CLAUDE_ENV_FILE"
 
 if [ "$forge" = gitlab ]; then
-  # Integrated mode only: a discreet profile says nothing refuses the agents, who read with
-  # the human's own glab login, so no GitLab token is exported for them.
-  [ "$(ola_profile_mode "$cwd" 2>/dev/null)" = integrated ] || exit 0
   id=$(ola_gitlab_id "$cwd") || id=""
-  ola_gitlab_env_line "$id" >>"$CLAUDE_ENV_FILE"
+  # Discreet: the agents act as the human, through a granular token limited to the project.
+  # Only the project's own account is read: one kept higher up is not limited to it, and a
+  # missing one must never let glab fall back to the human's own login.
+  scope=""
+  [ "$(ola_profile_mode "$cwd" 2>/dev/null)" = integrated ] || scope=project
+  ola_gitlab_env_line "$id" $scope >>"$CLAUDE_ENV_FILE"
   if [ -z "$id" ]; then
     echo "ola-workflow: this project has no remote the hook can read a GitLab host from, so every glab call of this session will fail with a 401. Tell the human to add the remote, then run: ola-workflow-tokens setup"
+  elif [ -n "$scope" ]; then
+    ola_token_read base "$(ola_gitlab_project_account "$id")" >/dev/null ||
+      echo "ola-workflow: there is no GitLab token in the keychain for $id. In discreet mode the agents act as you only through a granular token limited to this project, so every glab call of this session will fail with a 401. Tell the human to run: ola-workflow-tokens setup base"
   elif ! ola_gitlab_token_read base "$id" >/dev/null; then
     echo "ola-workflow: there is no base GitLab token in the keychain for ${id%%/*}, so every glab call of this session will fail with a 401. Tell the human to run: ola-workflow-tokens setup"
   fi
