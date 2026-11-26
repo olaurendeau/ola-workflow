@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# ola-workflow-pr-lint — checks that a pull request description follows the form of the brief
+# ("A reviewable pull request"), and prints the digest of the bytes it read.
+#
+#   ola-workflow-pr-lint [--expect <digest>] <file | ->
+#
+# `-` reads the standard input. The label of the verification line comes from the profile
+# resolved from $PWD: `language.artifacts` is `fr` → `Vérifié` (composed or decomposed
+# accent), any other value, or none readable → `Checked`. Neither the mode nor the forge is
+# read: the form is the same for `gh pr create` and for `glab mr create`.
+#
+# What it refuses (exit 1), one line per problem, `<file>:<line>: <problem>`:
+#   1. a line starting with `Closes #` that is not in the head block (leading blank lines
+#      are ignored);
+#   2. a summary — the non-blank lines between the `Closes` block and the verification
+#      line — that is empty, or longer than 3 sentences, or has a line starting with a list
+#      marker (`- `, `* `, `+ `, `1. `), `#`, `|`, `>` or `<`;
+#   3. no line starting with the label (optionally between `**`), then blanks (space, tab,
+#      U+00A0, U+202F), then `:`;
+#   4. a line starting with `Decision:` before the verification line or after the first
+#      `<details>`;
+#   5. a `<details>` before the verification line, or one never closed by `</details>`.
+# Nothing else is refused: a free line after the verification line, or after `</details>`
+# (the "Generated with" line a session adds), passes. Trailing carriage returns are ignored
+# by the analysis; the digest is of the raw bytes.
+#
+# Sentences are counted after removing code spans, link targets `](…)` and `https?://…`
+# URLs. A sentence ends with a run of . ! ? or … then any of ) " ' » * _, then a blank or the
+# end of the summary; a last fragment without punctuation counts as one.
+#
+# What it does not check: the Design line and the Captures block (their wording depends on the
+# language), the substance of the description, and an abbreviation followed by a blank
+# ("e.g. x") counts as the end of a sentence.
+#
+# Always printed, last, whatever the verdict:
+#   lines outside <details>: <N>      non-blank lines outside the <details> blocks. It never
+#                                     decides the exit status.
+#   digest: <40 hex>                  `git hash-object --no-filters --stdin` of the bytes read.
+#
+# --expect <digest>: exits 1 when the bytes are not those of that digest, whatever the form.
+# That is what makes "published" mean "reviewed": the reviewer cites the digest, and whoever
+# publishes asks for it again just before.
+#
+# Exit status: 0 follows the form (and the expected digest, when given) · 1 it does not, or
+# the digest differs · 2 a usage error, nothing on the standard output.
+# bash, awk and git only.
+set -uo pipefail
+
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=hooks/lib/profile.sh
+. "$SELF_DIR/../hooks/lib/profile.sh"
+# shellcheck source=scripts/scratch.sh
+. "$SELF_DIR/../scripts/scratch.sh"
+
+die() { echo "ola-workflow-pr-lint: $1" >&2; exit 2; }
+
+# Byte-wise, so that a locale cannot change what a character class or length() means.
+export LC_ALL=C
+
+usage="usage: ola-workflow-pr-lint [--expect <digest>] <file | ->"
+expect=
+have_expect=0
+file=
+have_file=0
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --expect)
+      [ "$have_expect" = 0 ] || die "$usage"
+      [ "$#" -ge 2 ] || die "--expect needs a digest. $usage"
+      expect=$2
+      have_expect=1
+      shift 2
+      ;;
+    -)
+      [ "$have_file" = 0 ] || die "$usage"
+      file=-
+      have_file=1
+      shift
+      ;;
+    -*) die "unknown option '$1'. $usage" ;;
+    *)
+      [ "$have_file" = 0 ] || die "one file only. $usage"
+      file=$1
+      have_file=1
+      shift
+      ;;
+  esac
+done
+[ "$have_file" = 1 ] || die "$usage"
+
+if [ "$have_expect" = 1 ]; then
+  case $expect in
+    *[!0-9a-fA-F]*) die "--expect wants 40 hexadecimal digits, got '$expect'" ;;
+  esac
+  [ "${#expect}" = 40 ] || die "--expect wants 40 hexadecimal digits, got '$expect'"
+  expect=$(printf '%s' "$expect" | tr 'A-F' 'a-f')
+fi
+
+ola_scratch pr-lint
+work=$OLA_SCRATCH
+trap 'rm -rf "${work:?}"' EXIT
+
+# One copy of the bytes: the digest and the analysis read the same ones.
+if [ "$file" = - ]; then
+  cat >"$work/body" || die "cannot read the standard input"
+else
+  [ -f "$file" ] && [ -r "$file" ] || die "'$file' is not a readable file"
+  cat -- "$file" >"$work/body" 2>/dev/null || die "cannot read '$file'"
+fi
+digest=$(git hash-object --no-filters --stdin <"$work/body") || die "git could not hash the bytes"
+
+language=$(ola_profile_get language.artifacts "$PWD" "" en 2>/dev/null) || language=en
+if [ "$language" = fr ]; then
+  label1=$(printf 'V\303\251rifi\303\251')
+  label2=$(printf 'Ve\314\201rifie\314\201')
+else
+  label1=Checked
+  label2=
+fi
+
+# The last line awk prints is the count of lines outside <details>; the lines before are the
+# problems. The values go through the environment: `-v` would interpret backslashes in a
+# file name.
+analysis=$(
+  PRLINT_NAME=$file PRLINT_LABEL1=$label1 PRLINT_LABEL2=$label2 awk '
+    function startswith(s, p) { return substr(s, 1, length(p)) == p }
+    function strip(s) { sub(/^[ \t]+/, "", s); return s }
+    function problem(n, msg) { print name ":" n ": " msg }
+    # Where the bytes of a blank at position i end: 0 when there is none.
+    function blank_len(s, i,    c) {
+      c = substr(s, i, 1)
+      if (c == " " || c == "\t") return 1
+      if (substr(s, i, 2) == nbsp) return 2
+      if (substr(s, i, 3) == nnbsp) return 3
+      return 0
+    }
+    # Is s the verification line: [**]label[**] blanks :
+    function is_verified(s,    i, k, w, l, labels, n, rest) {
+      if (startswith(s, "**")) s = substr(s, 3)
+      n = split(label1 "\n" label2, labels, "\n")
+      for (k = 1; k <= n; k++) {
+        l = labels[k]
+        if (l == "" || !startswith(s, l)) continue
+        rest = substr(s, length(l) + 1)
+        if (startswith(rest, "**")) rest = substr(rest, 3)
+        i = 1
+        while ((w = blank_len(rest, i)) > 0) i += w
+        if (substr(rest, i, 1) == ":") return 1
+        return 0
+      }
+      return 0
+    }
+    # How many bytes of a sentence terminator start at i: . ! ? or the 3 bytes of …
+    function ender_len(s, i,    c) {
+      c = substr(s, i, 1)
+      if (c == "." || c == "!" || c == "?") return 1
+      if (substr(s, i, 3) == ellipsis) return 3
+      return 0
+    }
+    function closer_len(s, i,    c) {
+      c = substr(s, i, 1)
+      if (c == ")" || c == "\"" || c == "\047" || c == "*" || c == "_") return 1
+      if (substr(s, i, 2) == raquo) return 2
+      return 0
+    }
+    function sentences(s,    i, n, k, count, open, j) {
+      gsub(/`[^`]*`/, "", s)
+      gsub(/\]\([^)]*\)/, "", s)
+      gsub(/https?:\/\/[^ \t]*/, "", s)
+      n = length(s)
+      count = 0
+      open = 0
+      i = 1
+      while (i <= n) {
+        k = ender_len(s, i)
+        if (k == 0) {
+          if (blank_len(s, i) == 0) open = 1
+          i += 1
+          continue
+        }
+        j = i
+        while (j <= n && (k = ender_len(s, j)) > 0) j += k
+        while (j <= n && (k = closer_len(s, j)) > 0) j += k
+        if (j > n || blank_len(s, j) > 0) {
+          count++
+          open = 0
+          i = j
+        } else {
+          open = 1
+          i = j
+        }
+      }
+      return count + open
+    }
+    BEGIN {
+      name = ENVIRON["PRLINT_NAME"]
+      label1 = ENVIRON["PRLINT_LABEL1"]
+      label2 = ENVIRON["PRLINT_LABEL2"]
+      nbsp = sprintf("%c%c", 194, 160)
+      nnbsp = sprintf("%c%c%c", 226, 128, 175)
+      ellipsis = sprintf("%c%c%c", 226, 128, 166)
+      raquo = sprintf("%c%c", 194, 187)
+      depth = 0
+      outside = 0
+      verified = 0        # line of the verification line, 0 until seen
+      firstdetails = 0    # line of the first <details>
+      head = 1            # still inside the head block
+      ndec = 0
+      nsum = 0
+    }
+    {
+      sub(/\r$/, "")
+      line = $0
+      blank = (line !~ /[^ \t]/)
+      code = line
+      gsub(/`[^`]*`/, "", code)
+      stripped = strip(code)
+      opens = startswith(stripped, "<details")
+      closes = index(code, "</details>") > 0
+
+      # Rule 1: Closes # outside the head block.
+      if (startswith(line, "Closes #")) {
+        if (!head) problem(NR, "a `Closes #` line is only allowed in the head block")
+      } else if (!blank) {
+        head = 0
+      }
+
+      # Rule 3 needs the first verification line.
+      if (!verified && !blank && is_verified(line)) verified = NR
+
+      # Rule 5, before the verification line, and rule 4 bookkeeping.
+      if (opens && !firstdetails) firstdetails = NR
+      if (opens && !verified) problem(NR, "a <details> before the verification line")
+      if (startswith(line, "Decision:")) { ndec++; decision[ndec] = NR }
+
+      # Summary: lines after the Closes block and before the verification line. A <details>
+      # and a Decision line there are other problems, reported as such.
+      if (!verified && !blank && !startswith(line, "Closes #") && !startswith(line, "Decision:") && depth == 0 && !opens) {
+        nsum++
+        sumline[nsum] = NR
+        sumtext[nsum] = line
+      }
+
+      # Depth and the count outside <details>.
+      inside = (depth > 0 || opens)
+      if (opens) depth++
+      if (closes && depth > 0) depth--
+      if (!blank && !inside) outside++
+    }
+    END {
+      if (!verified) problem(NR, "no line starting with \"" label1 "\" and a colon: the verification line is missing")
+      # Rule 2.
+      if (verified) {
+        if (nsum == 0) {
+          problem(verified, "the summary is empty: 1 to 3 sentences are expected before the verification line")
+        } else {
+          text = ""
+          for (i = 1; i <= nsum; i++) {
+            s = strip(sumtext[i])
+            c = substr(s, 1, 1)
+            if (c == "-" || c == "*" || c == "+") {
+              if (substr(s, 2, 1) == " ") problem(sumline[i], "the summary has a list: it is 1 to 3 sentences of prose")
+            }
+            if (s ~ /^[0-9]+\. /) problem(sumline[i], "the summary has a list: it is 1 to 3 sentences of prose")
+            if (c == "#") problem(sumline[i], "the summary has a heading: it is 1 to 3 sentences of prose")
+            if (c == "|") problem(sumline[i], "the summary has a table: it is 1 to 3 sentences of prose")
+            if (c == ">") problem(sumline[i], "the summary has a quote: it is 1 to 3 sentences of prose")
+            if (c == "<") problem(sumline[i], "the summary has HTML: it is 1 to 3 sentences of prose")
+            text = text " " sumtext[i]
+          }
+          n = sentences(text)
+          if (n > 3) problem(sumline[1], "the summary has " n " sentences: 1 to 3 are expected")
+          else if (n == 0) problem(sumline[1], "the summary has no sentence: 1 to 3 are expected")
+        }
+      }
+      # Rule 4.
+      for (i = 1; i <= ndec; i++) {
+        if (verified && decision[i] < verified) problem(decision[i], "a Decision line comes after the verification line")
+        else if (firstdetails && decision[i] > firstdetails) problem(decision[i], "a Decision line comes before the first <details>")
+      }
+      # Rule 5.
+      if (depth > 0) problem(NR, "a <details> is never closed by </details>")
+      print outside
+    }
+  ' "$work/body"
+)
+outside=${analysis##*$'\n'}
+problems=
+if [ "$analysis" != "$outside" ]; then
+  problems=${analysis%$'\n'*}
+fi
+
+status=0
+[ -z "$problems" ] || { printf '%s\n' "$problems"; status=1; }
+if [ "$have_expect" = 1 ] && [ "$digest" != "$expect" ]; then
+  echo "$file: not the description that was reviewed: digest $digest, expected $expect"
+  status=1
+fi
+[ "$status" != 0 ] || echo "$file: follows the form of the brief"
+echo "lines outside <details>: $outside"
+echo "digest: $digest"
+exit "$status"

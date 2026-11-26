@@ -131,6 +131,21 @@ Two scripts, on the PATH of every Bash call:
 `pr-assets` is as readable as the repository: capture development data only. Captures are
 written outside the worktree and are never committed.
 
+### Pull request descriptions
+
+A third script, also on the PATH of every Bash call, checks the form of a description:
+
+- `ola-workflow-pr-lint [--expect <digest>] <file | ->` reads a pull request description (`-`
+  is the standard input) and refuses, with one line per problem, a `Closes #` line outside
+  the head, a summary that is not 1 to 3 sentences of prose, a missing verification line
+  (`Checked:`, or `Vérifié :` when `language.artifacts` is `fr`), a `Decision:` line before
+  that line or inside the `<details>`, and a `<details>` before it or never closed. It reads
+  neither the mode nor the forge, and does not check the Design line, the Captures block or
+  the substance. It always prints the number of lines outside `<details>`, which never decides
+  the exit status, and the digest of the bytes it read; `--expect` refuses bytes that are not
+  those of that digest, so that what is published is what was reviewed. Exit status 0 follows
+  the form, 1 does not, 2 a usage error.
+
 ### Globs
 
 Every glob in a profile is a git pathspec `:(glob)`, and `schema/profile.schema.json` states
