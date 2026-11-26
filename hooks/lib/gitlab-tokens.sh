@@ -98,3 +98,48 @@ EOF
   printf '[ -n "$GITLAB_TOKEN" ] || export GITLAB_TOKEN=%s; export GITLAB_HOST=%s\n' \
     "$OLA_GITLAB_NO_TOKEN" "$host"
 }
+
+# ola_gitlab_project_path <host/path> → the path of the project without its host, every `/`
+# written `%2F`, as GitLab's API names a project — or 1. Each component is one of
+# [A-Za-z0-9._-], and neither `.` nor `..`: the path comes from the remote, and it is put in
+# the address of a call that carries a token.
+ola_gitlab_project_path() {
+  local path parts part out=""
+  case $1 in */*) path=${1#*/} ;; *) return 1 ;; esac
+  case $path in ''|/*|*/|*//*|*[!A-Za-z0-9._/-]*) return 1 ;; esac
+  IFS=/ read -r -a parts <<<"$path"
+  for part in "${parts[@]}"; do
+    case $part in .|..) return 1 ;; esac
+    out=${out:+$out%2F}$part
+  done
+  printf '%s' "$out"
+}
+
+# ola_gitlab_get <host> <token> <endpoint> → `<http code> <body>` on one line, and 0 for a 2xx
+# only. The code is `none` when glab gave no state line (glab missing, host unreachable).
+# The token goes in the environment of glab, as GITLAB_TOKEN, never in an argument — which a
+# `ps` shows — and GITLAB_HOST says where it is sent. `--include` prints the state line, the
+# only way to tell a 403 from a 401; the standard error carries glab's notices, not an answer.
+ola_gitlab_get() {
+  local out code body
+  command -v glab >/dev/null 2>&1 || { echo "none glab is not on this PATH"; return 1; }
+  out=$(GITLAB_TOKEN=$2 GITLAB_HOST=$1 GLAB_NO_PROMPT=1 glab api --include "$3" 2>/dev/null </dev/null | tr -d '\r')
+  code=$(printf '%s\n' "$out" | sed -n '1s#^HTTP/[0-9.]* \([0-9][0-9][0-9]\).*#\1#p')
+  body=$(printf '%s\n' "$out" | awk 'b { print } !b && /^$/ { b = 1 }' | tr '\n' ' ')
+  printf '%s %s\n' "${code:-none}" "$body"
+  case $code in 2??) return 0 ;; *) return 1 ;; esac
+}
+
+# ola_gitlab_token_self <kind> <host/path> → `<user_id> <granular> <expires_at> <token_id>`
+# of the token the project uses for that kind (the nearest, as ola_gitlab_token_read finds it):
+# `-` for a field GitLab did not give, `never` for no expiry. On failure, 1 and `<code> <what
+# GitLab said>`: a fine-grained token without "Personal Access Token: Read" gets 403
+# insufficient_granular_scope here, and a revoked one 401.
+ola_gitlab_token_self() {
+  local token line fields
+  token=$(ola_gitlab_token_read "$1" "$2") || { echo "none no $1 token in the keychain"; return 1; }
+  line=$(ola_gitlab_get "${2%%/*}" "$token" personal_access_tokens/self) || { printf '%s\n' "$line"; return 1; }
+  fields=$(jq -r '[.user_id // "-", .granular // false, .expires_at // "never", .id // "-"] | map(tostring) | join(" ")' \
+    <<<"${line#* }" 2>/dev/null) || { echo "${line%% *} GitLab's answer is not readable"; return 1; }
+  printf '%s\n' "$fields"
+}
