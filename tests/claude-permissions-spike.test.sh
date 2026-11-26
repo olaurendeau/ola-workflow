@@ -29,6 +29,7 @@ FAKES=$WORK/fakes
 HOME_DIR=$WORK/home
 ARGS=$WORK/claude-args
 NET=$WORK/net
+AUTH=$WORK/auth
 mkdir -p "$FAKES" "$HOME_DIR/.claude"
 # The human's settings: if anything of them reaches an output or a settings file, it shows.
 printf '{"permissions":{"allow":["Bash(HUMAN_MARKER:*)"]}}\n' >"$HOME_DIR/.claude/settings.json"
@@ -40,7 +41,16 @@ printf '{"permissions":{"allow":["Bash(HUMAN_MARKER:*)"]}}\n' >"$HOME_DIR/.claud
 cat >"$FAKES/claude" <<'EOF'
 #!/usr/bin/env bash
 [ "${1:-}" != --version ] || { echo "9.9.9 (Claude Code)"; exit 0; }
-printf 'cwd=%s\nargs=%s\nenv=%s|%s|%s|%s|%s\nstdin=' "$PWD" "$*" "${GH_TOKEN-unset}" "${GITHUB_TOKEN-unset}" "${GITLAB_TOKEN-unset}" "${GH_CONFIG_DIR-unset}" "${GLAB_CONFIG_DIR-unset}" >>"$CLAUDE_ARGS"
+printf 'cwd=%s\nargs=%s\nenv=%s|%s|%s|%s|%s\nenv2=%s|%s|%s|%s\nstdin=' "$PWD" "$*" "${GH_TOKEN-unset}" "${GITHUB_TOKEN-unset}" "${GITLAB_TOKEN-unset}" "${GH_CONFIG_DIR-unset}" "${GLAB_CONFIG_DIR-unset}" "${GITLAB_ACCESS_TOKEN-unset}" "${OAUTH_TOKEN-unset}" "${GH_HOST-unset}" "${GITLAB_HOST-unset}" >>"$CLAUDE_ARGS"
+# A real gh or glab ahead of the script's fakes, which the script could not prevent by PATH
+# alone: it authenticates, from a token in the environment or from the keyring of a host it
+# knows. Only a host that cannot exist (.invalid) leaves it nothing to read.
+for host in "${GH_HOST-github.com}" "${GITLAB_HOST-gitlab.com}"; do
+  case $host in *.invalid) ;; *) echo "could authenticate: host $host" >>"$AUTH_LOG" ;; esac
+done
+for v in GH_TOKEN GITHUB_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN; do
+  [ -z "${!v:-}" ] || echo "could authenticate: $v is set" >>"$AUTH_LOG"
+done
 prompt=$(cat)
 printf '%s\n' "$prompt" >>"$CLAUDE_ARGS"
 settings=""
@@ -90,8 +100,9 @@ chmod +x "$FAKES"/*
 run() { # run <args...> → OUT, STATUS
   : >"$ARGS"
   : >"$NET"
-  # A human's tokens and config directories, which must not reach a case.
-  OUT=$(GH_TOKEN=leak-gh GITHUB_TOKEN=leak-github GITLAB_TOKEN=leak-gitlab GH_CONFIG_DIR=$HOME_DIR/gh GLAB_CONFIG_DIR=$HOME_DIR/glab HOME=$HOME_DIR TMPDIR=$WORK CLAUDE_ARGS=$ARGS NET_LOG=$NET PATH="$FAKES:$PATH" "$SCRIPT" "$@" 2>&1)
+  : >"$AUTH"
+  # A human's tokens, hosts and config directories, which must not reach a case.
+  OUT=$(GH_TOKEN=leak-gh GITHUB_TOKEN=leak-github GITLAB_TOKEN=leak-gitlab GITLAB_ACCESS_TOKEN=leak-access OAUTH_TOKEN=leak-oauth GH_HOST=github.com GITLAB_HOST=gitlab.com GH_CONFIG_DIR=$HOME_DIR/gh GLAB_CONFIG_DIR=$HOME_DIR/glab HOME=$HOME_DIR TMPDIR=$WORK CLAUDE_ARGS=$ARGS NET_LOG=$NET AUTH_LOG=$AUTH PATH="$FAKES:$PATH" "$SCRIPT" "$@" 2>&1)
   STATUS=$?
 }
 
@@ -131,6 +142,8 @@ printf '%s\n' "$OUT" | grep -q HUMAN_MARKER && ko "the human's settings reached 
 grep -nE '\$HOME|~/\.claude|\.claude/settings' "$SCRIPT" | grep -v '^[0-9]*:#' | grep -q . && ko "the script names a place where the human's settings live" || ok "the script names no place where the human's settings live"
 [ ! -s "$NET" ] && ok "no network tool and no real gh or glab is reached" || ko "called: $(cat "$NET")"
 grep '^env=' "$ARGS" | grep -qv '^env=unset|unset|unset|' && ko "a token reached claude: $(grep '^env=' "$ARGS" | grep -v '^env=unset|unset|unset|' | head -n 1)" || ok "no GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN reaches claude"
+grep '^env2=' "$ARGS" | grep -qv '^env2=unset|unset|spike.invalid|spike.invalid$' && ko "GITLAB_ACCESS_TOKEN, OAUTH_TOKEN, GH_HOST or GITLAB_HOST reached claude as is: $(grep '^env2=' "$ARGS" | grep -v '^env2=unset|unset|spike.invalid|spike.invalid$' | head -n 1)" || ok "no GITLAB_ACCESS_TOKEN or OAUTH_TOKEN reaches claude, and GH_HOST and GITLAB_HOST are spike.invalid"
+[ "$(grep -c '^env2=' "$ARGS")" = 18 ] && [ ! -s "$AUTH" ] && ok "a real gh or glab ahead of the fakes would have nothing to authenticate with, in each case" || ko "could authenticate: $(head -n 2 "$AUTH" | tr '\n' ' ')"
 [ "$(grep '^env=' "$ARGS" | grep -c "|$D/case-[0-9]*/gh-config|$D/case-[0-9]*/glab-config\$")" = 18 ] && ok "gh and glab read a throwaway config directory, in each case" || ko "config dirs: $(grep '^env=' "$ARGS" | head -n 1)"
 [ -x "$D/bin/glab" ] && [ -s "$D/case-7/calls/glab" ] && ok "the fake glab recorded the call (a command is known to have run)" || ko "no call recorded"
 
@@ -164,7 +177,7 @@ run "$EMPTY"
 # 5. what claude can answer instead of a verdict
 for mode in down silent nodenials; do
   : >"$ARGS"
-  OUT=$(FAKE_MODE=$mode HOME=$HOME_DIR TMPDIR=$WORK CLAUDE_ARGS=$ARGS NET_LOG=$NET PATH="$FAKES:$PATH" "$SCRIPT" 2>&1)
+  OUT=$(FAKE_MODE=$mode HOME=$HOME_DIR TMPDIR=$WORK CLAUDE_ARGS=$ARGS NET_LOG=$NET AUTH_LOG=$AUTH PATH="$FAKES:$PATH" "$SCRIPT" 2>&1)
   [ "$(printf '%s\n' "$OUT" | grep -c '| not measurable: ')" = 18 ] && ok "claude '$mode': 18 lines say not measurable, none a false verdict" || ko "$mode: $(printf '%s\n' "$OUT" | grep -cE '\| (ran|asked)$') verdicts"
 done
 case $OUT in *"no permission_denials"*) ok "the reason is on the line" ;; *) ko "no reason: $OUT" ;; esac

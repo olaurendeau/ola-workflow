@@ -26,9 +26,11 @@
 #
 # It calls `claude`, which is billed to whoever runs it: the human runs this, never an agent.
 # It reads and writes no setting of the human's, touches no forge (the fakes are the only
-# glab and gh it reaches: they come first on PATH, each case gets throwaway GH_CONFIG_DIR and
-# GLAB_CONFIG_DIR, and GH_TOKEN, GITHUB_TOKEN and GITLAB_TOKEN are unset for claude, so none
-# of it rests on the order of PATH alone), and refuses a directory that is not new.
+# glab and gh it reaches: they come first on PATH, and a real gh or glab ahead of them would
+# find nothing to authenticate with: each case gets throwaway GH_CONFIG_DIR and
+# GLAB_CONFIG_DIR, GH_TOKEN, GITHUB_TOKEN, GITLAB_TOKEN, GITLAB_ACCESS_TOKEN and OAUTH_TOKEN
+# are unset for claude, and GH_HOST and GITLAB_HOST are spike.invalid, a host no keyring
+# knows), and refuses a directory that is not new.
 #
 # Usage: scripts/spike/claude-permissions.sh [--dry-run] [output directory]
 #   --dry-run  prints the cases and the commands, runs nothing and creates nothing
@@ -142,8 +144,8 @@ run_case() {
 
   out=$dir/answer.json
   printf '%s' "Run exactly this one command with the Bash tool, nothing else, then say done: $cmd" |
-    ( cd "$dir" && unset GH_TOKEN GITHUB_TOKEN GITLAB_TOKEN &&
-        SPIKE_CALLS=$calls GH_CONFIG_DIR=$dir/gh-config GLAB_CONFIG_DIR=$dir/glab-config PATH="$bin:$PATH" \
+    ( cd "$dir" && unset GH_TOKEN GITHUB_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN &&
+        SPIKE_CALLS=$calls GH_HOST=spike.invalid GITLAB_HOST=spike.invalid GH_CONFIG_DIR=$dir/gh-config GLAB_CONFIG_DIR=$dir/glab-config PATH="$bin:$PATH" \
         claude -p --output-format json --settings "$settings" --setting-sources project ) \
       >"$out" 2>"$dir/answer.err"
   rc=$?
