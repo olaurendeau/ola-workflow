@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2015
-#   `A && ok || ko`: ok() only counts and prints, so ko() cannot run after a passing test.
+# shellcheck disable=SC2015,SC2016
+#   SC2015: `A && ok || ko`: ok() only counts and prints, so ko() cannot run after a passing test.
+#   SC2016: the single quotes are deliberate, in the fake tools' bodies and in the pattern that
+#   looks for `$HOME` in the script: what is written there must reach the file unexpanded.
 # scripts/spike/claude-permissions.sh calls the real `claude`, billed to the human who runs
 # it: there is no such call here. A fake `claude` on PATH stands in. It reads the settings it
 # is given, as Claude Code would, and answers like one where an ask rule beats a hook's
@@ -38,7 +40,7 @@ printf '{"permissions":{"allow":["Bash(HUMAN_MARKER:*)"]}}\n' >"$HOME_DIR/.claud
 cat >"$FAKES/claude" <<'EOF'
 #!/usr/bin/env bash
 [ "${1:-}" != --version ] || { echo "9.9.9 (Claude Code)"; exit 0; }
-printf 'cwd=%s\nargs=%s\nstdin=' "$PWD" "$*" >>"$CLAUDE_ARGS"
+printf 'cwd=%s\nargs=%s\nenv=%s|%s|%s|%s|%s\nstdin=' "$PWD" "$*" "${GH_TOKEN-unset}" "${GITHUB_TOKEN-unset}" "${GITLAB_TOKEN-unset}" "${GH_CONFIG_DIR-unset}" "${GLAB_CONFIG_DIR-unset}" >>"$CLAUDE_ARGS"
 prompt=$(cat)
 printf '%s\n' "$prompt" >>"$CLAUDE_ARGS"
 settings=""
@@ -56,18 +58,31 @@ ask=$(jq -r '.permissions.ask[]?' "$settings")
 case $ask in
   "Bash($tool:*)" | "Bash($tool api:*)") asked=1 ;;
 esac
-[ "$(jq '.hooks.PreToolUse | length' "$settings")" != 0 ] || asked=1
+# A hook is a shell command line, run as Claude Code runs it: with `sh -c`, the call on its
+# stdin. One that does not run, or does not answer allow, allows nothing; one that rewrites
+# changes the command that runs.
+allowed=0
+if [ "$(jq '.hooks.PreToolUse | length' "$settings")" != 0 ]; then
+  hookcmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")
+  answer=$(jq -nc --arg c "$cmd" '{tool_name: "Bash", tool_input: {command: $c}}' | sh -c "$hookcmd" 2>/dev/null)
+  [ "$(printf '%s' "$answer" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null)" != allow ] || allowed=1
+  rewritten=$(printf '%s' "$answer" | jq -r '.hookSpecificOutput.updatedInput.command // empty' 2>/dev/null)
+  [ -z "$rewritten" ] || cmd=$rewritten
+fi
+[ "$allowed" = 1 ] || asked=1
 if [ "${FAKE_MODE:-}" = silent ]; then
   echo '{"type":"result","permission_denials":[]}'
 elif [ "$asked" = 1 ]; then
   echo '{"type":"result","permission_denials":[{"tool_name":"Bash"}]}'
 else
-  $cmd >/dev/null
+  bash -c "$cmd" >/dev/null
   echo '{"type":"result","permission_denials":[]}'
 fi
 EOF
-# A network tool the script must never call.
-for t in curl wget nc ssh; do
+# What the script must never reach: a network tool, and a REAL gh or glab, which these stand
+# for. They sit on the PATH the script receives, behind the script's own fakes: only a script
+# that does not put its fakes first, or does not run the command, gets here.
+for t in curl wget nc ssh gh glab; do
   printf '#!/usr/bin/env bash\necho "%s $*" >>"$NET_LOG"\nexit 1\n' "$t" >"$FAKES/$t"
 done
 chmod +x "$FAKES"/*
@@ -75,13 +90,18 @@ chmod +x "$FAKES"/*
 run() { # run <args...> → OUT, STATUS
   : >"$ARGS"
   : >"$NET"
-  OUT=$(HOME=$HOME_DIR TMPDIR=$WORK CLAUDE_ARGS=$ARGS NET_LOG=$NET PATH="$FAKES:$PATH" "$SCRIPT" "$@" 2>&1)
+  # A human's tokens and config directories, which must not reach a case.
+  OUT=$(GH_TOKEN=leak-gh GITHUB_TOKEN=leak-github GITLAB_TOKEN=leak-gitlab GH_CONFIG_DIR=$HOME_DIR/gh GLAB_CONFIG_DIR=$HOME_DIR/glab HOME=$HOME_DIR TMPDIR=$WORK CLAUDE_ARGS=$ARGS NET_LOG=$NET PATH="$FAKES:$PATH" "$SCRIPT" "$@" 2>&1)
   STATUS=$?
 }
 
 # 1. the plan: every case, no claude call
 run --dry-run
 [ "$STATUS" = 0 ] && [ ! -s "$ARGS" ] && ok "--dry-run lists the cases and calls no claude" || ko "status $STATUS, claude args: $(cat "$ARGS")"
+left=$(find "$WORK" -maxdepth 1 -name 'ola-claude-permissions.*')
+[ -z "$left" ] && ok "--dry-run leaves no scratch directory behind" || ko "left behind: $left"
+run --dry-run "$WORK/dry-out"
+[ "$STATUS" = 0 ] && [ ! -e "$WORK/dry-out" ] && ok "--dry-run creates not even the directory it is given" || ko "status $STATUS, $(ls -d "$WORK/dry-out" 2>&1)"
 [ "$(printf '%s\n' "$OUT" | grep -c ' | (not run) ')" = 18 ] && ok "18 cases: 2 forges, 3 rules, 3 hooks" || ko "cases: $(printf '%s\n' "$OUT" | grep -c ' | (not run) ')"
 
 # 2. the run: one line per case, the verdict follows the rule and the hook
@@ -109,7 +129,9 @@ fi
 grep -rq HUMAN_MARKER "$D" && ko "the human's settings reached the output directory" || ok "no setting of the human's is read: the marker is nowhere in the output"
 printf '%s\n' "$OUT" | grep -q HUMAN_MARKER && ko "the human's settings reached the output" || ok "nor in what is printed"
 grep -nE '\$HOME|~/\.claude|\.claude/settings' "$SCRIPT" | grep -v '^[0-9]*:#' | grep -q . && ko "the script names a place where the human's settings live" || ok "the script names no place where the human's settings live"
-[ ! -s "$NET" ] && ok "no network tool is called" || ko "called: $(cat "$NET")"
+[ ! -s "$NET" ] && ok "no network tool and no real gh or glab is reached" || ko "called: $(cat "$NET")"
+grep '^env=' "$ARGS" | grep -qv '^env=unset|unset|unset|' && ko "a token reached claude: $(grep '^env=' "$ARGS" | grep -v '^env=unset|unset|unset|' | head -n 1)" || ok "no GH_TOKEN, GITHUB_TOKEN or GITLAB_TOKEN reaches claude"
+[ "$(grep '^env=' "$ARGS" | grep -c "|$D/case-[0-9]*/gh-config|$D/case-[0-9]*/glab-config\$")" = 18 ] && ok "gh and glab read a throwaway config directory, in each case" || ko "config dirs: $(grep '^env=' "$ARGS" | head -n 1)"
 [ -x "$D/bin/glab" ] && [ -s "$D/case-7/calls/glab" ] && ok "the fake glab recorded the call (a command is known to have run)" || ko "no call recorded"
 
 set_of() { jq -c '.permissions.ask' "$D/case-$1/settings.json"; }
@@ -117,8 +139,13 @@ hook_of() { jq -r '.hooks.PreToolUse[0].hooks[0].command // "none"' "$D/case-$1/
 [ "$(set_of 1)" = '["Bash(glab:*)"]' ] && [ "$(set_of 4)" = '["Bash(glab api:*)"]' ] && [ "$(set_of 7)" = '[]' ] && [ "$(set_of 10)" = '["Bash(gh:*)"]' ] && [ "$(set_of 13)" = '["Bash(gh api:*)"]' ] && ok "each case writes its own rule in its settings file" || ko "rules: $(set_of 1) $(set_of 4) $(set_of 7) $(set_of 10) $(set_of 13)"
 [ "$(hook_of 1)" = rewrite ] && [ "$(hook_of 2)" = allow ] && [ "$(hook_of 3)" = none ] && ok "each case wires its own hook (rewrite, allow only, none)" || ko "hooks: $(hook_of 1) $(hook_of 2) $(hook_of 3)"
 rewritten=$(printf '{"tool_input":{"command":"glab api projects/x"}}' | "$D/bin/hook.sh" rewrite | jq -r '.hookSpecificOutput | .permissionDecision + " " + .updatedInput.command')
-case $rewritten in "allow $D/bin/with-token.sh gitlab review glab api projects/x") ok "the rewriting hook answers allow with the enveloped command" ;; *) ko "rewrite: $rewritten" ;; esac
+case $rewritten in "allow bash $D/bin/with-token.sh gitlab review glab api projects/x") ok "the rewriting hook answers allow with elevate.sh's form: bash <path> forge role command" ;; *) ko "rewrite: $rewritten" ;; esac
 [ -z "$(printf '{"tool_input":{"command":"ls"}}' | "$D/bin/hook.sh" rewrite)" ] && ok "the test hook leaves any other command alone" || ko "hook answered for ls"
+
+# 3b. a directory whose name holds a space: the hook is a shell command line
+run "$WORK/out with space"
+[ "$STATUS" = 0 ] && [ "$(printf '%s\n' "$OUT" | grep -cE '\| (ran|asked)$')" = 18 ] && ok "a directory with a space in its name: 18 verdicts" || ko "status $STATUS, verdicts: $(printf '%s\n' "$OUT" | grep -cE '\| (ran|asked)$')"
+case $(printf '%s\n' "$OUT" | grep -F 'gh   | no rule' | head -n 1) in *'hook rewrites + allow  | ran') ok "...and the rewritten form still runs there" ;; *) ko "$(printf '%s\n' "$OUT" | grep -F 'gh   | no rule' | head -n 1)" ;; esac
 
 # 4. the refusals
 run "$ROOT"

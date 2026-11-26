@@ -26,10 +26,12 @@
 #
 # It calls `claude`, which is billed to whoever runs it: the human runs this, never an agent.
 # It reads and writes no setting of the human's, touches no forge (the fakes are the only
-# glab and gh it reaches, and no token exists here), and refuses a directory that is not new.
+# glab and gh it reaches: they come first on PATH, each case gets throwaway GH_CONFIG_DIR and
+# GLAB_CONFIG_DIR, and GH_TOKEN, GITHUB_TOKEN and GITLAB_TOKEN are unset for claude, so none
+# of it rests on the order of PATH alone), and refuses a directory that is not new.
 #
 # Usage: scripts/spike/claude-permissions.sh [--dry-run] [output directory]
-#   --dry-run  prints the cases and the commands, runs nothing
+#   --dry-run  prints the cases and the commands, runs nothing and creates nothing
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -53,15 +55,28 @@ if [ "$#" = 1 ]; then
     echo "${0##*/}: $OUT exists and is not an empty directory: refusing to run there" >&2
     exit 2
   fi
-  mkdir -p "$OUT" || exit 2
-  OUT=$(cd "$OUT" && pwd -P) || exit 2
+  if [ "$dry" = 0 ]; then
+    mkdir -p "$OUT" || exit 2
+    OUT=$(cd "$OUT" && pwd -P) || exit 2
+  fi
+elif [ "$dry" = 1 ]; then
+  OUT="(a new scratch directory)"
 else
   ola_scratch claude-permissions
   OUT=$OLA_SCRATCH
 fi
-
-# The fakes. They record their arguments, which is how a command is known to have run.
 bin=$OUT/bin
+
+command_for() { # <tool> → the exact form the hook knows
+  case $1 in
+    glab) echo 'glab api projects/spike%2Fspike/statuses' ;;
+    gh) echo 'gh api repos/spike/spike/statuses' ;;
+  esac
+}
+
+# The fakes. They record their arguments, which is how a command is known to have run. None
+# of it is made when only the plan is printed.
+if [ "$dry" = 0 ]; then
 mkdir -p "$bin" || exit 2
 for tool in glab gh; do
   cat >"$bin/$tool" <<'FAKE'
@@ -81,11 +96,12 @@ exec "$@"
 WRAP
 chmod +x "$bin/with-token.sh"
 
-# The test hook. `rewrite` also rewrites; both answer allow for an exact form.
+# The test hook. `rewrite` also rewrites, in the form elevate.sh writes (`bash <path> forge role
+# command`, the path quoted); both answer allow for an exact form.
 cat >"$bin/hook.sh" <<'HOOK'
 #!/usr/bin/env bash
 mode=$1
-wrapper=$(cd "$(dirname "$0")" && pwd)/with-token.sh
+wrapper="bash $(printf '%q' "$(cd "$(dirname "$0")" && pwd)/with-token.sh")"
 input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 case $cmd in
@@ -103,12 +119,7 @@ fi
 HOOK
 chmod +x "$bin/hook.sh"
 
-command_for() { # <tool> → the exact form the hook knows
-  case $1 in
-    glab) echo 'glab api projects/spike%2Fspike/statuses' ;;
-    gh) echo 'gh api repos/spike/spike/statuses' ;;
-  esac
-}
+fi
 
 # One case: <n> <tool> <rule: tool|api|none> <hook: rewrite|allow|none> → prints its verdict.
 run_case() {
@@ -121,7 +132,7 @@ run_case() {
     api) rules="Bash($tool api:*)" ;;
   esac
   if [ "$hook" != none ]; then
-    hooks=$(jq -nc --arg c "$bin/hook.sh $hook" \
+    hooks=$(jq -nc --arg c "$(printf '%q' "$bin/hook.sh") $hook" \
       '{PreToolUse: [{matcher: "Bash", hooks: [{type: "command", command: $c}]}]}')
   fi
   settings=$dir/settings.json
@@ -131,7 +142,8 @@ run_case() {
 
   out=$dir/answer.json
   printf '%s' "Run exactly this one command with the Bash tool, nothing else, then say done: $cmd" |
-    ( cd "$dir" && SPIKE_CALLS=$calls PATH="$bin:$PATH" \
+    ( cd "$dir" && unset GH_TOKEN GITHUB_TOKEN GITLAB_TOKEN &&
+        SPIKE_CALLS=$calls GH_CONFIG_DIR=$dir/gh-config GLAB_CONFIG_DIR=$dir/glab-config PATH="$bin:$PATH" \
         claude -p --output-format json --settings "$settings" --setting-sources project ) \
       >"$out" 2>"$dir/answer.err"
   rc=$?
