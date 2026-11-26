@@ -661,6 +661,23 @@ check "tokens gitlab: setup merge refuses a 500, and copies what GitLab said" \
   "$([ "$RC" != 0 ] && [ -z "$(held merge "$PROJ_ACCOUNT")" ] && printf '%s' "$OUT" | grep -q '500.*boom-from-gitlab' && echo 0 || echo 1)"
 check "tokens gitlab: a refused token is deleted from the keychain" "$([ -s "$WORK/deleted" ] && echo 0 || echo 1)"
 
+# A refusal deletes the previous token of that kind too (one keychain item per account): it says so.
+fresh
+store_at review "$PROJ_ACCOUNT" tok-previous
+self_say tok-classic 21899033 false "" 8
+setup_with "$GL" tok-classic review
+check "tokens gitlab: a refusal deletes the previous token of the kind, and says so" \
+  "$([ -z "$(held review "$PROJ_ACCOUNT")" ] && printf '%s' "$OUT" | grep -qF 'The previous review token was deleted with it' && echo 0 || echo 1)"
+
+# GitLab gave no answer: nobody knows the token is bad, so it stays, with a warning.
+fresh
+printf 'not an http answer\n' >"$GLAB_FIX/tok-silent@personal_access_tokens%self"
+setup_with "$GL" tok-silent review
+check "tokens gitlab: no answer from GitLab keeps the token" \
+  "$([ "$(held review "$PROJ_ACCOUNT")" = tok-silent ] && [ ! -e "$WORK/deleted" ] && echo 0 || echo 1)"
+check "tokens gitlab: ... and warns that it was not verified" \
+  "$(mentions "$OUT" 'warning' 'GitLab gave no answer' 'not verified' 'ola-workflow-tokens status')"
+
 # --- setup base: the bot in integrated mode, the human's read-only token in discreet mode.
 fresh
 setup_with "$GL" bot-token base
@@ -773,8 +790,8 @@ check "tokens gitlab: ... and not for a Developer" "$(healthy; status_of "$GL"; 
 healthy
 glab_say mrg-tok "projects/$PROJ_ENC/protected_branches/main" 404 '{"message":"404 Not found"}'
 status_of "$GL"
-check "tokens gitlab: warning when the base branch is not protected" \
-  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'main is not protected' && echo 0 || echo 1)"
+check "tokens gitlab: warning when no rule names the base branch (wildcards are not checked)" \
+  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'no rule protects main by its exact name' && printf '%s\n' "$OUT" | grep '^warning' | grep -q 'wildcard rules are not checked' && ! printf '%s\n' "$OUT" | grep -q 'main is not protected' && echo 0 || echo 1)"
 healthy
 glab_say mrg-tok "projects/$PROJ_ENC/protected_branches/main" 200 '{"name":"main","merge_access_levels":[{"access_level":30}]}'
 status_of "$GL"

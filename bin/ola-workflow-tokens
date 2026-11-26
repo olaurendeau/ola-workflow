@@ -166,10 +166,11 @@ gitlab_explain() { # gitlab_explain <kind>
 }
 
 # The token just kept is the one refused, so it goes, and with it whatever it replaced: the
-# keychain keeps one item per account.
+# keychain keeps one item per account. The message says so.
 gitlab_refuse() { # gitlab_refuse <kind> <why>
   security delete-generic-password -a "gitlab:$GL_ID" -s "$(ola_token_service "$1")" >/dev/null 2>&1
   echo "   not stored: $2" >&2
+  echo "   The previous $1 token was deleted with it: if you had one, paste it again too." >&2
   exit 1
 }
 
@@ -192,6 +193,9 @@ gitlab_verify() { # gitlab_verify <kind>
       [ "$1" = base ] ||
         gitlab_refuse "$1" "GitLab will not tell who this token is (403). Add the permission \"Personal Access Token: Read\" to it and paste it again."
       echo "   stored. GitLab will not tell who it is, or when it expires: status says so." ;;
+    none:*)
+      # No answer says nothing of the token: it stays, and the human is told it was not checked.
+      echo "   stored. warning: GitLab gave no answer ($(printf '%s' "$detail" | cut -c1-300)): the token is not verified. Run ola-workflow-tokens status once GitLab answers." ;;
     401:*) gitlab_refuse "$1" "GitLab rejects this token (401): unknown, revoked or expired. Paste it again." ;;
     *) gitlab_refuse "$1" "GitLab answered $code: $(printf '%s' "$detail" | cut -c1-300)" ;;
   esac
@@ -300,7 +304,7 @@ gitlab_status() {
       [ "$(jq -r '[.merge_access_levels[]?.access_level | select(. > 0 and . < 40)] | length' <<<"${line#* }" 2>/dev/null)" = 0 ] ||
         warnings+=("merging into $branch is open to Developers: only Maintainers should merge there")
     elif [ "${line%% *}" = 404 ]; then
-      warnings+=("$branch is not protected on this project")
+      warnings+=("no rule protects $branch by its exact name on this project (wildcard rules are not checked): check by hand that only Maintainers can merge there")
     else
       warnings+=("the protection of $branch cannot be read with the merge token (GitLab answered ${line%% *}): check by hand that only Maintainers can merge there")
     fi
