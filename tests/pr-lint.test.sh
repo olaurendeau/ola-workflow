@@ -286,6 +286,38 @@ for item in '- a.' '* a.' '+ a.' '1. a.' '# a.' '| a | b |' '> a.' '<b>a.</b>'; 
 done
 sum s-dash 'Une phrase - avec un tiret. Deux.'
 accept "2: a dash inside a line is not a list" fr s-dash
+# A no-break space is 2 bytes (U+00A0) or 3 (U+202F): it is one blank, not the start of a word.
+sum s-nbsp "$(printf 'Un. Deux. Trois.\302\240')"
+accept "2: a no-break space U+00A0 after the last sentence is not a sentence" fr s-nbsp
+sum s-nnbsp "$(printf 'Un. Deux. Trois.\342\200\257')"
+accept "2: a no-break space U+202F after the last sentence is not a sentence" fr s-nnbsp
+sum s-nbsp4 "$(printf 'Un.\302\240Deux.\342\200\257Trois.\302\240Quatre.\342\200\257')"
+refuse "2: sentences separated by no-break spaces are still counted" fr s-nbsp4 'the summary has 4 sentences'
+sum s-fr "$(printf 'Un. Deux. Il dit :\302\240\302\253\302\240Je viens.\302\240\302\273\342\200\257')"
+accept "2: three sentences, the last in the French form with no-break spaces" fr s-fr
+sum s-quote 'Il dit : « Je viens. »'
+accept "2: a » after a plain space is not a sentence" fr s-quote
+sum s-quote3 'Un. Deux. Il dit : « Trois. »'
+accept "2: three sentences, the last one quoted with a » after a space" fr s-quote3
+sum s-quote4 'Un. Deux. Trois. Il dit : « Quatre. »'
+refuse "2: four sentences, the last one quoted with a » after a space" fr s-quote4 'the summary has 4 sentences'
+sum s-closer-sp 'Un. ) Deux. " Trois. *'
+accept "2: a lone closer after a blank is not a sentence" fr s-closer-sp
+# A heading is # then a blank (or nothing); a list number can interrupt a paragraph only as 1.
+sum s-hash "$(printf 'Une phrase.\n#213 est lié.')"
+accept "2: a line starting with #213 is prose, not a heading" fr s-hash
+sum s-hash-first '#213 est lié. Deux.'
+accept "2: a summary starting with #213 is prose" fr s-hash-first
+for item in '## a.' '###### a.' '#'; do
+  sum s-head "$(printf 'Une phrase.\n%s' "$item")"
+  refuse "2: a summary line '$item' is a heading" fr s-head 'the summary has a heading'
+done
+sum s-year "$(printf 'Une phrase écrite en\n2026. Deux.')"
+accept "2: a wrapped line starting with 2026. is not a list" fr s-year
+sum s-year-par "$(printf 'Une phrase.\n\n2026. Deux.')"
+refuse "2: a paragraph starting with 2026. is a list" fr s-year-par 'the summary has a list'
+sum s-num-first '3. Une phrase.'
+refuse "2: a summary starting with 3. is a list" fr s-num-first 'the summary has a list'
 
 # 3. The verification line.
 printf 'Closes #1\n\nUne phrase.\n' | put v-none
@@ -303,7 +335,7 @@ Decision: a — Reason: b
 
 Vérifié : `make check`
 EOF
-refuse "4: a Decision line before the verification line is refused" fr d-before 'd-before.md:5: a Decision line comes after the verification line'
+refuse "4: a Decision line before the verification line is refused" fr d-before 'd-before.md:5: a Decision line must come after the verification line'
 put d-after-details <<'EOF'
 Closes #1
 
@@ -317,7 +349,7 @@ Decision: a — Reason: b
 
 </details>
 EOF
-refuse "4: a Decision line after the first <details> is refused" fr d-after-details 'a Decision line comes before the first <details>'
+refuse "4: a Decision line after the first <details> is refused" fr d-after-details 'a Decision line must come before the first <details>'
 put d-after-closed <<'EOF'
 Closes #1
 
@@ -333,7 +365,7 @@ Vérifié : `make check`
 
 Decision: a — Reason: b
 EOF
-refuse "4: a Decision line after the closed <details> is refused" fr d-after-closed 'a Decision line comes before the first <details>'
+refuse "4: a Decision line after the closed <details> is refused" fr d-after-closed 'a Decision line must come before the first <details>'
 put d-ok <<'EOF'
 Closes #1
 
@@ -520,6 +552,19 @@ lint fr --expect "$(digest_of "$(F closes-late)")" "$(F closes-late)"
   ko "--expect: the right bytes in the wrong form are refused for the form"
 lint fr --expect "$(digest_of "$(F witness-206)" | tr 'a-f' 'A-F')" "$(F witness-206)"
 [ "$rc" = 0 ] && ok "--expect: upper-case hexadecimal digits are accepted" || ko "--expect: upper-case hexadecimal digits are accepted"
+
+# --- awk fails: no verdict, exit 2, nothing on stdout -----------------------------------
+mkdir -p "$WORK/stub"
+printf '#!/bin/sh\nexit 1\n' >"$WORK/stub/awk"
+chmod +x "$WORK/stub/awk"
+out=$(cd "$WORK/fr" && PATH="$WORK/stub:$PATH" "$LINT" "$(F witness-206)" 2>"$WORK/err")
+rc=$?
+err=$(cat "$WORK/err")
+[ "$rc" = 2 ] && [ -z "$out" ] && [ -n "$err" ] && ok "awk fails: exit 2, nothing on stdout, a word on stderr" ||
+  { ko "awk fails: exit 2 (exit $rc, stdout '$out')"; }
+out=$(cd "$WORK/fr" && PATH="$WORK/stub:$PATH" "$LINT" "$(F s-4)" 2>"$WORK/err")
+rc=$?
+[ "$rc" = 2 ] && [ -z "$out" ] && ok "awk fails on a refused description: still exit 2" || ko "awk fails on a refused description (exit $rc)"
 
 # --- Usage ----------------------------------------------------------------------------------
 usage "no argument"

@@ -14,7 +14,8 @@
 #      are ignored);
 #   2. a summary — the non-blank lines between the `Closes` block and the verification
 #      line — that is empty, or longer than 3 sentences, or has a line starting with a list
-#      marker (`- `, `* `, `+ `, `1. `), `#`, `|`, `>` or `<`;
+#      marker (`- `, `* `, `+ `, `1. `; any `N. ` at the head of a paragraph), a heading
+#      (`#` then a blank or nothing: `#213 …` is prose), `|`, `>` or `<`;
 #   3. no line starting with the label (optionally between `**`), then blanks (space, tab,
 #      U+00A0, U+202F), then `:`;
 #   4. a line starting with `Decision:` before the verification line or after the first
@@ -25,8 +26,9 @@
 # by the analysis; the digest is of the raw bytes.
 #
 # Sentences are counted after removing code spans, link targets `](…)` and `https?://…`
-# URLs. A sentence ends with a run of . ! ? or … then any of ) " ' » * _, then a blank or the
-# end of the summary; a last fragment without punctuation counts as one.
+# URLs. A sentence ends with a run of . ! ? or … then any of ) " ' » * _, then a blank (space,
+# tab, U+00A0, U+202F) or the end of the summary; a last fragment without punctuation counts as
+# one, and a closer after a blank with no sentence open (the » of « Je viens. ») counts as none.
 #
 # What it does not check: the Design line and the Captures block (their wording depends on the
 # language), the substance of the description, and an abbreviation followed by a blank
@@ -42,7 +44,8 @@
 # publishes asks for it again just before.
 #
 # Exit status: 0 follows the form (and the expected digest, when given) · 1 it does not, or
-# the digest differs · 2 a usage error, nothing on the standard output.
+# the digest differs · 2 a usage error, or awk failed (no verdict): nothing on the standard
+# output.
 # bash, awk and git only.
 set -uo pipefail
 
@@ -163,7 +166,7 @@ analysis=$(
       if (substr(s, i, 2) == raquo) return 2
       return 0
     }
-    function sentences(s,    i, n, k, count, open, j) {
+    function sentences(s,    i, n, k, count, open, j, b, c) {
       gsub(/`[^`]*`/, "", s)
       gsub(/\]\([^)]*\)/, "", s)
       gsub(/https?:\/\/[^ \t]*/, "", s)
@@ -174,7 +177,13 @@ analysis=$(
       while (i <= n) {
         k = ender_len(s, i)
         if (k == 0) {
-          if (blank_len(s, i) == 0) open = 1
+          # A blank is 1 to 3 bytes: step over all of them, not over the first one only.
+          b = blank_len(s, i)
+          if (b > 0) { i += b; continue }
+          # A closer with no sentence open (« Je viens. » with a plain blank before ») ends nothing.
+          c = closer_len(s, i)
+          if (!open && c > 0) { i += c; continue }
+          open = 1
           i += 1
           continue
         }
@@ -261,8 +270,10 @@ analysis=$(
             if (c == "-" || c == "*" || c == "+") {
               if (substr(s, 2, 1) == " ") problem(sumline[i], "the summary has a list: it is 1 to 3 sentences of prose")
             }
-            if (s ~ /^[0-9]+\. /) problem(sumline[i], "the summary has a list: it is 1 to 3 sentences of prose")
-            if (c == "#") problem(sumline[i], "the summary has a heading: it is 1 to 3 sentences of prose")
+            # A number starts a list at the head of a paragraph; inside one, only 1. does.
+            para = (i == 1 || sumline[i] != sumline[i - 1] + 1)
+            if ((para && s ~ /^[0-9]+\. /) || s ~ /^1\. /) problem(sumline[i], "the summary has a list: it is 1 to 3 sentences of prose")
+            if (s ~ /^#+( |$)/) problem(sumline[i], "the summary has a heading: it is 1 to 3 sentences of prose")
             if (c == "|") problem(sumline[i], "the summary has a table: it is 1 to 3 sentences of prose")
             if (c == ">") problem(sumline[i], "the summary has a quote: it is 1 to 3 sentences of prose")
             if (c == "<") problem(sumline[i], "the summary has HTML: it is 1 to 3 sentences of prose")
@@ -275,15 +286,15 @@ analysis=$(
       }
       # Rule 4.
       for (i = 1; i <= ndec; i++) {
-        if (verified && decision[i] < verified) problem(decision[i], "a Decision line comes after the verification line")
-        else if (firstdetails && decision[i] > firstdetails) problem(decision[i], "a Decision line comes before the first <details>")
+        if (verified && decision[i] < verified) problem(decision[i], "a Decision line must come after the verification line")
+        else if (firstdetails && decision[i] > firstdetails) problem(decision[i], "a Decision line must come before the first <details>")
       }
       # Rule 5.
       if (depth > 0) problem(NR, "a <details> is never closed by </details>")
       print outside
     }
   ' "$work/body"
-)
+) || die "awk failed, no verdict"
 outside=${analysis##*$'\n'}
 problems=
 if [ "$analysis" != "$outside" ]; then
