@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.10.0
+
+**The groundwork for GitLab, a brief written in Markdown, reviewers that open on the verdict,
+and a documentation reorganised under `docs/`.** Nothing here breaks an existing profile. A
+GitLab project is not supported yet, and says so instead of failing in a confusing way.
+
+- GitLab groundwork (#203, #205, #206, #209, #223, #226): a new `forge` key in the profile
+  (`github`, the default, or `gitlab`). A `gitlab` project is not usable yet: the brief refuses
+  it and says why, rather than dictating `gh` commands. Behind that refusal, the pieces are in
+  place: the hooks elevate and read tokens per forge, host and path (`GITLAB_TOKEN` in the
+  session, and in discreet mode a fine-grained PAT of the human limited to the project),
+  `ola-workflow-tokens` creates and checks the GitLab tokens of a project, and
+  `ola-workflow-pr-assets` prints GitLab image links for merge requests. GitHub behaviour is
+  unchanged. What was measured on gitlab.com is kept in the decision journal (#212).
+- A brief written in Markdown (#159, #174, #175, #187, #188): the text of the brief moves out
+  of `bin/ola-workflow-brief` into templates under `brief/`, rendered by the script. The
+  output stays the same, checked by an equivalence script, and tests now forbid text in the
+  script.
+- Reviewers that open on the verdict (#195, #196, #198): the pr-reviewer, the design-reviewer
+  and the security-reviewer start with the verdict and the problems, as short ranked findings
+  tied to a criterion or a state. The security review is written in French.
+- A command to lint a description (#225): `ola-workflow-pr-lint` checks that a pull request
+  description follows the form of the brief (`Closes` at the head, 1 to 3 sentences, a
+  verification line, `Decision:` and `<details>` in place) and prints a digest of the bytes it
+  read.
+- A coordinator that resumes and links (#112/#118, #120, #186, #201): it groups the follow-ups
+  of an epic into a single task, rebuilds its state from the forge when it starts, puts a link
+  to the pull request or issue at the first mention in each message to the human, and takes its
+  resume commands and the task-to-epic link from the brief.
+- Fewer repeated reviews (#117, #146): after a catch-up of the base branch, the security
+  review is owed again only when the change the pull request brings differs, and the
+  pr-reviewer confirms a conflict-free catch-up lightly, carrying its verdict over instead of
+  reviewing again.
+- Cost (#116, #119): `scripts/token-cost.sh` weights each call by the price of its model, and
+  `workflow-init` sets `agent` and an auto-summary window (`autoCompactWindow`) of 250k for the
+  coordinator in `.claude/settings.json` (integrated mode; in discreet mode it gives the two
+  keys to the human).
+- Documentation under `docs/` (#136, #138, #148 to #158): a README with a pitch, a Quickstart
+  and a "How it works" section; pages for getting started, a walkthrough, discreet mode,
+  configuration, GitHub tokens, models and agent identity, and contributors (with
+  `CONTRIBUTING.md`); a decision journal; tests that scan `docs/` for broken links, keys and
+  models.
+
 ## 0.9.0
 
 **The coordinator never runs as a sub-agent.** A coordinator dispatched as a sub-agent loses
