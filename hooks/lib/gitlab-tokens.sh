@@ -17,7 +17,11 @@
 #
 # What GitLab does not give is what GitHub gives: the roles are not enforced by the
 # token's rights, so what this file lends is an identity, not a permission. What that means
-# for the roles is for the GitLab token documentation to say (#167). The tokens are never written to a file and never put in the text of a command.
+# for the roles is for the GitLab token documentation to say (#167). The tokens are never
+# written to a file and never put in the text of a command.
+#
+# Whose token it is depends on the mode: in integrated mode the agents' bot, in discreet mode
+# the human's granular token for this project only, read at the project's own account.
 #
 # Everything in the remote — host and path — is project-controlled text. It reaches the
 # line sourced before each Bash command only through `printf %q`, so a quote, a space or a
@@ -57,6 +61,13 @@ ola_gitlab_accounts() {
   done
 }
 
+# ola_gitlab_project_account <host/path> → the one account of a token limited to the project.
+# Nothing above it: a token kept at a group or at the host is a classic or a group token, and
+# is not limited to the project.
+ola_gitlab_project_account() {
+  printf 'gitlab:%s\n' "$1"
+}
+
 # ola_gitlab_token_read <kind> <host/path> → the nearest token on stdout, or 1 when there is
 # none. An empty answer is a missing token, as for GitHub.
 ola_gitlab_token_read() {
@@ -73,11 +84,13 @@ EOF
 # <host>/<path> of the project (empty when the remote is unknown). Like that one it looks the
 # token up each time rather than writing it in, so the secret stays in the keychain. The
 # accounts are the ascent above, written as words quoted by `%q`; the loop runs in a
-# command substitution so that its variables are not left in the session.
+# command substitution so that its variables are not left in the session. With a second
+# argument, `project` (discreet mode), the only account is the project's own, with no ascent:
+# the line is the same otherwise, and without the argument the output is the integrated one.
 # shellcheck disable=SC2016
 #   The $ are for the shell that sources the line, not for this one.
 ola_gitlab_env_line() {
-  local id=${1:-} account host
+  local id=${1:-} scope=${2:-} account host
   if [ -z "$id" ]; then
     printf 'export GITLAB_TOKEN=%s\n' "$OLA_GITLAB_NO_TOKEN"
     return 0
@@ -86,7 +99,7 @@ ola_gitlab_env_line() {
   while IFS= read -r account; do
     printf ' %q' "$account"
   done <<EOF
-$(ola_gitlab_accounts "$id")
+$(if [ "$scope" = project ]; then ola_gitlab_project_account "$id"; else ola_gitlab_accounts "$id"; fi)
 EOF
   printf '; do t=$(security find-generic-password -s %s -a "$a" -w 2>/dev/null) && [ -n "$t" ] && { printf %%s "$t"; break; }; done)"; ' \
     "$(ola_token_service base)"
