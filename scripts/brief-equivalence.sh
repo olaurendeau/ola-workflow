@@ -4,9 +4,9 @@
 # Usage: scripts/brief-equivalence.sh [<rev>]      (default origin/main; run from the worktree)
 #
 # The brief used to be one bash script and is becoming templates in brief/. A refactor owes
-# one thing: the same output. This renders 15 profiles (C01 to C15) with the brief of the
+# one thing: the same output. This renders 16 profiles (C01 to C16) with the brief of the
 # worktree it is run from, and with the brief of <rev> extracted by git archive, and compares
-# stdout, stderr and the exit status, once in the caller's locale and once in LC_ALL=C: 30
+# stdout, stderr and the exit status, once in the caller's locale and once in LC_ALL=C: 32
 # comparisons. The reference is rendered every time and no expected output is committed, so
 # there is nothing here to go stale or to be edited into agreement.
 #
@@ -92,7 +92,7 @@ read -r -d '' TRAPS <<'JSON'
 JSON
 
 # --- The cases ----------------------------------------------------------------------------
-IDS=()      # C01 ... C15
+IDS=()      # C01 ... C16
 SLUGS=()    # integrated-defaults ...
 DIRS=()
 
@@ -150,6 +150,11 @@ profile '[1,2]'
 # the good element and the stop that tells them apart.
 mkrepo C15 commands-non-object
 profile '{"mode":"integrated","commands":[{"cmd":"a"},"make",{"cmd":"b"}]}'
+# C16: the profile of this repository, read in the worktree: what a change to the brief has
+# to leave alone first is the brief this project itself reads. A copy, so that the render
+# cannot touch it; the file is the worktree's, whichever side renders.
+mkrepo C16 this-repository
+cp "$top/.claude/workflow.json" "$REPO_DIR/.claude/workflow.json" || { echo "brief-equivalence: no profile in $top/.claude" >&2; exit 2; }
 
 # --- Rendering and comparing ----------------------------------------------------------------
 # render <brief> <dir> <locale: caller|C> <prefix> → <prefix>.out, .err, .rc

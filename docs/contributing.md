@@ -13,7 +13,7 @@ make spike     # replays the agent-identity spike
 make spike-artifact  # prints how to replay the artifact spike, by hand
 scripts/spike/gitlab-forge.sh --dry-run  # prints what the GitLab spike measures, offline; a real run is the human's, on a throwaway project of gitlab.com (self-managed is not measured)
 scripts/spike/claude-permissions.sh --dry-run  # prints the cases of the "ask rule against the hook's allow" spike, offline; a real run calls claude, billed to the human who starts it
-scripts/brief-equivalence.sh [<rev>]  # renders 15 profiles with this worktree's brief and with <rev>'s (default origin/main), and shows what differs: nothing, for a refactor
+scripts/brief-equivalence.sh [<rev>]  # renders 16 profiles with this worktree's brief and with <rev>'s (default origin/main), and shows what differs: nothing, for a refactor
 scripts/token-cost.sh [--since D] [--until D] <dir>...  # weighted token cost per role, per model and per PR, raw and in $, from ~/.claude/projects/<slug>/
 ```
 
