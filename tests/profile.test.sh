@@ -1023,6 +1023,85 @@ rc 1 "where: no repository, no candidate, and it says so" -- "$CLI" -C "$WORK/no
 rc 1 "where user: the same, per scope" -- "$CLI" -C "$WORK/not-a-repo" where user
 rc 2 "where: an unknown scope is a usage error" -- "$CLI" -C "$WORK/integrated" where sideways
 
+# --- The keywords beyond the profile schema's own -----------------------------------------
+# allOf, anyOf, oneOf, not, if/then and errorMessage, read from a throwaway schema passed by
+# OLA_PROFILE_SCHEMA: the real schema does not use them yet, so no profile changes verdict.
+kw_validate() { # kw_validate <schema json> <profile json> → the problems, on stdout
+  printf '%s\n' "$1" >"$WORK/kw.schema.json"
+  printf '%s\n' "$2" >"$WORK/kw.json"
+  env OLA_PROFILE_SCHEMA="$WORK/kw.schema.json" "$CLI" validate "$WORK/kw.json" 2>&1
+}
+kw_accepts() { # kw_accepts <schema> <profile> <label>
+  local out
+  out=$(kw_validate "$1" "$2")
+  total=$((total + 1))
+  if [ -z "$out" ]; then echo "ok    keyword: $3"; else
+    echo "FAIL  keyword: $3 (got '$out')"; failures=$((failures + 1)); fi
+}
+kw_refuses() { # kw_refuses <schema> <profile> <exact output expected> <label>
+  local out
+  out=$(kw_validate "$1" "$2")
+  total=$((total + 1))
+  if [ "$out" = "$3" ]; then echo "ok    keyword: $4"; else
+    echo "FAIL  keyword: $4"
+    echo "        expected: $3"
+    echo "        actual:   $out"
+    failures=$((failures + 1)); fi
+}
+
+S_ALL='{"allOf": [{"required": ["a"]}, {"required": ["b"]}]}'
+kw_accepts "$S_ALL" '{"a": 1, "b": 2}' 'allOf: every sub-schema holds'
+kw_refuses "$S_ALL" '{}' "profile/a: required key is missing
+profile/b: required key is missing" 'allOf: the problems of each sub-schema add up'
+
+S_ANY='{"anyOf": [{"type": "string"}, {"type": "integer"}]}'
+kw_accepts "$S_ANY" '7' 'anyOf: one form is enough'
+kw_refuses "$S_ANY" 'true' 'profile: matches none of the allowed forms' \
+  'anyOf: no form holds, and the inner problems are not printed'
+
+S_ONE='{"oneOf": [{"type": "string"}, {"type": "object", "required": ["x"]}]}'
+kw_accepts "$S_ONE" '"s"' 'oneOf: exactly one form holds'
+kw_refuses "$S_ONE" '3' 'profile: matches none of the allowed forms' 'oneOf: no form holds'
+kw_refuses '{"oneOf": [{"type": "integer"}, {"minimum": 1}]}' '5' \
+  'profile: matches more than one of the allowed forms' 'oneOf: two valid forms are refused'
+
+S_NOT='{"not": {"required": ["a"]}}'
+kw_accepts "$S_NOT" '{"b": 1}' 'not: the sub-schema does not hold'
+kw_refuses "$S_NOT" '{"a": 1}' 'profile: matches a form it must not' 'not: the sub-schema holds'
+
+S_IF='{"if": {"required": ["a"]}, "then": {"required": ["b"]}}'
+kw_accepts "$S_IF" '{"a": 1, "b": 2}' 'if/then: then holds when if does'
+kw_refuses "$S_IF" '{"a": 1}' 'profile/b: required key is missing' 'if/then: then applies when if holds'
+kw_accepts "$S_IF" '{"c": 1}' 'if/then: a false if does not apply then'
+kw_accepts '{"if": {"required": ["a"]}, "else": {"required": ["b"]}}' '{"c": 1}' \
+  'if/then: there is no else'
+
+S_MSG='{"enum": ["a", "b"], "errorMessage": "got {value}, want a or b"}'
+kw_accepts "$S_MSG" '"a"' 'errorMessage: a valid value is untouched'
+kw_refuses "$S_MSG" '"z"' 'profile: got "z", want a or b' \
+  'errorMessage: replaces the enum error, {value} a string'
+kw_refuses "$S_MSG" '3' 'profile: got 3, want a or b' 'errorMessage: {value} a number'
+kw_refuses "$S_MSG" '{"k": [1]}' 'profile: got {"k":[1]}, want a or b' 'errorMessage: {value} an object'
+kw_refuses '{"type": "string", "errorMessage": "text only"}' '1' 'profile: text only' \
+  'errorMessage: replaces the type error'
+kw_refuses '{"type": "integer", "minimum": 5, "errorMessage": "too small: {value}"}' '2' \
+  'profile: too small: 2' 'errorMessage: replaces the minimum error'
+kw_refuses '{"minItems": 2, "errorMessage": "need two"}' '[1]' 'profile: need two' \
+  'errorMessage: replaces the minItems error'
+kw_refuses '{"required": ["a", "b"], "errorMessage": "a and b, please"}' '{}' \
+  'profile: a and b, please' 'errorMessage: several required errors become one line'
+kw_refuses '{"oneOf": [{"type": "string"}, {"type": "integer"}], "errorMessage": "string or integer, not {value}"}' \
+  'true' 'profile: string or integer, not true' 'errorMessage: replaces the oneOf error'
+kw_refuses '{"anyOf": [{"type": "string"}], "errorMessage": "nope"}' '1' 'profile: nope' \
+  'errorMessage: replaces the anyOf error'
+kw_refuses '{"not": {"type": "integer"}, "errorMessage": "no integers"}' '1' 'profile: no integers' \
+  'errorMessage: replaces the not error'
+kw_refuses '{"properties": {"m": {"enum": ["a"]}, "n": {"type": "string"}}, "errorMessage": "top"}' \
+  '{"m": "z", "n": 1}' 'profile/m: "z" is not one of a
+profile/n: expected string, got integer' 'errorMessage: a nested error keeps its line and path'
+kw_refuses '{"properties": {"m": {"type": "string", "errorMessage": "m must be text"}}}' '{"m": 1}' \
+  'profile/m: m must be text' 'errorMessage: on a nested schema, under its own path'
+
 # The schema the CLI validates against, so that whoever writes a profile can point an
 # editor at it without restating where the plugin keeps it. It is not a value to put *in* a
 # profile: the path holds the plugin version, so it is right on one machine until the next
