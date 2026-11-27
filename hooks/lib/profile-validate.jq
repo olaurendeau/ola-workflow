@@ -12,6 +12,10 @@
 #     message, {value} standing for the received value as JSON; problems of nested
 #     properties and items keep their own line and path).
 #
+# Under if and not, write only keywords listed above (enum, required, properties, type...),
+# never const or pattern: a keyword it does not read is true of everything, so a condition
+# built on it always holds, then applies to every profile and a not refuses them all.
+#
 # Prints one line per problem; no output means the profile is valid.
 
 def tname:

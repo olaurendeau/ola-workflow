@@ -1458,6 +1458,9 @@ forbid_key preview '(npm run dev|yarn dev|pnpm dev|rails server|https?://localho
 forbid_key forge '\bglab [a-z]|merge_request\.|GITLAB_TOKEN' \
   'a GitLab command or token'
 forbid_key escalation_extra 'escalation_extra' 'the escalation list itself'
+# Who approves each step is the project's: a prompt that names the key, or a value of it, has
+# decided for every project. The prompts cite the brief, which says what this profile asks.
+forbid_key approval '\bapproval\.|human_when' 'who approves a step'
 # The paths that get a security review, and the command that matches them, are the brief's:
 # a prompt that lists them has decided for every project which files are worth a look.
 forbid_key security '(security\.paths|:\(glob\)|security-precedents)' \

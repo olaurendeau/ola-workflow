@@ -65,7 +65,8 @@ is also what validates it — point your editor at it:
 | `check` | `full` (what CI runs), `affected` (the subset), `cleanup` |
 | `slots` | how parallel agents avoid colliding on ports, databases and containers: one per developer, and one or more for reviewers, each running a review at the same time |
 | `pr` | `max_lines`, `exclude`, `title` |
-| `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns` |
+| `merge` | `required_checks`, `review_status`, `sensitive_paths`, `sensitive_patterns`; the last two may be replaced by `approval.merge.human_when`, and are refused beside `approval.merge` |
+| `approval` | who approves each step, `human` or `agent`: `design`, `architecture`, `merge` (also `{ "human_when": { "paths", "patterns" } }`) and `release` — see [Approval](#approval) |
 | `security` | `paths`: the globs whose change gets a security review beside the code review; none, and nobody is dispatched |
 | `commands` | per-command `allow_args` / `deny_args` rules the brief states — nothing applies them yet |
 | `forge` | `github` (the default) or `gitlab`: the forge that hosts the remote. This version does not support GitLab yet: `ola-workflow-brief` refuses a profile that says `gitlab` and prints why |
@@ -145,6 +146,58 @@ A third script, also on the PATH of every Bash call, checks the form of a descri
   the exit status, and the digest of the bytes it read; `--expect` refuses bytes that are not
   those of that digest, so that what is published is what was reviewed. Exit status 0 follows
   the form, 1 does not, 2 a usage error or an awk failure (no verdict).
+
+### Approval
+
+The `approval` key says who approves each step, and the brief prints it in its Escalation
+section. Without it the brief is the one it always was.
+
+| step | values | when omitted |
+|---|---|---|
+| `design` | `human`, `agent` | `agent`: the design-reviewer approves, nobody is stopped |
+| `architecture` | `human`, `agent` | `agent`: nobody is stopped |
+| `merge` | `human`, `agent`, or `{ "human_when": { "paths": [globs], "patterns": [...] } }` | the gate reads `merge.sensitive_paths` and `merge.sensitive_patterns` |
+| `release` | `human`, `agent` | the human decides and acts |
+
+- `human_when` is required in the object form; `paths` and `patterns` are each optional. A
+  pattern is a string, which stands for `{ "regex": <string> }`, or an object like those of
+  `merge.sensitive_patterns` (`regex`, `file`, `exclude`).
+- `release: "human"`: the human decides whether to release and the version; once they have
+  asked, the coordinator does the whole chain: the release pull request, the annotated tag,
+  the GitHub release. `"agent"`: the coordinator decides.
+- A step omitted takes the default of a profile without the key. A value the schema refuses
+  is read as the most restrictive one (`human` for design, architecture and merge; the
+  default text for release), and `ola-profile validate` exits 1 with one message per step.
+- `approval.merge`, in any form, and `merge.sensitive_paths` or `merge.sensitive_patterns`
+  cannot both be set: `ola-profile validate` refuses it, and the brief says so. Keep one.
+- In discreet mode nothing is merged and nothing is published on the forge, so `merge` and
+  `release` decide nothing there.
+
+A strong project: the human validates the design and the architecture, merges what touches
+the workflow's own files or a private key, and decides the release.
+
+```json
+"approval": { "design": "human", "architecture": "human",
+  "merge": { "human_when": { "paths": [".github/**", "hooks/**", "agents/**"], "patterns": ["BEGIN .*PRIVATE KEY"] } },
+  "release": "human" }
+```
+
+A medium project: the human validates the design and the architecture and merges what
+touches the CI; the coordinator merges the rest and decides the release.
+
+```json
+"approval": { "design": "human", "architecture": "human",
+  "merge": { "human_when": { "paths": [".github/**"] } }, "release": "agent" }
+```
+
+A personal project: the human validates the design alone.
+
+```json
+"approval": { "design": "human", "architecture": "agent", "merge": "agent", "release": "agent" }
+```
+
+`release: "agent"` stops at the GitHub release when the coordinator's token cannot create
+one: granting it is the human's call.
 
 ### Globs
 

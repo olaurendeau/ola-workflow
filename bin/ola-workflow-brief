@@ -218,6 +218,67 @@ render pull-request; echo
 extra=$(get escalation_extra)
 [ -n "$extra" ] && extra=$(printf '%s\n' "$extra" | sed 's/^/- /')
 value escalation_extra "$extra"
+# Who approves each step. The key is the project's own: without it nothing below is printed
+# and the brief is the one it always was. With it, a step it omits takes the default of a
+# profile without the key, and a value the schema refuses is read as the most restrictive one
+# (design, architecture and merge to the human; release to the text it has without the key),
+# as ola_profile_mode reads an unknown mode as discreet. The words are the templates'.
+state_is() { # state_is <state> <one of...> → 0 when the state is one of them
+  local s
+  for s in "${@:2}"; do [ "$1" = "$s" ] && return 0; done
+  return 1
+}
+flag approval ola_profile_has approval "$dir"
+# The state of a step is read by one jq over the profile itself, not through `get`: `get`
+# unpacks an array of scalars (["agent"] would read as agent) and its command substitution
+# strips a trailing newline ("agent\n" would read as agent), and the schema refuses both.
+# jq's own truth decides: a step is human or agent only when it is exactly that string, `when`
+# only for merge, with an object the schema accepts, omitted only when the key is absent, and
+# anything else is invalid (null included). An `approval` that is no object makes every step
+# invalid.
+approval_state() { # approval_state <step> → omitted | human | agent | when | invalid
+  local file out=
+  file=$(ola_profile_path "$dir") && out=$(jq -r -n --arg step "$1" "$OLA_PROFILE_GATE"'
+    | def strs: type == "array" and all(.[]; type == "string");
+      def pat: type == "string" or (type == "object" and has("regex")
+        and ((keys - ["file", "regex", "exclude"]) | length) == 0
+        and (.regex | type) == "string"
+        and ((has("file") | not) or (.file | type) == "string")
+        and ((has("exclude") | not) or (.exclude | strs)));
+      def when: type == "object" and keys == ["human_when"] and (.human_when | type) == "object"
+        and (.human_when | ((keys - ["paths", "patterns"]) | length) == 0
+          and ((has("paths") | not) or (.paths | strs))
+          and ((has("patterns") | not) or ((.patterns | type) == "array" and all(.patterns[]; pat))));
+      if (has("approval") | not) then "omitted"
+      elif (.approval | type) != "object" then "invalid"
+      elif (.approval | has($step) | not) then "omitted"
+      else .approval[$step] as $v
+        | if $v == "human" or $v == "agent" then $v
+          elif $step == "merge" and ($v | when) then "when"
+          else "invalid" end
+      end' "$file" 2>/dev/null)
+  printf '%s\n' "${out:-omitted}"
+}
+for step in design architecture release merge; do
+  state=$(approval_state "$step")
+  flag "approval_${step}_omitted" state_is "$state" omitted
+  case $step in
+    design | architecture)
+      flag "approval_${step}_human" state_is "$state" human invalid
+      flag "approval_${step}_agent" state_is "$state" agent omitted
+      ;;
+    merge)
+      flag approval_merge_human state_is "$state" human invalid
+      flag approval_merge_agent state_is "$state" agent
+      flag approval_merge_when state_is "$state" when
+      ;;
+    release)
+      flag approval_release_human state_is "$state" human
+      flag approval_release_agent state_is "$state" agent
+      flag approval_release_current state_is "$state" omitted invalid
+      ;;
+  esac
+done
 render escalation; echo
 # What GitHub itself refuses, read from the profile like everything else. An agent has to know
 # whether a rule it is about to break will stop it: told it will be refused and seeing no

@@ -113,6 +113,72 @@
         }
       }
     },
+    "approval": {
+      "description": "Who approves each step of the workflow: the human, or an agent. A step the profile omits takes the default of a profile without this key, and a value the schema refuses is read as the most restrictive one. Without this key the brief is the one it always was.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "design": {
+          "description": "Who approves a design. agent (the default): the design-reviewer approves, and the human is not stopped. human: the coordinator stops after the design and waits for the human.",
+          "enum": ["human", "agent"],
+          "errorMessage": "Invalid profile: `approval.design` must be \"human\" or \"agent\" (got: {value})."
+        },
+        "architecture": {
+          "description": "Who approves an architecture, before the tasks are created. agent (the default): no stop. human: the coordinator stops and waits for the human.",
+          "enum": ["human", "agent"],
+          "errorMessage": "Invalid profile: `approval.architecture` must be \"human\" or \"agent\" (got: {value})."
+        },
+        "merge": {
+          "description": "Who merges. Omitted, the merge gate reads merge.sensitive_paths and merge.sensitive_patterns: a human merges what touches them, the coordinator the rest. human: a human merges every pull request. agent: the coordinator merges every pull request whose gate holds. { human_when: { paths, patterns } }: a human merges what touches those paths or matches those patterns, and the coordinator the rest; it replaces merge.sensitive_paths and merge.sensitive_patterns, which cannot be set beside it, in any form of approval.merge. A pattern is a string, which stands for { regex: <string> }, or an object like those of merge.sensitive_patterns.",
+          "oneOf": [
+            { "enum": ["human", "agent"] },
+            {
+              "type": "object",
+              "required": ["human_when"],
+              "additionalProperties": false,
+              "properties": {
+                "human_when": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "paths": {
+                      "description": "Globs a human merges: same dialect as merge.sensitive_paths.",
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "patterns": {
+                      "description": "A patch matching one of these needs a human, as with merge.sensitive_patterns.",
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          { "type": "string" },
+                          {
+                            "type": "object",
+                            "required": ["regex"],
+                            "additionalProperties": false,
+                            "properties": {
+                              "file": { "type": "string" },
+                              "regex": { "type": "string" },
+                              "exclude": { "type": "array", "items": { "type": "string" } }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "errorMessage": "Invalid profile: `approval.merge` must be \"human\", \"agent\" or an object with `human_when` (got: {value})."
+        },
+        "release": {
+          "description": "Who decides a release. Omitted: the human decides and acts. human: the human decides whether to release and the version, and once they have asked the coordinator does the whole chain: the release pull request, the annotated tag, the GitHub release. agent: the coordinator decides.",
+          "enum": ["human", "agent"],
+          "errorMessage": "Invalid profile: `approval.release` must be \"human\" or \"agent\" (got: {value})."
+        }
+      }
+    },
     "security": {
       "description": "When a pull request gets a security review beside the code review.",
       "type": "object",
@@ -186,5 +252,49 @@
       "type": "array",
       "items": { "type": "string" }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "required": ["approval", "merge"],
+        "properties": {
+          "approval": {
+            "type": "object",
+            "required": ["merge"],
+            "properties": { "merge": { "type": "object" } }
+          },
+          "merge": {
+            "type": "object",
+            "anyOf": [{ "required": ["sensitive_paths"] }, { "required": ["sensitive_patterns"] }]
+          }
+        }
+      },
+      "then": {
+        "not": {},
+        "errorMessage": "Invalid profile: `approval.merge.human_when` and `merge.sensitive_*` are both set; keep only one."
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "required": ["approval", "merge"],
+        "properties": {
+          "approval": {
+            "type": "object",
+            "required": ["merge"],
+            "properties": { "merge": { "enum": ["human", "agent"] } }
+          },
+          "merge": {
+            "type": "object",
+            "anyOf": [{ "required": ["sensitive_paths"] }, { "required": ["sensitive_patterns"] }]
+          }
+        }
+      },
+      "then": {
+        "not": {},
+        "errorMessage": "Invalid profile: `approval.merge` and `merge.sensitive_*` are both set; keep only one."
+      }
+    }
+  ]
 }
