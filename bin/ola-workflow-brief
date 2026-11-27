@@ -218,6 +218,49 @@ render pull-request; echo
 extra=$(get escalation_extra)
 [ -n "$extra" ] && extra=$(printf '%s\n' "$extra" | sed 's/^/- /')
 value escalation_extra "$extra"
+# Who approves each step. The key is the project's own: without it nothing below is printed
+# and the brief is the one it always was. With it, a step it omits takes the default of a
+# profile without the key, and a value the schema refuses is read as the most restrictive one
+# (design, architecture and merge to the human; release to the text it has without the key),
+# as ola_profile_mode reads an unknown mode as discreet. The words are the templates'.
+state_is() { # state_is <state> <one of...> → 0 when the state is one of them
+  local s
+  for s in "${@:2}"; do [ "$1" = "$s" ] && return 0; done
+  return 1
+}
+flag approval ola_profile_has approval "$dir"
+for step in design architecture release merge; do
+  state=omitted
+  if ola_profile_has "approval.$step" "$dir"; then
+    raw=$(get "approval.$step")
+    case $raw in
+      human | agent) state=$raw ;;
+      *) state=invalid ;;
+    esac
+    # The object form of merge: exactly `human_when`, itself an object.
+    if [ "$step" = merge ] && [ "$state" = invalid ] &&
+       printf '%s' "$raw" | jq -e 'type == "object" and keys == ["human_when"] and (.human_when | type) == "object"' >/dev/null 2>&1; then
+      state=when
+    fi
+  fi
+  flag "approval_${step}_omitted" state_is "$state" omitted
+  case $step in
+    design | architecture)
+      flag "approval_${step}_human" state_is "$state" human invalid
+      flag "approval_${step}_agent" state_is "$state" agent omitted
+      ;;
+    merge)
+      flag approval_merge_human state_is "$state" human invalid
+      flag approval_merge_agent state_is "$state" agent
+      flag approval_merge_when state_is "$state" when
+      ;;
+    release)
+      flag approval_release_human state_is "$state" human
+      flag approval_release_agent state_is "$state" agent
+      flag approval_release_current state_is "$state" omitted invalid
+      ;;
+  esac
+done
 render escalation; echo
 # What GitHub itself refuses, read from the profile like everything else. An agent has to know
 # whether a rule it is about to break will stop it: told it will be refused and seeing no

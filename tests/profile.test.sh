@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016
+#   SC2016: the backticks in single quotes in the approval messages are the text to compare.
 # Profile resolution, reading and validation, against throwaway git repositories.
 # Nothing here touches the network or the real HOME.
 set -uo pipefail
@@ -1114,6 +1116,70 @@ else
 fi
 rc 1 "schema: says so rather than naming a file that is not there" -- \
   env OLA_PROFILE_SCHEMA=/nonexistent/profile.schema.json "$CLI" schema
+
+# --- approval: who approves each step, against the real schema -------------------------------
+ap_check() { # ap_check <profile json> <exact output expected, "" for valid> <label>
+  local out
+  printf '%s\n' "$1" >"$WORK/approval.json"
+  out=$("$CLI" validate "$WORK/approval.json" 2>&1)
+  total=$((total + 1))
+  if [ "$out" = "$2" ]; then echo "ok    approval: $3"; else
+    echo "FAIL  approval: $3"
+    echo "        expected: $2"
+    echo "        actual:   $out"
+    failures=$((failures + 1)); fi
+}
+ap_check '{"mode": "integrated"}' '' 'a profile without approval is valid'
+ap_check '{"mode": "integrated", "approval": {}}' '' 'an empty approval is valid'
+ap_check '{"mode": "integrated", "approval": {"design": "human", "architecture": "human", "merge": "human", "release": "human"}}' '' \
+  'every step to the human is valid'
+ap_check '{"mode": "integrated", "approval": {"design": "agent", "architecture": "agent", "merge": "agent", "release": "agent"}}' '' \
+  'every step to an agent is valid'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {"paths": ["infra/**"], "patterns": ["AKIA[0-9A-Z]{16}", {"regex": "deploy", "file": "Makefile", "exclude": ["docs/**"]}]}}}}' '' \
+  'merge by human_when, patterns as strings and as objects, is valid'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {}}}}' '' 'human_when needs neither paths nor patterns'
+ap_check '{"mode": "integrated", "approval": {"merge": "agent"}}' '' 'approval.merge without merge.sensitive_* is valid'
+ap_check '{"mode": "integrated", "merge": {"sensitive_paths": ["a/**"], "sensitive_patterns": [{"regex": "x"}]}}' '' \
+  'merge.sensitive_* without approval is valid'
+ap_check '{"mode": "integrated", "approval": {"design": "human"}, "merge": {"sensitive_paths": ["a/**"]}}' '' \
+  'approval without approval.merge is valid beside merge.sensitive_*'
+ap_check '{"mode": "integrated", "approval": {"deploy": "human"}}' 'profile/approval/deploy: unknown key' \
+  'an unknown key under approval is refused'
+for step in design architecture release; do
+  ap_check "{\"mode\": \"integrated\", \"approval\": {\"$step\": \"maybe\"}}" \
+    "profile/approval/$step: Invalid profile: \`approval.$step\` must be \"human\" or \"agent\" (got: \"maybe\")." \
+    "approval.$step: \"maybe\" is refused with the exact message"
+done
+ap_check '{"mode": "integrated", "approval": {"merge": "maybe"}}' \
+  'profile/approval/merge: Invalid profile: `approval.merge` must be "human", "agent" or an object with `human_when` (got: "maybe").' \
+  'approval.merge: "maybe" is refused with the exact message'
+ap_check '{"mode": "integrated", "approval": {"merge": {}}}' \
+  'profile/approval/merge: Invalid profile: `approval.merge` must be "human", "agent" or an object with `human_when` (got: {}).' \
+  'approval.merge: {} is refused, human_when being required'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {"glob": ["a"]}}}}' \
+  'profile/approval/merge: Invalid profile: `approval.merge` must be "human", "agent" or an object with `human_when` (got: {"human_when":{"glob":["a"]}}).' \
+  'an unknown key of human_when is refused'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {"paths": ["a"]}, "also": 1}}}' \
+  'profile/approval/merge: Invalid profile: `approval.merge` must be "human", "agent" or an object with `human_when` (got: {"human_when":{"paths":["a"]},"also":1}).' \
+  'an unknown key beside human_when is refused'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {"patterns": [3]}}}}' \
+  'profile/approval/merge: Invalid profile: `approval.merge` must be "human", "agent" or an object with `human_when` (got: {"human_when":{"patterns":[3]}}).' \
+  'a pattern that is neither a string nor an object is refused'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {"patterns": [{"file": "a"}]}}}}' \
+  'profile/approval/merge: Invalid profile: `approval.merge` must be "human", "agent" or an object with `human_when` (got: {"human_when":{"patterns":[{"file":"a"}]}}).' \
+  'a pattern object without regex is refused'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {"paths": ["a"]}}}, "merge": {"sensitive_paths": ["a"]}}' \
+  'profile: Invalid profile: `approval.merge.human_when` and `merge.sensitive_*` are both set; keep only one.' \
+  'human_when beside merge.sensitive_paths is refused'
+ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {}}}, "merge": {"sensitive_patterns": [{"regex": "x"}]}}' \
+  'profile: Invalid profile: `approval.merge.human_when` and `merge.sensitive_*` are both set; keep only one.' \
+  'human_when beside merge.sensitive_patterns is refused'
+ap_check '{"mode": "integrated", "approval": {"merge": "agent"}, "merge": {"sensitive_paths": ["a"]}}' \
+  'profile: Invalid profile: `approval.merge` and `merge.sensitive_*` are both set; keep only one.' \
+  'approval.merge "agent" beside merge.sensitive_paths is refused'
+ap_check '{"mode": "integrated", "approval": {"merge": "human"}, "merge": {"sensitive_patterns": [{"regex": "x"}]}}' \
+  'profile: Invalid profile: `approval.merge` and `merge.sensitive_*` are both set; keep only one.' \
+  'approval.merge "human" beside merge.sensitive_patterns is refused'
 
 # --- Bad usage ------------------------------------------------------------------------
 rc 2 "usage: no command" -- "$CLI"
