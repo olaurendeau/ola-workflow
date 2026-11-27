@@ -19,13 +19,14 @@ GitLab project is not supported yet, and says so instead of failing in a confusi
   output stays the same, checked by an equivalence script, and tests now forbid text in the
   script.
 - Reviewers that open on the verdict (#195, #196, #198): the pr-reviewer, the design-reviewer
-  and the security-reviewer start with the verdict and the problems, as short ranked findings
-  tied to a criterion or a state. The security review is written in French.
+  and the security-reviewer start with the verdict and the problems. The design-reviewer gives
+  short ranked findings tied to a criterion or a state, and the security review is written in
+  the language of the brief (French when it is `fr`, English otherwise).
 - A command to lint a description (#225): `ola-workflow-pr-lint` checks that a pull request
   description follows the form of the brief (`Closes` at the head, 1 to 3 sentences, a
   verification line, `Decision:` and `<details>` in place) and prints a digest of the bytes it
   read.
-- A coordinator that resumes and links (#112/#118, #120, #186, #201): it groups the follow-ups
+- A coordinator that resumes and links (#118, #120, #186, #201): it groups the follow-ups
   of an epic into a single task, rebuilds its state from the forge when it starts, puts a link
   to the pull request or issue at the first mention in each message to the human, and takes its
   resume commands and the task-to-epic link from the brief.
