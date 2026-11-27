@@ -30,14 +30,21 @@ KEYCHAIN=$WORK/keychain
 mkdir -p "$KEYCHAIN" "$WORK/bin"
 cat >"$WORK/bin/security" <<EOF
 #!/usr/bin/env bash
-[ "\$1" = find-generic-password ] || exit 2
+# add-generic-password prompts for the token, as the real one does: here, on the standard
+# input, and never in an argument. delete-generic-password forgets it.
+op=\$1
+case \$op in find-generic-password|add-generic-password|delete-generic-password) ;; *) exit 2 ;; esac
 shift
 svc=""
 acct=ola-workflow
 while [ \$# -gt 0 ]; do
-  case \$1 in -s) svc=\$2; shift 2 ;; -a) acct=\$2; printf '%s\\n' "\$2" >>"$WORK/accounts"; shift 2 ;; *) shift ;; esac
+  case \$1 in -s) svc=\$2; shift 2 ;; -a) acct=\$2; printf '%s\\n' "\$2" >>"$WORK/accounts"; shift 2 ;; -l) shift 2 ;; *) shift ;; esac
 done
 [ "\$acct" = ola-workflow ] || svc=\$svc@\${acct//\//%}
+case \$op in
+  add-generic-password) read -r token || exit 1; printf '%s' "\$token" >"$KEYCHAIN/\$svc"; exit 0 ;;
+  delete-generic-password) [ -e "$KEYCHAIN/\$svc" ] || exit 44; rm -f "$KEYCHAIN/\$svc"; echo "deleted \$svc" >>"$WORK/deleted"; exit 0 ;;
+esac
 [ -e "$KEYCHAIN/\$svc" ] || { echo "security: item not found" >&2; exit 44; }
 cat "$KEYCHAIN/\$svc"
 EOF
@@ -504,6 +511,349 @@ check "with-token gitlab: with no remote, no host is known and nothing runs" "$(
 store_at merge gitlab:gl.example.com merge-host-token
 out=$(cd "$GL" && bash "$ROOT/hooks/lib/with-token.sh" gitlab merge sh -c 'printf "%s" "$*"' _ a b 2>&1)
 check "with-token gitlab: the arguments are the command's own, no token among them" "$(is "$out" 'a b')"
+
+# ------------------------------------------------------- ola-workflow-tokens, both forges
+# The command runs in the project's clone, with the fake security, glab, gh and open of this
+# suite. The setup reads its token from the standard input only because the fake `security`
+# does: the real one prompts on the terminal, and OLA_TOKENS_TEST_NO_TTY skips only the check
+# that there is one.
+cat >"$WORK/bin/open" <<EOF
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >>"$WORK/opened"
+EOF
+cat >"$WORK/bin/gh" <<EOF
+#!/usr/bin/env bash
+[ "\$GH_TOKEN" = gh-merge-token ] || exit 1
+case " \$* " in
+  *" -i "*) printf 'HTTP/2.0 200 OK\\r\\ngithub-authentication-token-expiration: 2099-01-01 00:00:00 UTC\\r\\n\\r\\n{}\\n' ;;
+  *) echo octo ;;
+esac
+EOF
+# glab answers by token and by endpoint, from a file holding the whole answer, headers
+# included. A token found in an argument is a leak, and is written down.
+GLAB_FIX=$WORK/glab-fix
+mkdir -p "$GLAB_FIX"
+export GLAB_FIX
+cat >"$WORK/bin/glab" <<EOF
+#!/usr/bin/env bash
+printf '%s|%s\\n' "\$GITLAB_HOST" "\$*" >>"$WORK/glab.log"
+case " \$* " in *" \$GITLAB_TOKEN "*) echo "\$GITLAB_TOKEN" >>"$WORK/glab.leak" ;; esac
+[ "\$1" = api ] && [ "\$2" = --include ] || exit 2
+f=\$GLAB_FIX/\$GITLAB_TOKEN@\${3//\\//%}
+[ -f "\$f" ] || { printf 'HTTP/2.0 404 Not Found\\r\\n\\r\\n{"message":"404 Not found"}\\n'; exit 1; }
+cat "\$f"
+case \$(sed -n '1s/^HTTP\\/[0-9.]* \\([0-9]*\\).*/\\1/p' "\$f") in 2*) exit 0 ;; *) exit 1 ;; esac
+EOF
+chmod +x "$WORK/bin/open" "$WORK/bin/gh" "$WORK/bin/glab"
+
+glab_say() { # glab_say <token> <endpoint> <code> <json body>
+  printf 'HTTP/2.0 %s X\r\nContent-Type: application/json\r\n\r\n%s\n' "$3" "$4" >"$GLAB_FIX/$1@${2//\//%}"
+}
+self_say() { # self_say <token> <user id> <granular> <expires_at, empty for none> <token id>
+  glab_say "$1" personal_access_tokens/self 200 "$(jq -nc --argjson u "$2" --argjson g "$3" --arg e "$4" --argjson i "$5" \
+    '{id:$i,user_id:$u,granular:$g,expires_at:(if $e == "" then null else $e end),active:true,scopes:["api"]}')"
+}
+tokens() { # tokens <dir> <args…> → the command's output, standard error included
+  local dir=$1
+  shift
+  (cd "$dir" && OLA_TOKENS_TEST_NO_TTY=1 bash "$ROOT/bin/ola-workflow-tokens" "$@" 2>&1)
+}
+setup_with() { # setup_with <dir> <token pasted> <kind> → OUT and RC
+  OUT=$(printf '%s\n' "$2" | tokens "$1" setup "$3")
+  RC=$?
+}
+held() { # held <kind> <account> → the token kept there, or nothing
+  cat "$KEYCHAIN/ola-workflow-$1@${2//\//%}" 2>/dev/null
+}
+fresh() { forget_all; rm -f "$GLAB_FIX"/* "$WORK/glab.log" "$WORK/glab.leak" "$WORK/opened" "$WORK/deleted"; }
+PROJ_ACCOUNT=gitlab:gl.example.com/grp/sub/proj
+PROJ_ENC=grp%2Fsub%2Fproj
+
+mentions() { # mentions <text> <needle…> → 0 when the text holds each of them
+  local text=$1 needle
+  shift
+  for needle in "$@"; do
+    printf '%s\n' "$text" | grep -qF -- "$needle" || { echo 1; return; }
+  done
+  echo 0
+}
+
+# --- GitHub: what `url`, `setup` and `status` print and store does not change.
+fresh
+check "tokens github: url base" "$(is "$(tokens "$NOWHERE" url base)" 'https://github.com/settings/personal-access-tokens/new?name=ola-workflow+base&description=every+agent%3B+cannot+merge+or+write+a+status&expires_in=90&metadata=read&contents=read&pull_requests=write&issues=write&statuses=read&actions=read')"
+check "tokens github: url merge" "$(is "$(tokens "$GH_REMOTE" url merge)" "https://github.com/settings/personal-access-tokens/new?name=ola-workflow+merge&description=the+coordinator%27s+gh+pr+merge+only&expires_in=90&metadata=read&contents=write&pull_requests=write")"
+check "tokens github: url review" "$(is "$(tokens "$GITHUB" url review)" "https://github.com/settings/personal-access-tokens/new?name=ola-workflow+review&description=the+pr-reviewer%27s+review+status+only&expires_in=90&metadata=read&statuses=write")"
+OUT=$(printf 'gh-merge-token\n' | tokens "$NOWHERE" setup merge)
+RC=$?
+WANT="== merge — the coordinator's gh pr merge only
+   Permissions: metadata=read contents=write pull_requests=write
+   On the form, choose 'Only select repositories' and pick each project that has a profile.
+   https://github.com/settings/personal-access-tokens/new?name=ola-workflow+merge&description=the+coordinator%27s+gh+pr+merge+only&expires_in=90&metadata=read&contents=write&pull_requests=write
+   Paste the token at the prompt (twice; nothing is echoed).
+   stored.
+
+base    missing — ola-workflow-tokens setup base
+merge   ok, acts as octo, expires 2099-01-01 00:00:00 UTC
+review  missing — ola-workflow-tokens setup review"
+check "tokens github: setup merge prints and stores as before" "$(is "$OUT" "$WANT")"
+check "tokens github: the token is kept at the account of GitHub" "$(is "$(cat "$KEYCHAIN/ola-workflow-merge")" gh-merge-token)"
+check "tokens github: no glab call" "$([ ! -e "$WORK/glab.log" ] && echo 0 || echo 1)"
+
+# --- GitLab: the pages, for gitlab.com and for a self-hosted host, never a github.com URL.
+GLCOM=$(remote_project glcom "$GL_JSON" git@gitlab.com:o/r.git)
+GLDEEP=$(remote_project gldeep "$GL_JSON" git@git.example.com:a/b/c.git)
+check "tokens gitlab: url base, gitlab.com" "$(is "$(tokens "$GLCOM" url base)" https://gitlab.com/o/r/-/settings/access_tokens)"
+check "tokens gitlab: url base, a self-hosted host and a deep path" \
+  "$(is "$(tokens "$GLDEEP" url base)" https://git.example.com/a/b/c/-/settings/access_tokens)"
+check "tokens gitlab: url review, gitlab.com: the name only, no classic scope" \
+  "$(is "$(tokens "$GLCOM" url review)" 'https://gitlab.com/-/user_settings/personal_access_tokens?name=ola-workflow+review')"
+check "tokens gitlab: url merge, a self-hosted host: the same form" \
+  "$(is "$(tokens "$GLDEEP" url merge)" 'https://git.example.com/-/user_settings/personal_access_tokens?name=ola-workflow+merge')"
+check "tokens gitlab: url base, discreet: the personal page, as the token is the human's" \
+  "$(is "$(tokens "$GL_DISCREET" url base)" 'https://gl.example.com/-/user_settings/personal_access_tokens?name=ola-workflow+base')"
+check "tokens gitlab: no github.com in any page" \
+  "$(for k in base merge review; do tokens "$GL" url $k; tokens "$GL_DISCREET" url $k; done | grep -q github && echo 1 || echo 0)"
+check "tokens gitlab: an unknown kind is refused" "$(tokens "$GL" url nope >/dev/null; [ $? = 2 ] && echo 0 || echo 1)"
+
+# --- setup review and merge: only a fine-grained token, kept at the project, never at the host.
+fresh
+self_say tok-granular 21899033 true 2099-01-01 7
+setup_with "$GL" tok-granular review
+check "tokens gitlab: setup review keeps a fine-grained token at the project's account" \
+  "$([ "$(held review "$PROJ_ACCOUNT")" = tok-granular ] && [ -z "$(held review gitlab:gl.example.com)" ] && echo 0 || echo 1)"
+check "tokens gitlab: setup review says the permissions, the project limit and what it does not check" \
+  "$(mentions "$OUT" '"Commit Status: Create"' '"Personal Access Token: Read"' 'grp/sub/proj' '"Terraform State"' 'Not checked')"
+check "tokens gitlab: setup review opens the page without scopes=api" \
+  "$(grep -qF 'https://gl.example.com/-/user_settings/personal_access_tokens?name=ola-workflow+review' "$WORK/opened" && ! grep -q 'scopes=api' "$WORK/opened" && echo 0 || echo 1)"
+check "tokens gitlab: setup asks the host of the project, and no github.com is named" \
+  "$(grep -q '^gl.example.com|api --include personal_access_tokens/self' "$WORK/glab.log" && ! printf '%s' "$OUT" | grep -q github && echo 0 || echo 1)"
+check "tokens gitlab: the token is in no argument of glab" "$([ ! -e "$WORK/glab.leak" ] && echo 0 || echo 1)"
+setup_with "$GL" tok-granular merge
+check "tokens gitlab: setup merge keeps it at the project's account, under its own kind" \
+  "$([ "$(held merge "$PROJ_ACCOUNT")" = tok-granular ] && echo 0 || echo 1)"
+
+fresh
+self_say tok-classic 21899033 false "" 8
+setup_with "$GL" tok-classic review
+check "tokens gitlab: setup review refuses a classic token, and keeps nothing" \
+  "$([ "$RC" != 0 ] && [ -z "$(held review "$PROJ_ACCOUNT")" ] && [ -z "$(held review gitlab:gl.example.com)" ] && echo 0 || echo 1)"
+check "tokens gitlab: ... and says why" \
+  "$(printf '%s' "$OUT" | grep -qF 'This is a classic token. Review and merge take a fine-grained token limited to grp/sub/proj: create one and paste it again.' && echo 0 || echo 1)"
+glab_say tok-nofield personal_access_tokens/self 200 '{"id":9,"user_id":1}'
+setup_with "$GL" tok-nofield merge
+check "tokens gitlab: a token with no 'granular' field is a classic one" \
+  "$([ "$RC" != 0 ] && [ -z "$(held merge "$PROJ_ACCOUNT")" ] && printf '%s' "$OUT" | grep -q 'classic token' && echo 0 || echo 1)"
+
+fresh
+glab_say tok-min personal_access_tokens/self 403 '{"error":"insufficient_granular_scope","error_description":"no"}'
+setup_with "$GL" tok-min review
+check "tokens gitlab: setup review refuses the 403 of a token without 'Personal Access Token: Read'" \
+  "$([ "$RC" != 0 ] && [ -z "$(held review "$PROJ_ACCOUNT")" ] && echo 0 || echo 1)"
+check "tokens gitlab: ... and says to add the permission" \
+  "$(printf '%s' "$OUT" | grep -qF 'GitLab will not tell who this token is (403). Add the permission "Personal Access Token: Read" to it and paste it again.' && echo 0 || echo 1)"
+glab_say tok-old personal_access_tokens/self 401 '{"message":"401 Unauthorized"}'
+setup_with "$GL" tok-old review
+check "tokens gitlab: setup review refuses a 401, keeps nothing" \
+  "$([ "$RC" != 0 ] && [ -z "$(held review "$PROJ_ACCOUNT")" ] && printf '%s' "$OUT" | grep -q '401' && echo 0 || echo 1)"
+glab_say tok-boom personal_access_tokens/self 500 '{"message":"boom-from-gitlab"}'
+setup_with "$GL" tok-boom merge
+check "tokens gitlab: setup merge refuses a 500, and copies what GitLab said" \
+  "$([ "$RC" != 0 ] && [ -z "$(held merge "$PROJ_ACCOUNT")" ] && printf '%s' "$OUT" | grep -q '500.*boom-from-gitlab' && echo 0 || echo 1)"
+check "tokens gitlab: a refused token is deleted from the keychain" "$([ -s "$WORK/deleted" ] && echo 0 || echo 1)"
+
+# A refusal deletes the previous token of that kind too (one keychain item per account): it says so.
+fresh
+store_at review "$PROJ_ACCOUNT" tok-previous
+self_say tok-classic 21899033 false "" 8
+setup_with "$GL" tok-classic review
+check "tokens gitlab: a refusal deletes the previous token of the kind, and says so" \
+  "$([ -z "$(held review "$PROJ_ACCOUNT")" ] && printf '%s' "$OUT" | grep -qF 'The previous review token was deleted with it' && echo 0 || echo 1)"
+
+# GitLab gave no answer: nobody knows the token is bad, so it stays, with a warning.
+fresh
+printf 'not an http answer\n' >"$GLAB_FIX/tok-silent@personal_access_tokens%self"
+setup_with "$GL" tok-silent review
+check "tokens gitlab: no answer from GitLab keeps the token" \
+  "$([ "$(held review "$PROJ_ACCOUNT")" = tok-silent ] && [ ! -e "$WORK/deleted" ] && echo 0 || echo 1)"
+check "tokens gitlab: ... and warns that it was not verified" \
+  "$(mentions "$OUT" 'warning' 'GitLab gave no answer' 'not verified' 'ola-workflow-tokens status')"
+
+# --- setup base: the bot in integrated mode, the human's read-only token in discreet mode.
+fresh
+setup_with "$GL" bot-token base
+check "tokens gitlab: setup base, integrated, keeps the token at the project's account" \
+  "$([ "$(held base "$PROJ_ACCOUNT")" = bot-token ] && echo 0 || echo 1)"
+check "tokens gitlab: ... explains the one identity: Developer, scope api, project token or dedicated account" \
+  "$(mentions "$OUT" Developer 'api' 'project access token' 'dedicated account')"
+check "tokens gitlab: ... and opens the project's token page" \
+  "$(grep -qxF 'https://gl.example.com/grp/sub/proj/-/settings/access_tokens' "$WORK/opened" && echo 0 || echo 1)"
+fresh
+glab_say tok-min personal_access_tokens/self 403 '{"error":"insufficient_granular_scope"}'
+setup_with "$GL_DISCREET" tok-min base
+check "tokens gitlab: setup base, discreet, accepts a fine-grained token that cannot read itself" \
+  "$([ "$(held base "$PROJ_ACCOUNT")" = tok-min ] && printf '%s' "$OUT" | grep -q 'not readable' && echo 0 || echo 1)"
+check "tokens gitlab: ... and says which permissions: read only, never Personal Access Token: Read nor Terraform State" \
+  "$(mentions "$OUT" '"Merge Request: Read"' '"Work Item: Read"' '"Terraform State"')"
+fresh
+self_say tok-classic 21899033 false "" 8
+setup_with "$GL_DISCREET" tok-classic base
+check "tokens gitlab: setup base, discreet, refuses a classic token" \
+  "$([ "$RC" != 0 ] && [ -z "$(held base "$PROJ_ACCOUNT")" ] && echo 0 || echo 1)"
+glab_say tok-old personal_access_tokens/self 401 '{"message":"401 Unauthorized"}'
+setup_with "$GL_DISCREET" tok-old base
+check "tokens gitlab: setup base, discreet, refuses a 401" "$([ "$RC" != 0 ] && [ -z "$(held base "$PROJ_ACCOUNT")" ] && echo 0 || echo 1)"
+
+# --- the shared helpers
+check "gitlab: the project path is the profile's, without the host, '/' encoded" \
+  "$(is "$(ola_gitlab_project_path gl.example.com/grp/sub/proj)" grp%2Fsub%2Fproj)"
+check "gitlab: a project at the root has no separator to encode" "$(is "$(ola_gitlab_project_path gl.example.com/proj.x_y-z)" proj.x_y-z)"
+for bad in gl.example.com gl.example.com/ 'gl.example.com/a b/c' 'gl.example.com/a$c' 'gl.example.com/a//b' 'gl.example.com/../x' \
+           'gl.example.com/a/' 'gl.example.com/a?x=1' 'gl.example.com/a*' "gl.example.com/a
+b"; do
+  if ola_gitlab_project_path "$bad" >/dev/null 2>&1; then
+    ko "gitlab: a path outside [A-Za-z0-9._-] is refused: $(printf %q "$bad")"
+  else
+    ok "gitlab: a path outside [A-Za-z0-9._-] is refused: $(printf %q "$bad")"
+  fi
+done
+fresh
+store_at review "$PROJ_ACCOUNT" tok-granular
+self_say tok-granular 21899033 true 2099-01-01 7
+got=$(ola_gitlab_token_self review gl.example.com/grp/sub/proj)
+check "gitlab: ola_gitlab_token_self gives user_id granular expires_at token_id on one line" "$(is "$got" '21899033 true 2099-01-01 7')"
+check "gitlab: ... with the token in the environment of glab, in no argument" \
+  "$([ ! -e "$WORK/glab.leak" ] && grep -q 'personal_access_tokens/self' "$WORK/glab.log" && echo 0 || echo 1)"
+self_say tok-granular 21899033 true "" 7
+check "gitlab: a token that never expires says so" "$(is "$(ola_gitlab_token_self review gl.example.com/grp/sub/proj)" '21899033 true never 7')"
+glab_say tok-granular personal_access_tokens/self 403 '{"error":"insufficient_granular_scope"}'
+got=$(ola_gitlab_token_self review gl.example.com/grp/sub/proj)
+rc=$?
+check "gitlab: a refusal fails, with its code and what GitLab said" \
+  "$([ "$rc" != 0 ] && printf '%s' "$got" | grep -q '^403 .*insufficient_granular_scope' && echo 0 || echo 1)"
+forget_all
+got=$(ola_gitlab_token_self review gl.example.com/grp/sub/proj)
+check "gitlab: no token in the keychain fails, saying so" "$(printf '%s' "$got" | grep -q 'no review token' && echo 0 || echo 1)"
+
+# --- status: who each token acts as, when it expires, and what is wrong.
+date_in() { jq -rn --argjson d "$1" 'now + $d * 86400 | strftime("%Y-%m-%d")'; }
+healthy() { # a project, its three tokens, a protected branch: nothing to warn about
+  fresh
+  store_at base "$PROJ_ACCOUNT" bot-tok
+  store_at review "$PROJ_ACCOUNT" rev-tok
+  store_at merge "$PROJ_ACCOUNT" mrg-tok
+  self_say bot-tok 100 false 2099-01-01 1
+  glab_say bot-tok user 200 '{"id":100,"username":"ola-bot","bot":true}'
+  glab_say bot-tok "projects/$PROJ_ENC/members/all/100" 200 '{"id":100,"access_level":30}'
+  self_say rev-tok 200 true 2099-06-01 2
+  self_say mrg-tok 200 true 2099-07-01 3
+  glab_say bot-tok users/200 200 '{"id":200,"username":"alice"}'
+  glab_say mrg-tok "projects/$PROJ_ENC/protected_branches/main" 200 '{"name":"main","merge_access_levels":[{"access_level":40}]}'
+}
+status_of() { OUT=$(tokens "$1" status); RC=$?; }
+warns() { printf '%s\n' "$OUT" | grep -c '^warning'; }
+healthy
+status_of "$GL"
+check "tokens gitlab: status says, per token, who it acts as and when it expires" \
+  "$(printf '%s\n' "$OUT" | grep -q '^base    ok, acts as ola-bot, expires 2099-01-01' &&
+     printf '%s\n' "$OUT" | grep -q '^merge   ok, acts as alice, .*expires 2099-07-01' &&
+     printf '%s\n' "$OUT" | grep -q '^review  ok, acts as alice, .*expires 2099-06-01' && echo 0 || echo 1)"
+check "tokens gitlab: ... and says that the human's are fine-grained" "$(printf '%s\n' "$OUT" | grep '^review' | grep -q 'fine-grained' && echo 0 || echo 1)"
+check "tokens gitlab: a healthy project has no warning, and status succeeds" "$([ "$(warns)" = 0 ] && [ "$RC" = 0 ] && echo 0 || echo 1)"
+check "tokens gitlab: status names no github.com, and no token is in an argument" \
+  "$(! printf '%s' "$OUT" | grep -q github && [ ! -e "$WORK/glab.leak" ] && echo 0 || echo 1)"
+check "tokens gitlab: every call names the project explicitly, none leaves it to :id" "$(grep -q ':id' "$WORK/glab.log" && echo 1 || echo 0)"
+
+healthy
+self_say rev-tok 100 true 2099-06-01 2
+glab_say bot-tok users/100 200 '{"id":100,"username":"someone-else"}'
+status_of "$GL"
+check "tokens gitlab: warning when the base token and the review token are one user (by user_id, whatever the names)" \
+  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'base.*review' && echo 0 || echo 1)"
+healthy
+self_say mrg-tok 100 true 2099-06-01 3
+status_of "$GL"
+check "tokens gitlab: ... and the base token and the merge token" "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'base.*merge' && echo 0 || echo 1)"
+
+healthy
+self_say mrg-tok 200 true 2099-07-01 2
+status_of "$GL"
+check "tokens gitlab: warning when review and merge are the same token (same token id)" \
+  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'review and merge' && echo 0 || echo 1)"
+
+healthy
+glab_say bot-tok "projects/$PROJ_ENC/members/all/100" 200 '{"id":100,"access_level":40}'
+status_of "$GL"
+check "tokens gitlab: warning when the bot is above Developer" \
+  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'above Developer' && echo 0 || echo 1)"
+check "tokens gitlab: ... and not for a Developer" "$(healthy; status_of "$GL"; [ "$(warns)" = 0 ] && echo 0 || echo 1)"
+
+healthy
+glab_say mrg-tok "projects/$PROJ_ENC/protected_branches/main" 404 '{"message":"404 Not found"}'
+status_of "$GL"
+check "tokens gitlab: warning when no rule names the base branch (wildcards are not checked)" \
+  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'no rule protects main by its exact name' && printf '%s\n' "$OUT" | grep '^warning' | grep -q 'wildcard rules are not checked' && ! printf '%s\n' "$OUT" | grep -q 'main is not protected' && echo 0 || echo 1)"
+healthy
+glab_say mrg-tok "projects/$PROJ_ENC/protected_branches/main" 200 '{"name":"main","merge_access_levels":[{"access_level":30}]}'
+status_of "$GL"
+check "tokens gitlab: warning when Developers can merge the base branch" \
+  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'open to Developers' && echo 0 || echo 1)"
+healthy
+glab_say mrg-tok "projects/$PROJ_ENC/protected_branches/main" 403 '{"error":"insufficient_granular_scope"}'
+status_of "$GL"
+check "tokens gitlab: warning when the protection cannot be read, saying so as is" \
+  "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'cannot be read.*403' && echo 0 || echo 1)"
+healthy
+printf '{"mode":"integrated","forge":"gitlab","base_branch":"release/1"}\n' >"$GL/.claude/workflow.json"
+glab_say mrg-tok "projects/$PROJ_ENC/protected_branches/release%2F1" 200 '{"merge_access_levels":[{"access_level":40}]}'
+status_of "$GL"
+check "tokens gitlab: the protection read is that of the profile's base branch, encoded" "$([ "$(warns)" = 0 ] && echo 0 || echo 1)"
+printf '%s\n' "$GL_JSON" >"$GL/.claude/workflow.json"
+
+healthy
+self_say rev-tok 200 true 2000-01-01 2
+status_of "$GL"
+check "tokens gitlab: warning for an expired token" "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'review.*expired' && echo 0 || echo 1)"
+healthy
+self_say mrg-tok 200 true "$(date_in 3)" 3
+status_of "$GL"
+check "tokens gitlab: warning for a token that expires within 7 days" "$(printf '%s\n' "$OUT" | grep '^warning' | grep -q 'merge.*expires in' && echo 0 || echo 1)"
+healthy
+self_say mrg-tok 200 true "$(date_in 30)" 3
+status_of "$GL"
+check "tokens gitlab: no warning at 30 days" "$([ "$(warns)" = 0 ] && echo 0 || echo 1)"
+
+healthy
+self_say rev-tok 200 false "" 2
+status_of "$GL"
+check "tokens gitlab: a classic token kept for review is reported as such, and status fails" \
+  "$(printf '%s\n' "$OUT" | grep '^review' | grep -q 'classic' && [ "$RC" != 0 ] && echo 0 || echo 1)"
+healthy
+glab_say rev-tok personal_access_tokens/self 403 '{"error":"insufficient_granular_scope"}'
+status_of "$GL"
+check "tokens gitlab: a fine-grained token without Personal Access Token: Read says what it cannot tell" \
+  "$(printf '%s\n' "$OUT" | grep '^review' | grep -qF 'expires: not readable (fine-grained token without Personal Access Token: Read)' && echo 0 || echo 1)"
+healthy
+glab_say rev-tok personal_access_tokens/self 401 '{"message":"401 Unauthorized"}'
+status_of "$GL"
+got401=$(printf '%s\n' "$OUT" | grep '^review')
+rc401=$RC
+healthy
+glab_say rev-tok personal_access_tokens/self 403 '{"message":"403 Forbidden"}'
+status_of "$GL"
+check "tokens gitlab: a 401 and a 403 are the same 'unreadable', and status fails" \
+  "$(printf '%s' "$got401" | grep -q unreadable && printf '%s\n' "$OUT" | grep '^review' | grep -q unreadable && [ "$rc401" != 0 ] && [ "$RC" != 0 ] && echo 0 || echo 1)"
+healthy
+forget_all
+status_of "$GL"
+check "tokens gitlab: a token missing is said, with the command that makes it" \
+  "$(printf '%s\n' "$OUT" | grep -q '^review  missing — ola-workflow-tokens setup review' && [ "$RC" != 0 ] && echo 0 || echo 1)"
+
+# discreet: the base token is the human's, and may not read itself.
+healthy
+glab_say bot-tok personal_access_tokens/self 403 '{"error":"insufficient_granular_scope"}'
+status_of "$GL_DISCREET"
+check "tokens gitlab: discreet, a base token that cannot read itself is not a warning, and says why" \
+  "$(printf '%s\n' "$OUT" | grep '^base' | grep -qF 'expires: not readable' && [ "$(warns)" = 0 ] && echo 0 || echo 1)"
 
 # ----------------------------------------------------- what the tokens may do
 # The two rights that matter, read from the one table, so that a change to it is a change

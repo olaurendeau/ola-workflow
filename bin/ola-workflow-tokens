@@ -13,16 +13,35 @@
 #   merge    the coordinator's `gh pr merge`, nothing else
 #   review   the pr-reviewer's review status, nothing else
 #
+# In a project whose profile says `forge: gitlab` it creates and checks the GitLab tokens
+# of that project instead (hooks/lib/gitlab-tokens.sh says how they are kept): run it from
+# the project's clone.
+#
 # This is the human's command, run in a terminal: it reads secrets from the keyboard.
 set -uo pipefail
 
 SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=hooks/lib/github-tokens.sh
 . "$SELF_DIR/../hooks/lib/github-tokens.sh"
+# shellcheck source=hooks/lib/profile.sh
+. "$SELF_DIR/../hooks/lib/profile.sh"
+# shellcheck source=hooks/lib/gitlab-tokens.sh
+. "$SELF_DIR/../hooks/lib/gitlab-tokens.sh"
+
+# Anything but gitlab is GitHub, as everywhere else: no profile at all, too.
+FORGE=$(ola_profile_get forge "$PWD" "" github 2>/dev/null) || FORGE=github
 
 usage() { sed -n '4,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 describe() {
+  if [ "$FORGE" = gitlab ]; then
+    case $1 in
+      base)   echo "the agents' identity: a bot with the Developer role" ;;
+      merge)  echo "the coordinator's merge only" ;;
+      review) echo "the pr-reviewer's review status only" ;;
+    esac
+    return
+  fi
   case $1 in
     base)   echo "every agent; cannot merge or write a status" ;;
     merge)  echo "the coordinator's gh pr merge only" ;;
@@ -31,6 +50,7 @@ describe() {
 }
 
 url_for() { # url_for <kind>
+  if [ "$FORGE" = gitlab ]; then gitlab_target; gitlab_url "$1"; return; fi
   local desc
   desc=$(describe "$1" | sed 's/ /+/g; s/;/%3B/g; s/'"'"'/%27/g')
   printf 'https://github.com/settings/personal-access-tokens/new?name=ola-workflow+%s&description=%s&expires_in=90&%s\n' \
@@ -53,10 +73,15 @@ need_keychain() {
 setup() {
   local kind kinds=("$@")
   need_keychain
-  [ -t 0 ] || { echo "ola-workflow-tokens setup reads tokens from the keyboard: run it in a terminal." >&2; exit 2; }
+  # The real `security` prompts on the terminal whatever this reads, so the variable only
+  # lets a test with a fake `security` get past this check; it hands no one a way to paste.
+  [ -t 0 ] || [ -n "${OLA_TOKENS_TEST_NO_TTY:-}" ] ||
+    { echo "ola-workflow-tokens setup reads tokens from the keyboard: run it in a terminal." >&2; exit 2; }
   [ "${#kinds[@]}" -gt 0 ] || read -r -a kinds <<<"$OLA_TOKEN_KINDS"
   for kind in "${kinds[@]}"; do check_kind "$kind"; done
+  [ "$FORGE" != gitlab ] || gitlab_target
   for kind in "${kinds[@]}"; do
+    if [ "$FORGE" = gitlab ]; then gitlab_setup "$kind"; continue; fi
     echo "== $kind — $(describe "$kind")"
     echo "   Permissions: $(ola_token_permissions "$kind" | tr '&' ' ')"
     echo "   On the form, choose 'Only select repositories' and pick each project that has a profile."
@@ -75,6 +100,7 @@ setup() {
 status() {
   local kind token login expiry rc=0
   need_keychain
+  if [ "$FORGE" = gitlab ]; then gitlab_status; return; fi
   for kind in $OLA_TOKEN_KINDS; do
     if ! token=$(ola_token_read "$kind"); then
       printf '%-7s missing — ola-workflow-tokens setup %s\n' "$kind" "$kind"
@@ -89,6 +115,205 @@ status() {
       printf '%-7s present, but GitHub rejects it (expired or revoked?)\n' "$kind"
       rc=1
     fi
+  done
+  return "$rc"
+}
+
+# ------------------------------------------------------------------------------ GitLab
+# What the project is, from its remote: GL_ID (<host>/<path>), GL_HOST, GL_PATH, GL_ENC (the
+# path as the API names it), GL_MODE. Every call names the project: `:id` resolves to
+# whichever remote glab prefers, which is not always this one.
+gitlab_target() {
+  GL_ID=$(ola_gitlab_id "$PWD") || {
+    echo "ola-workflow-tokens: this project has no remote to read a GitLab host and path from." >&2; exit 2; }
+  GL_HOST=${GL_ID%%/*}
+  GL_PATH=${GL_ID#*/}
+  GL_ENC=$(ola_gitlab_project_path "$GL_ID") || {
+    echo "ola-workflow-tokens: '$GL_ID' is not a project path this command will put in an address." >&2; exit 2; }
+  GL_MODE=$(ola_profile_mode "$PWD")
+}
+
+# The base token of an integrated project is a bot's, made on a page of the project. Every
+# other token is the human's own, made on their own page, which only the name pre-fills (a
+# pre-filled scope is a classic token's).
+gitlab_url() { # gitlab_url <kind>
+  if [ "$1" = base ] && [ "$GL_MODE" = integrated ]; then
+    printf 'https://%s/%s/-/settings/access_tokens\n' "$GL_HOST" "$GL_PATH"
+  else
+    printf 'https://%s/-/user_settings/personal_access_tokens?name=ola-workflow+%s\n' "$GL_HOST" "$1"
+  fi
+}
+
+gitlab_explain() { # gitlab_explain <kind>
+  local limit="limited to $GL_PATH and to nothing else, never \"Terraform State\""
+  case $1:$GL_MODE in
+    base:integrated)
+      echo "   The agents' one identity, not yours: a project access token (role Developer, scope api); where this"
+      echo "   GitLab has no project tokens, the personal access token of a dedicated account added as Developer."
+      return ;;
+    base:*)
+      echo "   Discreet mode: the agents read through your own fine-grained personal access token, $limit,"
+      echo "   read-only: \"Merge Request: Read\", \"Work Item: Read\"." ;;
+    review:*)
+      echo "   Your own fine-grained personal access token, lent to this one use, $limit."
+      echo "   Permissions: \"Commit Status: Create\", \"Personal Access Token: Read\" (how this command learns who the token is)." ;;
+    merge:*)
+      echo "   Your own fine-grained personal access token, lent to this one use, $limit."
+      echo "   Permissions: \"Merge Request: Merge\", \"Personal Access Token: Read\" (how this command learns who the token is)." ;;
+  esac
+  echo "   Not checked: that it is limited to this project, or that it lacks \"Terraform State\": nothing readable says so."
+  echo "   Not measured: each of these permissions on a token alone, and the form pre-filled beyond its name."
+}
+
+# The token just kept is the one refused, so it goes, and with it whatever it replaced: the
+# keychain keeps one item per account. The message says so.
+gitlab_refuse() { # gitlab_refuse <kind> <why>
+  security delete-generic-password -a "gitlab:$GL_ID" -s "$(ola_token_service "$1")" >/dev/null 2>&1
+  echo "   not stored: $2" >&2
+  echo "   The previous $1 token was deleted with it: if you had one, paste it again too." >&2
+  exit 1
+}
+
+# What the token says of itself decides whether it stays: a fine-grained one, or — for the
+# base token of a discreet project only — one that cannot read itself (403
+# insufficient_granular_scope), since no check of an author depends on that token.
+gitlab_verify() { # gitlab_verify <kind>
+  local self uid gran code detail what="Review and merge take"
+  [ "$1" != base ] || what="The base token of a discreet project takes"
+  if self=$(ola_gitlab_token_self "$1" "$GL_ID"); then
+    read -r uid gran _ <<<"$self"
+    [ "$gran" = true ] ||
+      gitlab_refuse "$1" "This is a classic token. $what a fine-grained token limited to $GL_PATH: create one and paste it again."
+    echo "   stored: a fine-grained token of user $uid."
+    return
+  fi
+  read -r code detail <<<"$self"
+  case $code:$detail in
+    403:*insufficient_granular_scope*)
+      [ "$1" = base ] ||
+        gitlab_refuse "$1" "GitLab will not tell who this token is (403). Add the permission \"Personal Access Token: Read\" to it and paste it again."
+      echo "   stored. GitLab will not tell who it is, or when it expires: status says so." ;;
+    none:*)
+      # No answer says nothing of the token: it stays, and the human is told it was not checked.
+      echo "   stored. warning: GitLab gave no answer ($(printf '%s' "$detail" | cut -c1-300)): the token is not verified. Run ola-workflow-tokens status once GitLab answers." ;;
+    401:*) gitlab_refuse "$1" "GitLab rejects this token (401): unknown, revoked or expired. Paste it again." ;;
+    *) gitlab_refuse "$1" "GitLab answered $code: $(printf '%s' "$detail" | cut -c1-300)" ;;
+  esac
+}
+
+gitlab_setup() { # gitlab_setup <kind>
+  local kind=$1 url
+  echo "== $kind — $(describe "$kind")"
+  gitlab_explain "$kind"
+  url=$(gitlab_url "$kind")
+  echo "   $url"
+  command -v open >/dev/null 2>&1 && open "$url"
+  echo "   Paste the token at the prompt (twice; nothing is echoed)."
+  security add-generic-password -U -a "gitlab:$GL_ID" -s "$(ola_token_service "$kind")" \
+    -l "ola-workflow $kind GitLab token" -w || { echo "   not stored" >&2; exit 1; }
+  if [ "$kind" = base ] && [ "$GL_MODE" = integrated ]; then
+    echo "   stored."
+  else
+    gitlab_verify "$kind"
+  fi
+  echo
+}
+
+gitlab_username() { # gitlab_username <token> <endpoint> → the username, or 1
+  local line
+  line=$(ola_gitlab_get "$GL_HOST" "$1" "$2") || return 1
+  jq -er '.username' <<<"${line#* }" 2>/dev/null
+}
+
+# The days from now to a date, rounded down; negative once it is past.
+gitlab_days() { # gitlab_days <YYYY-MM-DD>
+  jq -rn --arg d "$1" '((($d + "T00:00:00Z") | fromdateiso8601) - now) / 86400 | floor' 2>/dev/null
+}
+
+gitlab_status() {
+  local kind token self uid gran exp tid code detail name line days level branch n
+  # shellcheck disable=SC2034
+  #   uid_<kind> and tid_<kind> are set by `printf -v` and read by indirection.
+  local rc=0 base_token="" merge_token="" warnings=() uid_base="" uid_review="" uid_merge="" tid_review="" tid_merge=""
+  gitlab_target
+  base_token=$(ola_gitlab_token_read base "$GL_ID") || base_token=""
+  merge_token=$(ola_gitlab_token_read merge "$GL_ID") || merge_token=""
+  for kind in $OLA_TOKEN_KINDS; do
+    if ! token=$(ola_gitlab_token_read "$kind" "$GL_ID"); then
+      printf '%-7s missing — ola-workflow-tokens setup %s\n' "$kind" "$kind"
+      rc=1
+      continue
+    fi
+    if self=$(ola_gitlab_token_self "$kind" "$GL_ID"); then
+      read -r uid gran exp tid <<<"$self"
+      printf -v "uid_$kind" %s "$uid"
+      printf -v "tid_$kind" %s "$tid"
+      name=""
+      if [ "$kind" = base ]; then
+        name=$(gitlab_username "$token" user)
+      elif [ -n "$base_token" ]; then
+        name=$(gitlab_username "$base_token" "users/$uid")
+      fi
+      line="ok, acts as ${name:-user $uid}, expires $exp"
+      if [ "$gran" = true ]; then
+        line="$line, fine-grained"
+      elif [ "$kind" != base ]; then
+        line="$line, classic token: review and merge take a fine-grained one"
+        rc=1
+      fi
+      if [ "$exp" != never ] && days=$(gitlab_days "$exp") && [ -n "$days" ]; then
+        if [ "$days" -lt 0 ]; then
+          warnings+=("the $kind token expired on $exp")
+        elif [ "$days" -lt 7 ]; then
+          warnings+=("the $kind token expires in $((days + 1)) day(s), on $exp")
+        fi
+      fi
+    else
+      read -r code detail <<<"$self"
+      case $detail in
+        *insufficient_granular_scope*)
+          line="ok, acts as: not readable, expires: not readable (fine-grained token without Personal Access Token: Read)" ;;
+        *) line="present, but unreadable (GitLab answered $code)"; rc=1 ;;
+      esac
+    fi
+    printf '%-7s %s\n' "$kind" "$line"
+  done
+
+  for kind in review merge; do
+    n=uid_$kind
+    [ -z "$uid_base" ] || [ "$uid_base" = - ] || [ "$uid_base" != "${!n}" ] ||
+      warnings+=("the base token and the $kind token act as the same user ($uid_base): the agents would hold your identity")
+  done
+  [ -z "$tid_review" ] || [ "$tid_review" = - ] || [ "$tid_review" != "$tid_merge" ] ||
+    warnings+=("review and merge are the same token (id $tid_review): they are meant to be two")
+
+  if [ "$GL_MODE" = integrated ] && [ -n "$uid_base" ] && [ "$uid_base" != - ]; then
+    if line=$(ola_gitlab_get "$GL_HOST" "$base_token" "projects/$GL_ENC/members/all/$uid_base"); then
+      level=$(jq -r '.access_level // 0' <<<"${line#* }" 2>/dev/null)
+      [ "${level:-0}" -le 30 ] ||
+        warnings+=("the base token's user holds access level $level on this project, above Developer (30)")
+    else
+      warnings+=("the role of the base token's user cannot be read (GitLab answered ${line%% *})")
+    fi
+  fi
+
+  if [ -n "$merge_token" ]; then
+    branch=$(ola_profile_get base_branch "$PWD" "" main)
+    if line=$(ola_gitlab_get "$GL_HOST" "$merge_token" \
+        "projects/$GL_ENC/protected_branches/$(jq -rn --arg b "$branch" '$b | @uri')"); then
+      [ "$(jq -r '[.merge_access_levels[]?.access_level | select(. > 0 and . < 40)] | length' <<<"${line#* }" 2>/dev/null)" = 0 ] ||
+        warnings+=("merging into $branch is open to Developers: only Maintainers should merge there")
+    elif [ "${line%% *}" = 404 ]; then
+      warnings+=("no rule protects $branch by its exact name on this project (wildcard rules are not checked): check by hand that only Maintainers can merge there")
+    else
+      warnings+=("the protection of $branch cannot be read with the merge token (GitLab answered ${line%% *}): check by hand that only Maintainers can merge there")
+    fi
+  fi
+
+  n=0
+  while [ "$n" -lt "${#warnings[@]}" ]; do
+    printf 'warning: %s\n' "${warnings[$n]}"
+    n=$((n + 1))
   done
   return "$rc"
 }
