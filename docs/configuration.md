@@ -184,7 +184,7 @@ printed, and the value each template reads.
 - A change to `brief/` is merged by the human, like a change to `bin/`: it is what every
   agent is told.
 
-To change a rule, edit the Markdown. `scripts/brief-equivalence.sh` renders fifteen
+To change a rule, edit the Markdown. `scripts/brief-equivalence.sh` renders sixteen
 profiles with your branch and with `origin/main`, and shows exactly what the change does to
 each; for a rewrite that should change nothing, it must show nothing. `tests/brief.test.sh`
 fails on text that comes back into the script through a heredoc, an `echo` or a `printf`;
