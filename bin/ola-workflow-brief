@@ -229,20 +229,38 @@ state_is() { # state_is <state> <one of...> → 0 when the state is one of them
   return 1
 }
 flag approval ola_profile_has approval "$dir"
+# The state of a step is read by one jq over the profile itself, not through `get`: `get`
+# unpacks an array of scalars (["agent"] would read as agent) and its command substitution
+# strips a trailing newline ("agent\n" would read as agent), and the schema refuses both.
+# jq's own truth decides: a step is human or agent only when it is exactly that string, `when`
+# only for merge, with an object the schema accepts, omitted only when the key is absent, and
+# anything else is invalid (null included). An `approval` that is no object makes every step
+# invalid.
+approval_state() { # approval_state <step> → omitted | human | agent | when | invalid
+  local file out=
+  file=$(ola_profile_path "$dir") && out=$(jq -r -n --arg step "$1" "$OLA_PROFILE_GATE"'
+    | def strs: type == "array" and all(.[]; type == "string");
+      def pat: type == "string" or (type == "object" and has("regex")
+        and ((keys - ["file", "regex", "exclude"]) | length) == 0
+        and (.regex | type) == "string"
+        and ((has("file") | not) or (.file | type) == "string")
+        and ((has("exclude") | not) or (.exclude | strs)));
+      def when: type == "object" and keys == ["human_when"] and (.human_when | type) == "object"
+        and (.human_when | ((keys - ["paths", "patterns"]) | length) == 0
+          and ((has("paths") | not) or (.paths | strs))
+          and ((has("patterns") | not) or ((.patterns | type) == "array" and all(.patterns[]; pat))));
+      if (has("approval") | not) then "omitted"
+      elif (.approval | type) != "object" then "invalid"
+      elif (.approval | has($step) | not) then "omitted"
+      else .approval[$step] as $v
+        | if $v == "human" or $v == "agent" then $v
+          elif $step == "merge" and ($v | when) then "when"
+          else "invalid" end
+      end' "$file" 2>/dev/null)
+  printf '%s\n' "${out:-omitted}"
+}
 for step in design architecture release merge; do
-  state=omitted
-  if ola_profile_has "approval.$step" "$dir"; then
-    raw=$(get "approval.$step")
-    case $raw in
-      human | agent) state=$raw ;;
-      *) state=invalid ;;
-    esac
-    # The object form of merge: exactly `human_when`, itself an object.
-    if [ "$step" = merge ] && [ "$state" = invalid ] &&
-       printf '%s' "$raw" | jq -e 'type == "object" and keys == ["human_when"] and (.human_when | type) == "object"' >/dev/null 2>&1; then
-      state=when
-    fi
-  fi
+  state=$(approval_state "$step")
   flag "approval_${step}_omitted" state_is "$state" omitted
   case $step in
     design | architecture)

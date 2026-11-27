@@ -1119,14 +1119,16 @@ rc 1 "schema: says so rather than naming a file that is not there" -- \
 
 # --- approval: who approves each step, against the real schema -------------------------------
 ap_check() { # ap_check <profile json> <exact output expected, "" for valid> <label>
-  local out
+  local out code want=0
+  [ -n "$2" ] && want=1
   printf '%s\n' "$1" >"$WORK/approval.json"
   out=$("$CLI" validate "$WORK/approval.json" 2>&1)
+  code=$?
   total=$((total + 1))
-  if [ "$out" = "$2" ]; then echo "ok    approval: $3"; else
+  if [ "$out" = "$2" ] && [ "$code" = "$want" ]; then echo "ok    approval: $3"; else
     echo "FAIL  approval: $3"
-    echo "        expected: $2"
-    echo "        actual:   $out"
+    echo "        expected: $2 (exit $want)"
+    echo "        actual:   $out (exit $code)"
     failures=$((failures + 1)); fi
 }
 ap_check '{"mode": "integrated"}' '' 'a profile without approval is valid'
@@ -1137,6 +1139,12 @@ ap_check '{"mode": "integrated", "approval": {"design": "agent", "architecture":
   'every step to an agent is valid'
 ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {"paths": ["infra/**"], "patterns": ["AKIA[0-9A-Z]{16}", {"regex": "deploy", "file": "Makefile", "exclude": ["docs/**"]}]}}}}' '' \
   'merge by human_when, patterns as strings and as objects, is valid'
+ap_check '{"mode": "integrated", "approval": {"design": "human", "architecture": "human", "merge": {"human_when": {"paths": [".github/**", "hooks/**", "agents/**"], "patterns": ["BEGIN .*PRIVATE KEY"]}}, "release": "human"}}' '' \
+  "the epic's strong project is valid"
+ap_check '{"mode": "integrated", "approval": {"design": "human", "architecture": "human", "merge": {"human_when": {"paths": [".github/**"]}}, "release": "agent"}}' '' \
+  "the epic's medium project is valid"
+ap_check '{"mode": "integrated", "approval": {"design": "human", "architecture": "agent", "merge": "agent", "release": "agent"}}' '' \
+  "the epic's personal project is valid"
 ap_check '{"mode": "integrated", "approval": {"merge": {"human_when": {}}}}' '' 'human_when needs neither paths nor patterns'
 ap_check '{"mode": "integrated", "approval": {"merge": "agent"}}' '' 'approval.merge without merge.sensitive_* is valid'
 ap_check '{"mode": "integrated", "merge": {"sensitive_paths": ["a/**"], "sensitive_patterns": [{"regex": "x"}]}}' '' \

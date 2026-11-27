@@ -39,8 +39,8 @@ mkdir -p "$INT/.claude" "$HOME/.claude/workflow-profiles/github.com/someone/disc
 # one is rendered once and kept.
 mkdir -p "$WORK/cache"
 escalation() { # escalation <mode> <profile json> → the Escalation section of the brief
-  local mode=$1 json=$2 repo=$INT file=$INT/.claude/workflow.json
-  local cached=$WORK/cache/$(printf '%s %s' "$mode" "$json" | cksum | tr ' ' _)
+  local mode=$1 json=$2 repo=$INT file=$INT/.claude/workflow.json cached
+  cached=$WORK/cache/$(printf '%s %s' "$mode" "$json" | cksum | tr ' ' _)
   if [ ! -f "$cached" ]; then
     if [ "$mode" = discreet ]; then
       repo=$DIS
@@ -133,7 +133,8 @@ for mode in integrated discreet; do
   check "$mode: release human, the line of the whole chain" has "$out" "$RELEASE_HUMAN"
   check "$mode: release human, no line of the current text" lacks has "$out" "$RELEASE_CURRENT"
   check "$mode: release human, no longer the human's act" lacks mentions "$out" "is the human's act"
-  for approval in '{}' '{"release": "maybe"}'; do
+  for approval in '{}' '{"release": "maybe"}' '{"release": ["agent"]}' '{"release": ["human"]}' \
+                  '{"release": "agent\n"}' '{"release": "human\n"}' '{"release": null}'; do
     out=$(escalation "$mode" "{$base, \"approval\": $approval}")
     check "$mode: release $approval, the current line" has "$out" "$RELEASE_CURRENT"
     check "$mode: release $approval, not the whole chain" lacks has "$out" "$RELEASE_HUMAN"
@@ -161,7 +162,9 @@ for mode in integrated discreet; do
     check "$mode: $key agent, not marked" has "$out" "- $step: $agent"
     out=$(escalation "$mode" "{$base, \"approval\": {\"$key\": \"human\"}}")
     check "$mode: $key human" has "$out" "- $step: the human"
-    for bad in '"maybe"' '3'; do
+    # What the schema refuses is the most restrictive, however close to a valid value it is:
+    # an array of one valid string, a valid string and a newline, null, an object.
+    for bad in '"maybe"' '3' '["agent"]' '["human"]' '"agent\n"' '"agent "' '"Agent"' 'null' '{}' '{"human_when": {}}'; do
       out=$(escalation "$mode" "{$base, \"approval\": {\"$key\": $bad}}")
       check "$mode: $key $bad is read as human" has "$out" "- $step: the human"
     done
@@ -182,11 +185,32 @@ for mode in integrated discreet; do
     check "$mode: merge human_when" mentions "$out" '- Merge: the human merges a pull request that touches a path or matches a pattern of approval.merge.human_when'
     out=$(escalation "$mode" "{$base, \"approval\": {}}")
     check "$mode: merge omitted reads merge.sensitive_*, marked" mentions "$out" 'merge.sensitive_paths or matches merge.sensitive_patterns, the coordinator any other whose gate holds (not in the profile — my default)'
-    for bad in '"maybe"' '{}'; do
+    # The object form only when the schema accepts the whole object: a typo of `paths`, a key
+    # beside human_when, a path that is no list, a pattern that is no pattern, all read as human.
+    for bad in '"maybe"' '{}' '["agent"]' '["human"]' '"agent\n"' '"human\n"' 'null' \
+               '{"human_when": {"path": ["infra/**"]}}' '{"human_when": {"paths": ["a"]}, "also": 1}' \
+               '{"human_when": {"paths": "infra/**"}}' '{"human_when": {"paths": [3]}}' \
+               '{"human_when": {"patterns": [3]}}' '{"human_when": {"patterns": [{"file": "a"}]}}' \
+               '{"human_when": {"patterns": [{"regex": "x", "glob": "a"}]}}' \
+               '{"human_when": {"patterns": [{"regex": "x", "exclude": "a"}]}}' \
+               '{"human_when": []}' '{"human_when": null}'; do
       out=$(escalation "$mode" "{$base, \"approval\": {\"merge\": $bad}}")
       check "$mode: merge $bad is read as human" has "$out" '- Merge: the human merges every pull request'
     done
+    for good in '{"human_when": {}}' '{"human_when": {"paths": ["a"], "patterns": ["x", {"regex": "y", "file": "f", "exclude": ["z"]}]}}'; do
+      out=$(escalation "$mode" "{$base, \"approval\": {\"merge\": $good}}")
+      check "$mode: merge $good is read as human_when" mentions "$out" '- Merge: the human merges a pull request that touches a path or matches a pattern of approval.merge.human_when'
+    done
   fi
+  # An approval that is no object refuses every step, so each is read as the most restrictive.
+  for bad in '"agent"' '["agent"]' '3'; do
+    out=$(escalation "$mode" "{$base, \"approval\": $bad}")
+    check "$mode: approval $bad, design is the human" has "$out" '- Design: the human'
+    check "$mode: approval $bad, architecture is the human" has "$out" '- Architecture: the human'
+    check "$mode: approval $bad, release is the current line" has "$out" "$RELEASE_CURRENT"
+    [ "$mode" = integrated ] &&
+      check "$mode: approval $bad, merge is the human" has "$out" '- Merge: the human merges every pull request'
+  done
 done
 
 if [ "$failures" -gt 0 ]; then

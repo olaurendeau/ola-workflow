@@ -173,17 +173,31 @@ section. Without it the brief is the one it always was.
 - In discreet mode nothing is merged and nothing is published on the forge, so `merge` and
   `release` decide nothing there.
 
-```json
-{ "approval": { "design": "human", "architecture": "human" } }
-```
+A strong project: the human validates the design and the architecture, merges what touches
+the workflow's own files or a private key, and decides the release.
 
 ```json
-{ "approval": { "merge": { "human_when": { "paths": ["infra/**", ".github/**"], "patterns": ["AKIA[0-9A-Z]{16}"] } } } }
+"approval": { "design": "human", "architecture": "human",
+  "merge": { "human_when": { "paths": [".github/**", "hooks/**", "agents/**"], "patterns": ["BEGIN .*PRIVATE KEY"] } },
+  "release": "human" }
 ```
 
+A medium project: the human validates the design and the architecture and merges what
+touches the CI; the coordinator merges the rest and decides the release.
+
 ```json
-{ "approval": { "design": "agent", "architecture": "agent", "merge": "agent", "release": "agent" } }
+"approval": { "design": "human", "architecture": "human",
+  "merge": { "human_when": { "paths": [".github/**"] } }, "release": "agent" }
 ```
+
+A personal project: the human validates the design alone.
+
+```json
+"approval": { "design": "human", "architecture": "agent", "merge": "agent", "release": "agent" }
+```
+
+`release: "agent"` stops at the GitHub release when the coordinator's token cannot create
+one: granting it is the human's call.
 
 ### Globs
 
